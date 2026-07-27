@@ -212,27 +212,90 @@ function parseChunkHeader(
   return header;
 }
 
+/**
+ * 将 grant-v1 返回的 DEK 导入为不可提取 HKDF 基础密钥并清理原始字节。
+ */
+export async function importFramedFileDek(
+  fileDekBase64: string,
+): Promise<CryptoKey> {
+  const fileDek = decodeBase64(fileDekBase64);
+  try {
+    if (fileDek.byteLength !== 32) {
+      throw new Error("framed AEAD file DEK 必须为 32 字节");
+    }
+    return await globalThis.crypto.subtle.importKey(
+      "raw",
+      asBufferSource(fileDek),
+      "HKDF",
+      false,
+      ["deriveKey", "deriveBits"],
+    );
+  } finally {
+    fileDek.fill(0);
+  }
+}
+
+/** 使用不可提取 HKDF 基础密钥派生单帧 AES key 与 nonce。 */
+async function deriveFramedCryptoKeyMaterial(params: {
+  fileDek: CryptoKey;
+  fileNonce: Uint8Array;
+  chunkIndex: number;
+  frameIndex: number;
+}): Promise<{ key: CryptoKey; nonce: Uint8Array }> {
+  const keyInfo = buildFrameInfo(
+    KEY_INFO_PREFIX,
+    params.chunkIndex,
+    params.frameIndex,
+  );
+  const nonceInfo = buildFrameInfo(
+    NONCE_INFO_PREFIX,
+    params.chunkIndex,
+    params.frameIndex,
+  );
+  try {
+    const key = await globalThis.crypto.subtle.deriveKey(
+      {
+        name: "HKDF",
+        hash: "SHA-256",
+        salt: asBufferSource(params.fileNonce),
+        info: asBufferSource(keyInfo),
+      },
+      params.fileDek,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["decrypt"],
+    );
+    const nonceBits = await globalThis.crypto.subtle.deriveBits(
+      {
+        name: "HKDF",
+        hash: "SHA-256",
+        salt: asBufferSource(params.fileNonce),
+        info: asBufferSource(nonceInfo),
+      },
+      params.fileDek,
+      96,
+    );
+    return { key, nonce: new Uint8Array(nonceBits) };
+  } finally {
+    keyInfo.fill(0);
+    nonceInfo.fill(0);
+  }
+}
+
 /** 使用 WebCrypto 验证并解密单个 AES-256-GCM frame。 */
 async function decryptFrame(params: {
   ciphertext: Uint8Array;
-  fileDek: Uint8Array;
+  fileDek: CryptoKey;
   header: FramedChunkHeader;
   frameIndex: number;
   plainLength: number;
 }): Promise<Uint8Array> {
-  const material = deriveFramedKeyMaterial({
+  const material = await deriveFramedCryptoKeyMaterial({
     fileDek: params.fileDek,
     fileNonce: params.header.fileNonce,
     chunkIndex: params.header.chunkIndex,
     frameIndex: params.frameIndex,
   });
-  const key = await globalThis.crypto.subtle.importKey(
-    "raw",
-    asBufferSource(material.key),
-    { name: "AES-GCM" },
-    false,
-    ["decrypt"],
-  );
   const aad = buildFramedAad({
     fileNonce: params.header.fileNonce,
     chunkIndex: params.header.chunkIndex,
@@ -250,7 +313,7 @@ async function decryptFrame(params: {
         additionalData: asBufferSource(aad),
         tagLength: FRAMED_AEAD_TAG_BYTES * 8,
       },
-      key,
+      material.key,
       asBufferSource(params.ciphertext),
     );
     return new Uint8Array(plaintext);
@@ -258,6 +321,8 @@ async function decryptFrame(params: {
     throw new Error(
       `framed AEAD 分片 ${params.header.chunkIndex} frame ${params.frameIndex} 认证失败`,
     );
+  } finally {
+    material.nonce.fill(0);
   }
 }
 
@@ -267,7 +332,7 @@ export async function downloadFramedPart(params: {
   part: FileDownloadPartVO;
   partCount: number;
   encryption: ChunkManifestEncryption;
-  fileDekBase64: string;
+  fileDek: CryptoKey;
   sink: DownloadSink;
   metrics: DownloadMetricsTracker;
   signal?: AbortSignal;
@@ -282,9 +347,12 @@ export async function downloadFramedPart(params: {
   }
   assertContentLength(params.response, params.part.size);
   const fileNonce = validateFramedEncryption(params.encryption);
-  const fileDek = decodeBase64(params.fileDekBase64);
-  if (fileDek.byteLength !== 32) {
-    throw new Error("framed AEAD file DEK 必须为 32 字节");
+  if (
+    params.fileDek.type !== "secret" ||
+    params.fileDek.extractable ||
+    params.fileDek.algorithm.name !== "HKDF"
+  ) {
+    throw new Error("framed AEAD file DEK 必须为不可提取 HKDF 密钥");
   }
 
   const cipherHash = createSha256();
@@ -365,7 +433,7 @@ export async function downloadFramedPart(params: {
         throwIfAborted();
         const plaintext = await decryptFrame({
           ciphertext,
-          fileDek,
+          fileDek: params.fileDek,
           header,
           frameIndex,
           plainLength,

@@ -123,7 +123,7 @@ async function decryptAesGcm(
 ): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey(
     "raw",
-    new Uint8Array(keyBytes) as unknown as BufferSource,
+    keyBytes as unknown as BufferSource,
     { name: "AES-GCM" },
     false,
     ["decrypt"],
@@ -167,39 +167,42 @@ export async function decryptChunk(
 }> {
   // 解码密钥
   const keyBytes = Uint8Array.from(atob(keyBase64), (c) => c.charCodeAt(0));
+  try {
+    if (keyBytes.length !== 32) {
+      throw new Error(
+        `无效的密钥长度: 期望 32 字节，得到 ${keyBytes.length} 字节`,
+      );
+    }
 
-  if (keyBytes.length !== 32) {
-    throw new Error(
-      `无效的密钥长度: 期望 32 字节，得到 ${keyBytes.length} 字节`,
-    );
+    // 提取元数据（哈希和下一个密钥）
+    const { encryptedPart, hash, nextKey } = extractMetadata(encryptedData);
+
+    // 解析头部
+    const { algorithm, dataOffset } = parseChunkHeader(encryptedPart);
+
+    // 提取 IV
+    if (encryptedPart.length < dataOffset + IV_SIZE) {
+      throw new Error("数据太短，无法提取 IV");
+    }
+    const iv = encryptedPart.slice(dataOffset, dataOffset + IV_SIZE);
+
+    // 提取密文
+    const ciphertext = encryptedPart.slice(dataOffset + IV_SIZE);
+
+    // AES 导入为不可提取 CryptoKey；ChaCha 实现必须短暂使用原始字节。
+    let plaintext: Uint8Array;
+    if (algorithm === ALGORITHM_AES_GCM) {
+      plaintext = await decryptAesGcm(ciphertext, keyBytes, iv);
+    } else if (algorithm === ALGORITHM_CHACHA20) {
+      plaintext = await decryptChaCha20(ciphertext, keyBytes, iv);
+    } else {
+      throw new Error(`不支持的加密算法: ${algorithm}`);
+    }
+
+    return { plaintext, nextKey, hash };
+  } finally {
+    keyBytes.fill(0);
   }
-
-  // 提取元数据（哈希和下一个密钥）
-  const { encryptedPart, hash, nextKey } = extractMetadata(encryptedData);
-
-  // 解析头部
-  const { algorithm, dataOffset } = parseChunkHeader(encryptedPart);
-
-  // 提取 IV
-  if (encryptedPart.length < dataOffset + IV_SIZE) {
-    throw new Error("数据太短，无法提取 IV");
-  }
-  const iv = encryptedPart.slice(dataOffset, dataOffset + IV_SIZE);
-
-  // 提取密文
-  const ciphertext = encryptedPart.slice(dataOffset + IV_SIZE);
-
-  // 根据算法解密
-  let plaintext: Uint8Array;
-  if (algorithm === ALGORITHM_AES_GCM) {
-    plaintext = await decryptAesGcm(ciphertext, keyBytes, iv);
-  } else if (algorithm === ALGORITHM_CHACHA20) {
-    plaintext = await decryptChaCha20(ciphertext, keyBytes, iv);
-  } else {
-    throw new Error(`不支持的加密算法: ${algorithm}`);
-  }
-
-  return { plaintext, nextKey, hash };
 }
 
 /**

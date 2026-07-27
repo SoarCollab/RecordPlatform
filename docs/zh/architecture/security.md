@@ -32,12 +32,13 @@ EventSource 不支持自定义 Header，因此 SSE 使用 URL Token：
 
 ## 匿名公开分享租户边界
 
-匿名面仅包含以下四条精确路由：
+匿名面仅包含以下五条精确路由：
 
 - `GET /api/v1/shares/{shareCode}/info`
 - `GET /api/v1/shares/{shareCode}/files`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
+- `POST /api/v1/public/key-grants/consume`
 
 它们既不需要 JWT，也不需要租户头。调用者控制的 `X-Tenant-ID` 会被忽略，不会成为权威 `TenantContext`。服务端通过匹配的 `shareCode` 元数据解析 owner tenant；只有这次分享元数据查询跨越租户隔离。文件元数据、key envelope、访问计数变更和分享访问审计随后都在 owner tenant 内执行。公开性、有效/取消/过期或未知状态、合法分享类型和文件归属校验继续失败关闭。当前模型没有分享密码字段；密码保护不属于本次变更。
 
@@ -191,6 +192,8 @@ Header: 魔数 `RP` (0x52 0x50) + 版本 (0x01) + 算法 (0x01=AES, 0x02=ChaCha2
 - 外部 `rp-file-envelope-context-v2` 绑定 tenant、file、hash、recipient 和 suite，Vault 只接收规范字节的 Base64 SHA-256 摘要；
 - 同名 Vault key 轮换使用 Transit `rewrap`，跨 provider 轮换才执行受控 unwrap/wrap；
 - 审计与指标只记录稳定失败分类和 key ID 指纹，不记录原始 key ID、wrapped blob、明文数据密钥、token 或 Vault 错误体。
+
+加密下载 metadata 现在返回短期 `grant-v1` 引用，不返回 plaintext 数据密钥。Redis 只保存引用摘要和不可变授权/信封绑定；Lua 状态转换允许首次消费和一次有界同会话重试。consume 会重新加载精确文件版本和精确 active 信封，因此轮换、撤销、分享取消、actor/session/tenant/client 漂移、过期或重放都会在释放密钥前失败关闭。grant 和瞬时密钥响应为 `no-store`，请求/响应 payload 日志关闭，浏览器不持久化 grant 或数据密钥。协议和浏览器内存边界见[密钥管理安全文档](../../security/key-management.md#7-下载密钥交付与暴露面)。
 
 Vault Community 集成测试只证明 Transit API 合同，不证明 HSM 托管。生产 HSM-backed 部署需要 Vault Enterprise 的 PKCS#11 seal wrap 或 Managed Keys，以及相应许可证、硬件与高可用设计。
 

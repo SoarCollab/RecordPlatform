@@ -388,6 +388,162 @@ class FileKeyEnvelopeServiceTest {
     }
 
     /**
+     * 验证 owner grant 只投影非敏感路由字段，并可按完全一致的 ACTIVE 信封即时解封。
+     */
+    @Test
+    void shouldResolveAndConsumeBoundOwnerGrant() {
+        File file = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setVersion(3)
+                .setFileHash("hash-1");
+        FileParamEnvelopeResult result = envelopeService.prepareFileParam(
+                "{\"initialKey\":\"serialized-key\"}");
+        ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+        envelopeService.saveOwnerEnvelope(file, "hash-1", 100L, result);
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope envelope = envelopeCaptor.getValue().setId(501L);
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(envelope);
+        FileKeyGrantEnvelopeBinding binding = envelopeService
+                .resolveOwnerGrantBinding(file, null, 100L)
+                .orElseThrow();
+        when(fileKeyEnvelopeMapper.selectById(501L)).thenReturn(envelope);
+
+        Optional<String> initialKey = envelopeService.unwrapGrantBinding(
+                file, binding, 100L, "DOWNLOAD_GRANT_CONSUME");
+
+        assertThat(binding.fileVersion()).isEqualTo(3);
+        assertThat(binding.fileHash()).isEqualTo("hash-1");
+        assertThat(binding.envelopeId()).isEqualTo(501L);
+        assertThat(binding.legacyPlaintextAtRest()).isFalse();
+        assertThat(initialKey).contains("serialized-key");
+        ArgumentCaptor<FileKeyAuditLog> audits = ArgumentCaptor.forClass(FileKeyAuditLog.class);
+        verify(fileKeyAuditLogMapper, org.mockito.Mockito.times(2)).insert(audits.capture());
+        assertThat(audits.getAllValues())
+                .extracting(FileKeyAuditLog::getOperation)
+                .containsExactly("UNWRAP", "GRANT_CONSUME");
+    }
+
+    /**
+     * 验证分享与好友分享 grant 均冻结各自 recipient，空分享上下文直接失败关闭。
+     */
+    @Test
+    void shouldResolveShareAndFriendGrantBindings() {
+        File file = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setVersion(2)
+                .setFileHash("hash-1");
+        FileShare share = new FileShare().setId(201L);
+        FriendFileShare friendShare = new FriendFileShare().setId(301L);
+        FileKeyEnvelope shareEnvelope = grantEnvelope(
+                601L, FileKeyEnvelopeService.RECIPIENT_TYPE_SHARE, 201L);
+        FileKeyEnvelope friendEnvelope = grantEnvelope(
+                602L, FileKeyEnvelopeService.RECIPIENT_TYPE_FRIEND_SHARE, 301L);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(shareEnvelope, friendEnvelope);
+
+        FileKeyGrantEnvelopeBinding shareBinding = envelopeService
+                .resolveShareGrantBinding(file, "hash-1", share)
+                .orElseThrow();
+        FileKeyGrantEnvelopeBinding friendBinding = envelopeService
+                .resolveFriendShareGrantBinding(file, "hash-1", friendShare)
+                .orElseThrow();
+
+        assertThat(shareBinding.recipientType())
+                .isEqualTo(FileKeyEnvelopeService.RECIPIENT_TYPE_SHARE);
+        assertThat(shareBinding.recipientId()).isEqualTo(201L);
+        assertThat(friendBinding.recipientType())
+                .isEqualTo(FileKeyEnvelopeService.RECIPIENT_TYPE_FRIEND_SHARE);
+        assertThat(friendBinding.recipientId()).isEqualTo(301L);
+        assertThat(envelopeService.resolveShareGrantBinding(file, "hash-1", null)).isEmpty();
+        assertThat(envelopeService.resolveFriendShareGrantBinding(file, "hash-1", null)).isEmpty();
+    }
+
+    /**
+     * 验证历史明文 grant 使用规范化文件哈希与版本，并在消费及兼容交付时留下无秘密审计。
+     */
+    @Test
+    void shouldResolveConsumeAndAuditLegacyGrant() {
+        File file = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1")
+                .setFileParam("""
+                        {"initialKey":"legacy-key","keyVersion":0,
+                         "algorithmSuite":"LEGACY-V1","signatureSuite":"UNSIGNED-V1",
+                         "kemSuite":"NONE-V1","proofSuite":"LEGACY-PROOF",
+                         "encryptionAlgorithm":"CHUNK_KEY_CHAIN"}
+                        """);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(null);
+
+        FileKeyGrantEnvelopeBinding binding = envelopeService
+                .resolveOwnerGrantBinding(file, "", 100L)
+                .orElseThrow();
+        Optional<String> initialKey = envelopeService.unwrapGrantBinding(
+                file, binding, 100L, "PLAINTEXT_V0_COMPATIBILITY");
+        envelopeService.auditGrantIssue(binding, 100L, "OWNER");
+        envelopeService.auditLegacyPlaintextDelivery(binding, 100L);
+        envelopeService.auditGrantDenial(binding, 100L, "SESSION_MISMATCH");
+        envelopeService.auditGrantIssue(null, 100L, "IGNORED");
+
+        assertThat(binding.envelopeId()).isNull();
+        assertThat(binding.fileVersion()).isEqualTo(1);
+        assertThat(binding.fileHash()).isEqualTo("hash-1");
+        assertThat(binding.kmsProvider()).isEqualTo("legacy-plaintext");
+        assertThat(binding.legacyPlaintextAtRest()).isTrue();
+        assertThat(initialKey).contains("legacy-key");
+        ArgumentCaptor<FileKeyAuditLog> audits = ArgumentCaptor.forClass(FileKeyAuditLog.class);
+        verify(fileKeyAuditLogMapper, org.mockito.Mockito.times(4)).insert(audits.capture());
+        assertThat(audits.getAllValues())
+                .extracting(FileKeyAuditLog::getOperation)
+                .containsExactly("GRANT_CONSUME", "GRANT_ISSUE", "PLAINTEXT_V0", "GRANT_DENY");
+    }
+
+    /**
+     * 验证文件版本变化、信封轮换或路由字段变化都会让已签发 grant 失败关闭。
+     */
+    @Test
+    void shouldRejectStaleFileAndEnvelopeGrantBindings() {
+        File file = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setVersion(2)
+                .setFileHash("hash-1");
+        FileKeyGrantEnvelopeBinding binding = new FileKeyGrantEnvelopeBinding(
+                501L, 1L, 10L, 1, "hash-1",
+                FileKeyEnvelopeService.RECIPIENT_TYPE_OWNER, 100L, 1,
+                properties.getAlgorithmSuite(), properties.getSignatureSuite(), properties.getKemSuite(),
+                properties.getProofSuite(), properties.getEncryptionAlgorithm(),
+                LocalKeyWrappingService.PROVIDER_ID, 1, "1", false);
+        FileKeyEnvelope envelope = grantEnvelope(
+                501L, FileKeyEnvelopeService.RECIPIENT_TYPE_OWNER, 100L);
+        when(fileKeyEnvelopeMapper.selectById(501L)).thenReturn(envelope);
+
+        assertThat(envelopeService.unwrapGrantBinding(
+                file, binding, 100L, "DOWNLOAD_GRANT_CONSUME")).isEmpty();
+
+        file.setVersion(1);
+        envelope.setStatus(FileKeyEnvelopeService.STATUS_SUPERSEDED);
+        assertThat(envelopeService.unwrapGrantBinding(
+                file, binding, 100L, "DOWNLOAD_GRANT_CONSUME")).isEmpty();
+
+        envelope.setStatus(FileKeyEnvelopeService.STATUS_ACTIVE).setProviderKeyVersion("2");
+        assertThat(envelopeService.unwrapGrantBinding(
+                file, binding, 100L, "DOWNLOAD_GRANT_CONSUME")).isEmpty();
+        ArgumentCaptor<FileKeyAuditLog> audits = ArgumentCaptor.forClass(FileKeyAuditLog.class);
+        verify(fileKeyAuditLogMapper, org.mockito.Mockito.times(3)).insert(audits.capture());
+        assertThat(audits.getAllValues())
+                .extracting(FileKeyAuditLog::getReason)
+                .containsExactly("FILE_BINDING_MISMATCH", "ENVELOPE_NOT_ACTIVE", "ENVELOPE_NOT_ACTIVE");
+    }
+
+    /**
      * Verifies that legacy plaintext key fallback remains bound to the persisted file owner.
      */
     @Test
@@ -1374,6 +1530,35 @@ class FileKeyEnvelopeServiceTest {
         verify(fileKeyAuditLogMapper).insert(auditCaptor.capture());
         assertEquals("INVALID_CIPHERTEXT", auditCaptor.getValue().getFailureCategory());
         assertEquals("FAILURE", auditCaptor.getValue().getResult());
+    }
+
+    /**
+     * 构造 grant 路由测试使用的完整 ACTIVE 信封。
+     */
+    private FileKeyEnvelope grantEnvelope(Long envelopeId, String recipientType, Long recipientId) {
+        return new FileKeyEnvelope()
+                .setId(envelopeId)
+                .setTenantId(1L)
+                .setFileId(10L)
+                .setFileHash("hash-1")
+                .setRecipientType(recipientType)
+                .setRecipientId(recipientId)
+                .setKeyVersion(1)
+                .setAlgorithmSuite(properties.getAlgorithmSuite())
+                .setSignatureSuite(properties.getSignatureSuite())
+                .setKemSuite(properties.getKemSuite())
+                .setProofSuite(properties.getProofSuite())
+                .setEncryptionAlgorithm(properties.getEncryptionAlgorithm())
+                .setWrappingAlgorithm(CryptoSuiteIds.LOCAL_WRAPPING)
+                .setKmsProvider(LocalKeyWrappingService.PROVIDER_ID)
+                .setProviderContractVersion(1)
+                .setKmsKeyId(properties.getKmsKeyId())
+                .setProviderKeyVersion("1")
+                .setContextSchema(WrappingContext.LOCAL_AAD_V1)
+                .setEncryptedDataKey("test-ciphertext")
+                .setAadHash("0".repeat(64))
+                .setStatus(FileKeyEnvelopeService.STATUS_ACTIVE)
+                .setDeleted(0);
     }
 
     /**

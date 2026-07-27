@@ -8,7 +8,6 @@
   import { ApiError } from "$api/client";
   import {
     getSharedFiles,
-    publicGetDecryptInfo,
     saveSharedFiles,
   } from "$api/endpoints/files";
   import { ResultCode, type SharedFileVO } from "$api/types";
@@ -84,32 +83,8 @@
     }
   }
 
-  // 处理分享文件下载：未登录时先验证是否为公开分享，私密分享引导登录
+  // 列表加载已经完成公开分享授权；下载时直接进入即时 grant 消费链路。
   async function handleDownload(file: SharedFileVO) {
-    if (!auth.isAuthenticated) {
-      try {
-        await publicGetDecryptInfo(data.code, file.fileHash);
-      } catch (err) {
-        const needsLogin =
-          err instanceof ApiError &&
-          (err.isUnauthorized ||
-            err.code === ResultCode.PERMISSION_UNAUTHORIZED ||
-            err.code === ResultCode.PERMISSION_UNAUTHENTICATED ||
-            err.code === ResultCode.USER_NOT_LOGGED_IN);
-        if (needsLogin) {
-          notifications.info("请先登录", "私密分享需要登录后才能下载");
-          await goto(`/login?redirect=/share/${data.code}`);
-          return;
-        }
-
-        notifications.error(
-          "下载失败",
-          err instanceof Error ? err.message : "请稍后重试",
-        );
-        return;
-      }
-    }
-
     // 共享文件使用后端代理（无可用的预签名 URL）
     // 优先尝试公开分享；若用户已登录则回退到私密分享
     const sourceType = auth.isAuthenticated ? "private_share" : "public_share";

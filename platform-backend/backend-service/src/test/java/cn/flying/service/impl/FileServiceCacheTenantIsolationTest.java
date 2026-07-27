@@ -324,6 +324,7 @@ class FileServiceCacheTenantIsolationTest {
                     null,
                     null,
                     null,
+                    null,
                     Runnable::run);
         }
 

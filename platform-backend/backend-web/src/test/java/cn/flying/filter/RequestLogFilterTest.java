@@ -216,6 +216,20 @@ class RequestLogFilterTest {
             assertThat(result).isTrue();
         }
 
+        /**
+         * 验证 grant 引用和下载会话即使被误放进查询参数也不会进入日志。
+         */
+        @Test
+        @DisplayName("Should treat key grant reference and session as sensitive")
+        void shouldTreatKeyGrantFieldsAsSensitive() {
+            Boolean grantReference = ReflectionTestUtils.invokeMethod(
+                    filter, "isSensitiveParam", "grantReference");
+            Boolean sessionId = ReflectionTestUtils.invokeMethod(filter, "isSensitiveParam", "sessionId");
+
+            assertThat(grantReference).isTrue();
+            assertThat(sessionId).isTrue();
+        }
+
         @Test
         @DisplayName("Should mask new_password parameter")
         void shouldMaskNewPasswordParameter() throws ServletException, IOException {
@@ -341,6 +355,30 @@ class RequestLogFilterTest {
             filter.doFilter(request, response, filterChain);
 
             assertThat(filterChain.getResponse()).isNotInstanceOf(ContentCachingResponseWrapper.class);
+        }
+
+        /**
+         * 验证瞬时密钥消费响应永远不会进入常规响应缓存或日志预览。
+         */
+        @Test
+        @DisplayName("Should not wrap key grant consume responses")
+        void shouldNotWrapKeyGrantConsumeResponses() throws ServletException, IOException {
+            request.setRequestURI("/api/v1/files/key-grants/consume");
+            request.setServletPath("/api/v1/files/key-grants/consume");
+            request.setMethod("POST");
+
+            filter.doFilter(request, response, filterChain);
+
+            assertThat(filterChain.getResponse()).isNotInstanceOf(ContentCachingResponseWrapper.class);
+            String content = ReflectionTestUtils.invokeMethod(
+                    filter,
+                    "buildResponseLogContent",
+                    request,
+                    "application/json",
+                    HttpServletResponse.SC_OK,
+                    "{\"initialKey\":\"raw-secret\"}".getBytes(StandardCharsets.UTF_8)
+            );
+            assertThat(content).isEqualTo("<skipped>");
         }
 
         /**

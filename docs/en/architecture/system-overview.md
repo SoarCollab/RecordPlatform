@@ -393,7 +393,6 @@ Query service provides async methods using Java 21 Virtual Threads:
 
 - `getUserFilesListAsync()`
 - `getFileAddressAsync()`
-- `getFileDecryptInfoAsync()`
 
 ## File Version Chain
 

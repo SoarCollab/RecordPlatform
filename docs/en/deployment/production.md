@@ -9,6 +9,8 @@ Best practices for deploying RecordPlatform in production.
 - [ ] `FILE_KEY_ENVELOPE_ACTIVE_PROVIDER` and contract version are explicit
 - [ ] Vault uses HTTPS and a least-privilege token, or local uses an independent ≥32-character master key
 - [ ] Historical provider/key versions remain available until envelope rotation completes
+- [ ] Download key grants use HA Redis; `plaintext-v0` is disabled and its deadline is monitored
+- [ ] Proxy, WAF, APM, and access logs do not cache or capture grant/session/key payloads
 - [ ] SSL certificates installed
 - [ ] Database backups configured
 - [ ] Monitoring and alerting set up
@@ -37,6 +39,12 @@ This starts services in the correct order with SkyWalking agent attached.
 `application-prod.yml` deliberately has no default active provider and no `JWT_KEY` fallback. Startup fails if provider configuration is blank, unknown, unavailable, if Vault uses HTTP, or if an explicitly selected local master key is missing, too short, or equal to the JWT key.
 
 For `vault-transit`, inject `FILE_KEY_ENVELOPE_VAULT_ADDRESS`, `FILE_KEY_ENVELOPE_VAULT_TOKEN`, `FILE_KEY_ENVELOPE_VAULT_KEY_NAME`, and the explicit key version through the deployment secret system. Do not put the token in Git or Nacos plaintext. The token requires only `update` on the selected key's encrypt, decrypt, and rewrap paths. Vault Community provides an external centralized KMS but does not establish an HSM security boundary; that requires Vault Enterprise PKCS#11 seal wrap or Managed Keys with the applicable operational prerequisites.
+
+### Production download key delivery
+
+Keep `FILE_KEY_DELIVERY_LEGACY_PLAINTEXT_ENABLED=false`. The standard 60-second grant TTL, 10-second retry window, and one same-session retry are the recommended starting point; any change must remain inside the startup bounds and be justified by measured KMS/Redis latency. Monitor the `operation`, `outcome`, and closed `reason` tags of `app.file.key.grant` for unavailable, denied, replay, and legacy activity without adding tenant, file, grant, session, client IP, or key values as labels.
+
+Redis must use production authentication, transport protection, least privilege, HA, and bounded eviction compatible with the 60-second grant namespace. Redis loss fails encrypted downloads closed. Load balancers, reverse proxies, CDNs, WAFs, APM agents, and HTTP access logs must honor `Cache-Control: no-store`, must not log POST bodies or the `X-Download-Session-ID` header, and must never cache decrypt-info or consume responses. If a time-limited rollback enables `plaintext-v0`, require a change record, alert on every compatibility use, keep the hard not-after deadline unchanged, and disable it again after the affected client is upgraded.
 
 ### Start Individual Service
 

@@ -16,7 +16,7 @@ public record FileVO(
         String fileName,
         @Schema(description = "文件分类")
         String classification,
-        @Schema(description = "文件参数(JSON)")
+        @Schema(description = "已剥离明文密钥、包封材料和密钥标识的文件参数(JSON)")
         String fileParam,
         @Schema(description = "文件哈希")
         String fileHash,

@@ -58,6 +58,7 @@ import cn.flying.service.key.rotation.KeyRotationRunService;
 import cn.flying.service.key.CryptoSuitePolicyService;
 import cn.flying.service.key.CryptoSuiteRegistry;
 import cn.flying.service.key.KeyWrappingProviderRegistry;
+import cn.flying.service.key.FileKeyGrantService;
 import cn.flying.service.key.TenantCryptoPolicyService;
 import cn.flying.service.manifest.backfill.ManifestBackfillRunService;
 import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
@@ -176,6 +177,9 @@ class OpenApiContractExportTest {
 
     @MockitoBean
     private FileService fileService;
+
+    @MockitoBean
+    private FileKeyGrantService fileKeyGrantService;
 
     @MockitoBean
     private ProofBundleService proofBundleService;
@@ -387,6 +391,11 @@ class OpenApiContractExportTest {
                 "#/components/schemas/ResultFileDecryptInfoVO",
                 "shareCode",
                 "fileHash");
+        assertAnonymousPostOperation(
+                rootNode,
+                "/api/v1/public/key-grants/consume",
+                "#/components/schemas/DownloadKeyGrantConsumeRequestVO",
+                "#/components/schemas/ResultDownloadKeyMaterialVO");
         assertProtectedOperation(rootNode, "/api/v1/shares", "post");
         assertProtectedOperation(rootNode, "/api/v1/shares/{shareCode}", "patch");
         assertProtectedOperation(rootNode, "/api/v1/shares/{shareCode}/files/save", "post");
@@ -398,6 +407,7 @@ class OpenApiContractExportTest {
                 rootNode,
                 "/api/v1/shares/{shareCode}/files/{fileHash}/decrypt-info",
                 "get");
+        assertProtectedOperation(rootNode, "/api/v1/files/key-grants/consume", "post");
         assertSignedProofArchiveResponseContract(
                 rootNode, "/api/v1/files/{id}/proof-bundle.zip");
         assertSignedProofArchiveResponseContract(
@@ -410,6 +420,7 @@ class OpenApiContractExportTest {
         assertThat(downloadMetadataSchema.isMissingNode()).isFalse();
         assertThat(downloadMetadataSchema.path("properties").has("encryption")).isTrue();
         assertThat(downloadMetadataSchema.path("properties").has("canonicalManifestJson")).isTrue();
+        assertThat(downloadMetadataSchema.path("properties").has("keyGrant")).isTrue();
         assertThat(downloadMetadataSchema.path("properties").path("canonicalManifestJson")
                 .path("type").asText()).isEqualTo("string");
         JsonNode downloadEncryptionSchema = rootNode.path("components").path("schemas")
@@ -432,6 +443,17 @@ class OpenApiContractExportTest {
         assertThat(downloadMetadataOperation.path("responses").path("200")
                 .path("content").path("*/*").path("schema").path("$ref").asText())
                 .isEqualTo("#/components/schemas/ResultFileDownloadMetadataVO");
+        List<String> downloadMetadataHeaders = downloadMetadataOperation.path("parameters")
+                .findValuesAsText("name");
+        assertThat(downloadMetadataHeaders)
+                .contains("X-Key-Delivery-Protocol", "X-Download-Session-ID");
+        JsonNode grantRequestSchema = rootNode.path("components").path("schemas")
+                .path("DownloadKeyGrantConsumeRequestVO");
+        assertRequiredFields(grantRequestSchema, "grantReference", "sessionId");
+        JsonNode grantSchema = rootNode.path("components").path("schemas").path("DownloadKeyGrantVO");
+        assertThat(grantSchema.path("properties").has("reference")).isTrue();
+        assertThat(grantSchema.path("properties").has("protocol")).isTrue();
+        assertThat(grantSchema.path("properties").has("expiresAt")).isTrue();
         JsonNode directCompletePartSchema = rootNode.path("components").path("schemas")
                 .path("DirectUploadCompletePartRequest");
         assertThat(directCompletePartSchema.path("properties").has("eTag")).isTrue();
@@ -588,6 +610,27 @@ class OpenApiContractExportTest {
             }
         });
         assertThat(actualPathParameters).containsExactlyInAnyOrder(pathParameters);
+        assertThat(operation.path("responses").path("200").path("content").path("*/*")
+                .path("schema").path("$ref").asText()).isEqualTo(responseSchemaRef);
+    }
+
+    /**
+     * 校验匿名 POST 显式覆盖 Bearer，且 grant 只通过 JSON 请求体传输。
+     */
+    private void assertAnonymousPostOperation(JsonNode rootNode,
+                                              String path,
+                                              String requestSchemaRef,
+                                              String responseSchemaRef) {
+        JsonNode operation = rootNode.path("paths").path(path).path("post");
+
+        assertThat(operation.isMissingNode()).isFalse();
+        assertThat(operation.path("security").isArray()).isTrue();
+        assertThat(operation.path("security")).isEmpty();
+        assertThat(operation.path("parameters").findValuesAsText("name"))
+                .noneMatch(name -> "X-Tenant-ID".equalsIgnoreCase(name))
+                .noneMatch(name -> "grantReference".equalsIgnoreCase(name));
+        assertThat(operation.path("requestBody").path("content").path("application/json")
+                .path("schema").path("$ref").asText()).isEqualTo(requestSchemaRef);
         assertThat(operation.path("responses").path("200").path("content").path("*/*")
                 .path("schema").path("$ref").asText()).isEqualTo(responseSchemaRef);
     }

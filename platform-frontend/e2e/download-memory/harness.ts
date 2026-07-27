@@ -6,6 +6,7 @@ import {
 import { executeBoundedDownload } from "../../src/lib/utils/boundedDownloader";
 import { DownloadMetricsTracker } from "../../src/lib/utils/downloadMetrics";
 import {
+  consumeSyntheticDownloadKeyGrant,
   createDownloadMetadata,
   createPlainBytes,
   createSyntheticResponse,
@@ -132,6 +133,13 @@ async function runScenario(
   options: DownloadMemoryRunOptions,
 ): Promise<DownloadMemoryResult> {
   const metadata = createDownloadMetadata(options);
+  const metadataContainedPlaintextKey = Boolean(metadata.initialKey);
+  const executionMetadata = { ...metadata };
+  let keyGrantConsumed = false;
+  if (options.format === "FRAMED_V2") {
+    executionMetadata.initialKey = consumeSyntheticDownloadKeyGrant(options);
+    keyGrantConsumed = true;
+  }
   const root = await navigator.storage.getDirectory();
   const fileName = `pw-${crypto.randomUUID()}.bin`;
   const handle = await root.getFileHandle(fileName, { create: true });
@@ -160,7 +168,7 @@ async function runScenario(
   let errorMessage: string | undefined;
   try {
     await executeBoundedDownload({
-      metadata,
+      metadata: executionMetadata,
       expectedFileHash: metadata.fileHash,
       sink,
       signal: controller.signal,
@@ -170,6 +178,8 @@ async function runScenario(
     ok = true;
   } catch (error) {
     errorMessage = error instanceof Error ? error.message : String(error);
+  } finally {
+    executionMetadata.initialKey = undefined;
   }
 
   const file = await handle.getFile();
@@ -191,6 +201,8 @@ async function runScenario(
     outputValid,
     outputSize: file.size,
     fileName,
+    metadataContainedPlaintextKey,
+    keyGrantConsumed,
   };
   await root.removeEntry(fileName);
   return result;
@@ -231,6 +243,8 @@ function start(options: DownloadMemoryRunOptions): string {
         outputValid: false,
         outputSize: 0,
         fileName: "",
+        metadataContainedPlaintextKey: false,
+        keyGrantConsumed: options.format === "FRAMED_V2",
       };
       entry.done = true;
       entry.result = result;

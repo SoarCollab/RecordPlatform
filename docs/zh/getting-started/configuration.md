@@ -319,6 +319,22 @@ file:
 
 应用 token 只需对目标 key 的 `transit/encrypt`、`transit/decrypt`、`transit/rewrap` 路径拥有 `update` 能力。所有历史信封完成轮换前必须保留旧 provider/key 版本。context 绑定、迁移与 HSM 部署边界见[密钥管理安全文档](../../security/key-management.md)，dry-run、APPLY、恢复、告警和退休流程见[自动密钥轮换运维手册](../../operations/key-rotation.md)。
 
+## 下载密钥交付
+
+加密下载 metadata 默认使用 `grant-v1`：返回短期、会话绑定的 grant，不返回 plaintext `initialKey`。Redis 是必需依赖，不可用时失败关闭。生产保持短窗口，禁止在没有限期客户端迁移计划时打开兼容：
+
+```yaml
+file:
+  key-delivery:
+    grant-ttl: ${FILE_KEY_DELIVERY_GRANT_TTL:60s}
+    retry-window: ${FILE_KEY_DELIVERY_RETRY_WINDOW:10s}
+    max-same-session-retries: ${FILE_KEY_DELIVERY_MAX_SAME_SESSION_RETRIES:1}
+    legacy-plaintext-enabled: ${FILE_KEY_DELIVERY_LEGACY_PLAINTEXT_ENABLED:false}
+    legacy-plaintext-not-after: ${FILE_KEY_DELIVERY_LEGACY_PLAINTEXT_NOT_AFTER:2026-10-01T00:00:00Z}
+```
+
+`grant-ttl` 必须大于零且不超过 5 分钟；`retry-window` 必须短于 TTL；同会话重试允许 0–3 次，默认 1 次。`plaintext-v0` 只有客户端显式协商、开关开启且未超过截止时间时可用；截止后即使误开开关也会失败关闭。生产代理和 APM/WAF 不得缓存或采集 metadata、decrypt-info、grant POST body、consume 响应、`X-Download-Session-ID`、grant 引用或 `initialKey`。完整绑定、防重放、浏览器内存、移除和回滚边界见[密钥管理安全文档](../../security/key-management.md#7-下载密钥交付与暴露面)。
+
 ## 运行时密码敏捷
 
 `crypto.agility` 只从内建闭集目录中选择真实实现；在配置中写入未知 suite/provider 不会动态加载算法，而会在启动或操作时失败关闭：

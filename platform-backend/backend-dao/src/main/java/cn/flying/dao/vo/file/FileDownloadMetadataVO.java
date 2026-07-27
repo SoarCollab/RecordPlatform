@@ -19,8 +19,10 @@ public record FileDownloadMetadataVO(
         long fileSize,
         @Schema(description = "文件 MIME 类型")
         String contentType,
-        @Schema(description = "初始密钥（最后一个分片的解密密钥，Base64 编码）")
+        @Schema(description = "仅 plaintext-v0 兼容模式返回的初始密钥；grant-v1 下为空")
         String initialKey,
+        @Schema(description = "grant-v1 短期密钥授权；未加密文件或 plaintext-v0 下为空")
+        DownloadKeyGrantVO keyGrant,
         @Schema(description = "manifest schema id")
         String manifestSchemaId,
         @Schema(description = "manifest hash")
@@ -70,7 +72,7 @@ public record FileDownloadMetadataVO(
             int totalChunks,
             List<FileDownloadPartVO> parts
     ) {
-        this(fileId, fileHash, fileName, fileSize, contentType, initialKey,
+        this(fileId, fileHash, fileName, fileSize, contentType, initialKey, null,
                 manifestSchemaId, manifestHash, null,
                 "ACTIVE", "ALREADY_MANIFEST", null, false,
                 hashAlgorithm, encryptionAlgorithm,

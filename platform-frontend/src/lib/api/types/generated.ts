@@ -1313,6 +1313,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/files/key-grants/consume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 消费短期下载密钥授权 */
+        post: operations["consumeDownloadKeyGrant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/files/quota": {
         parameters: {
             query?: never;
@@ -1878,6 +1895,23 @@ export interface paths {
         get: operations["getUnreadCount_1"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/key-grants/consume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 消费公开分享短期下载密钥授权 */
+        post: operations["consumePublicDownloadKeyGrant"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3909,6 +3943,38 @@ export interface components {
              */
             totalChunks: number;
         };
+        /** @description 下载密钥授权消费请求 */
+        DownloadKeyGrantConsumeRequestVO: {
+            /** @description 不透明授权引用 */
+            grantReference: string;
+            /** @description 创建授权时使用的浏览器内存会话标识 */
+            sessionId: string;
+        };
+        /** @description 短期、会话绑定的一次性下载密钥授权 */
+        DownloadKeyGrantVO: {
+            /**
+             * Format: date-time
+             * @description 授权到期时间
+             */
+            expiresAt?: string;
+            /**
+             * @description 密钥交付协议版本
+             * @example grant-v1
+             */
+            protocol?: string;
+            /** @description 不透明授权引用，仅允许通过 POST 请求体消费 */
+            reference?: string;
+        };
+        /** @description 仅用于即时浏览器导入的瞬时下载密钥材料 */
+        DownloadKeyMaterialVO: {
+            /** @description 初始密钥，Base64 编码；不得持久化或记录 */
+            initialKey?: string;
+            /**
+             * @description 实际使用的密钥交付协议
+             * @example grant-v1
+             */
+            protocol?: string;
+        };
         /** @description 用户注册表单信息 */
         EmailRegisterVO: {
             /** @description 验证码 */
@@ -3978,8 +4044,9 @@ export interface components {
              * @description 文件大小（字节）
              */
             fileSize?: number;
-            /** @description 初始密钥（最后一个分片的解密密钥，Base64编码） */
+            /** @description 仅 plaintext-v0 兼容模式返回的初始密钥；grant-v1 下为空 */
             initialKey?: string;
+            keyGrant?: components["schemas"]["DownloadKeyGrantVO"];
         };
         /** @description 文件下载加密格式描述 */
         FileDownloadEncryptionVO: {
@@ -4036,8 +4103,9 @@ export interface components {
             fileSize?: number;
             /** @description 哈希算法 */
             hashAlgorithm?: string;
-            /** @description 初始密钥（最后一个分片的解密密钥，Base64 编码） */
+            /** @description 仅 plaintext-v0 兼容模式返回的初始密钥；grant-v1 下为空 */
             initialKey?: string;
+            keyGrant?: components["schemas"]["DownloadKeyGrantVO"];
             /** @description Whether a bounded typed legacy download path is explicitly allowed */
             legacyDownloadAllowed?: boolean;
             /** @description Manifest evidence classification */
@@ -4285,7 +4353,7 @@ export interface components {
             fileHash?: string;
             /** @description 文件名称 */
             fileName?: string;
-            /** @description 文件参数(JSON) */
+            /** @description 已剥离明文密钥、包封材料和密钥标识的文件参数(JSON) */
             fileParam?: string;
             /**
              * Format: int64
@@ -5568,6 +5636,17 @@ export interface components {
              */
             code?: number;
             data?: components["schemas"]["DirectUploadSessionVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultDownloadKeyMaterialVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["DownloadKeyMaterialVO"];
             /** @description 提示信息 */
             message?: string;
         };
@@ -8968,7 +9047,10 @@ export interface operations {
     getFileDecryptInfo: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Download-Session-ID"?: string;
+                "X-Key-Delivery-Protocol"?: string;
+            };
             path: {
                 fileHash: string;
             };
@@ -8990,7 +9072,10 @@ export interface operations {
     getDownloadMetadata: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Download-Session-ID"?: string;
+                "X-Key-Delivery-Protocol"?: string;
+            };
             path: {
                 fileHash: string;
             };
@@ -9005,6 +9090,30 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultFileDownloadMetadataVO"];
+                };
+            };
+        };
+    };
+    consumeDownloadKeyGrant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DownloadKeyGrantConsumeRequestVO"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultDownloadKeyMaterialVO"];
                 };
             };
         };
@@ -9864,6 +9973,30 @@ export interface operations {
             };
         };
     };
+    consumePublicDownloadKeyGrant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DownloadKeyGrantConsumeRequestVO"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultDownloadKeyMaterialVO"];
+                };
+            };
+        };
+    };
     getProofSigningKey: {
         parameters: {
             query?: never;
@@ -9938,7 +10071,10 @@ export interface operations {
     publicDecryptInfo: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Download-Session-ID"?: string;
+                "X-Key-Delivery-Protocol"?: string;
+            };
             path: {
                 /** @description 文件哈希 */
                 fileHash: string;
@@ -10084,7 +10220,10 @@ export interface operations {
     getSharedDecryptInfo: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Download-Session-ID"?: string;
+                "X-Key-Delivery-Protocol"?: string;
+            };
             path: {
                 fileHash: string;
                 shareCode: string;

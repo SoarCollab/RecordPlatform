@@ -108,6 +108,7 @@ Authorization: Bearer <token>
 | GET | `/api/v1/transactions/{transactionHash}` | 查询链上交易信息 |
 | GET | `/api/v1/files/hash/{fileHash}/chunks` | 后端 byte payload 下载 |
 | GET | `/api/v1/files/hash/{fileHash}/decrypt-info` | 获取解密信息（登录态） |
+| POST | `/api/v1/files/key-grants/consume` | 消费登录态短期下载密钥 grant |
 | GET | `/api/v1/shares/{shareCode}/files` | 公开分享文件列表（公开） |
 | GET | `/api/v1/files/shares` | 获取我的分享列表 |
 | DELETE | `/api/v1/files` | 批量删除（支持 hash/id） |
@@ -123,13 +124,16 @@ Authorization: Bearer <token>
 | GET | `/api/v1/files/{id}/provenance` | 文件溯源链路（管理员） |
 | GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` | 公开分享下载（公开） |
 | GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` | 公开分享解密信息（公开） |
+| POST | `/api/v1/public/key-grants/consume` | 消费公开分享短期密钥 grant（公开） |
 | POST | `/api/v1/files/download-batches/report` | 上报批量下载质量指标 |
 | GET | `/api/v1/files/{id}/versions` | 查询文件版本链列表 |
 | POST | `/api/v1/files/{id}/versions` | 将文件标记为新版本的父版本 |
 
 自有文件 `download-metadata` 要求 active `cn.flying.chunk-manifest.v1`。成功响应包含 `canonicalManifestJson`、`manifestStatus=ACTIVE`、`manifestClassification=ALREADY_MANIFEST`、`manifestErrorCode=null`、`legacyDownloadAllowed=false`。缺失 manifest 时返回 `FILE_RECORD_ERROR`；标准 `ErrorPayload` 把四个机器可读治理字段放在 `data.detail` 下，未分类默认值为 `REUPLOAD_REQUIRED / UNCLASSIFIED / MISSING_MANIFEST_UNCLASSIFIED / false`。客户端不得解析 `message` 或自行推断 legacy 回退。详见[分片 Manifest 与历史数据治理](/zh/architecture/chunk-manifest)。
 
-精确的匿名公开分享合同仅包含 `GET /api/v1/shares/{shareCode}/info`、`GET /api/v1/shares/{shareCode}/files`、`GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` 和 `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`。这些路由既不需要 Bearer，也不需要租户头。调用者即使提供 `X-Tenant-ID=0`、其他租户或畸形值，该值也会在授权和数据选择中被忽略。后端只从匹配的 `shareCode` 元数据解析 owner tenant；跨租户范围仅覆盖这次元数据查询，后续文件、key envelope、访问计数和分享访问审计都在 owner tenant 内完成。匿名 `sys_operation_log` 固定使用 system tenant `0`；产生的 `share_access_log` 使用 owner tenant。两类审计使用同一个规范化可信客户端 IP。
+加密 metadata/decrypt-info 客户端发送 `X-Key-Delivery-Protocol: grant-v1` 和密码学随机、仅存在内存中的 `X-Download-Session-ID`。响应返回 `keyGrant`，不返回 plaintext `initialKey`。在解密前通过对应 POST 接口提交 `{ "grantReference": "...", "sessionId": "..." }` 即时消费，二者都不得放入 URL。登录态 consume 按用户 20 次/60 秒限流；公开 consume 按规范化可信客户端 IP 20 次/60 秒限流，不要求 Bearer 或 `X-Tenant-ID`。metadata、decrypt-info 和 consume 响应都为 `no-store`；短窗内允许的一次同会话重试只用于响应丢失/provider 失败，不能跨 tab、用户、会话或客户端共享 grant。未加密文件不返回 grant 或 key。`plaintext-v0` 只用于显式、服务端默认关闭且有硬截止时间的迁移，新客户端不得依赖。
+
+精确的匿名公开分享合同仅包含 `GET /api/v1/shares/{shareCode}/info`、`GET /api/v1/shares/{shareCode}/files`、`GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`、`GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` 和 `POST /api/v1/public/key-grants/consume`。这些路由既不需要 Bearer，也不需要租户头。调用者即使提供 `X-Tenant-ID=0`、其他租户或畸形值，该值也会在授权和数据选择中被忽略。后端只从匹配的 `shareCode` 元数据解析 owner tenant；跨租户范围仅覆盖这次元数据查询，后续文件、key envelope、访问计数和分享访问审计都在 owner tenant 内完成。匿名 `sys_operation_log` 固定使用 system tenant `0`；产生的 `share_access_log` 使用 owner tenant。两类审计使用同一个规范化可信客户端 IP。
 
 公开 chunks 与 decrypt-info 路由按 `rate:limit:public:share-access:v2:ip:<canonical-ip>` 共享一个无租户的固定 30 次/60 秒桶。除非 direct peer 命中已配置的 trusted-proxy allowlist 且提供合法代理链，否则修改 `X-Tenant-ID`、JWT 角色、端点、`X-Forwarded-For` 或 `X-Real-IP` 都不能拆分该桶。前 30 次合计请求可以进入 controller；当前第 31 次仍保持 HTTP 200，并返回业务码 `70005`。分享公开性、有效/过期状态、未知类型/状态和 included-file 校验继续失败关闭。当前模型没有分享密码字段；密码分享需要另建端到端功能任务。分享写入、保存分享文件到当前用户空间，以及登录态 `/api/v1/shares/{shareCode}/files/{fileHash}/chunks` 和 `/decrypt-info` 路由仍必须携带 Bearer。
 

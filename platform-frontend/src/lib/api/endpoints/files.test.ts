@@ -90,10 +90,10 @@ describe("files endpoints", () => {
     await filesApi.getFile("f1");
     await filesApi.getFileByHash("h1");
     await filesApi.downloadEncryptedChunks("h1");
-    await filesApi.getDecryptInfo("h1");
+    await filesApi.getDecryptInfo("h1", "download-session-1234");
     await filesApi.getMyShares({ pageNum: 1, pageSize: 5 });
     await filesApi.getDownloadAddress("h1");
-    await filesApi.getDownloadMetadata("h1");
+    await filesApi.getDownloadMetadata("h1", "download-session-1234");
     await filesApi.getTransaction("tx-hash");
     await filesApi.getShareAccessLogs("code1", { pageNum: 2 });
     await filesApi.getShareAccessStats("code1");
@@ -119,6 +119,12 @@ describe("files endpoints", () => {
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       7,
       "/files/hash/h1/decrypt-info",
+      {
+        headers: {
+          "X-Key-Delivery-Protocol": "grant-v1",
+          "X-Download-Session-ID": "download-session-1234",
+        },
+      },
     );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(8, "/files/shares", {
       params: { pageNum: 1, pageSize: 5 },
@@ -130,6 +136,12 @@ describe("files endpoints", () => {
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       10,
       "/files/hash/h1/download-metadata",
+      {
+        headers: {
+          "X-Key-Delivery-Protocol": "grant-v1",
+          "X-Download-Session-ID": "download-session-1234",
+        },
+      },
     );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       11,
@@ -239,7 +251,18 @@ describe("files endpoints", () => {
     cryptoMocks.arrayToBlob.mockReturnValue(blob);
     clientMocks.api.get
       .mockResolvedValueOnce(["AQID", "BAUG"])
-      .mockResolvedValueOnce({ initialKey: "k1", contentType: "text/plain" });
+      .mockResolvedValueOnce({
+        keyGrant: {
+          reference: "A".repeat(43),
+          protocol: "grant-v1",
+          expiresAt: "2030-01-01T00:00:00Z",
+        },
+        contentType: "text/plain",
+      });
+    clientMocks.api.post.mockResolvedValueOnce({
+      initialKey: "k1",
+      protocol: "grant-v1",
+    });
 
     const result = await filesApi.downloadFile("hash-1");
 
@@ -250,10 +273,24 @@ describe("files endpoints", () => {
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       2,
       "/files/hash/hash-1/decrypt-info",
+      {
+        headers: {
+          "X-Key-Delivery-Protocol": "grant-v1",
+          "X-Download-Session-ID": expect.any(String),
+        },
+      },
     );
     expect(cryptoMocks.decryptFile).toHaveBeenCalledWith(
       expect.any(Array),
       "k1",
+    );
+    const downloadSessionId = clientMocks.api.get.mock.calls[1][1].headers[
+      "X-Download-Session-ID"
+    ] as string;
+    expect(clientMocks.api.post).toHaveBeenCalledWith(
+      "/files/key-grants/consume",
+      { grantReference: "A".repeat(43), sessionId: downloadSessionId },
+      { retries: 1 },
     );
     expect(cryptoMocks.arrayToBlob).toHaveBeenCalledWith(
       new Uint8Array([9, 9]),
@@ -262,12 +299,89 @@ describe("files endpoints", () => {
     expect(result).toBe(blob);
   });
 
+  it("downloadFile 应在分片下载完成后才签发并消费短期 grant", async () => {
+    let resolveChunks: ((chunks: string[]) => void) | undefined;
+    const chunksPromise = new Promise<string[]>((resolve) => {
+      resolveChunks = resolve;
+    });
+    clientMocks.api.get
+      .mockReturnValueOnce(chunksPromise)
+      .mockResolvedValueOnce({
+        keyGrant: {
+          reference: "J".repeat(43),
+          protocol: "grant-v1",
+          expiresAt: "2030-01-01T00:00:00Z",
+        },
+        contentType: "text/plain",
+      });
+    clientMocks.api.post.mockResolvedValueOnce({
+      initialKey: "jit-key",
+      protocol: "grant-v1",
+    });
+
+    const pendingDownload = filesApi.downloadFile("hash-jit");
+    await vi.waitFor(() =>
+      expect(clientMocks.api.get).toHaveBeenCalledTimes(1),
+    );
+    expect(clientMocks.api.post).not.toHaveBeenCalled();
+
+    resolveChunks?.(["AQID"]);
+    await pendingDownload;
+
+    expect(clientMocks.api.get).toHaveBeenCalledTimes(2);
+    expect(clientMocks.api.post).toHaveBeenCalledTimes(1);
+  });
+
+  it("downloadFile 应直接合并 NONE 分片且不请求 grant", async () => {
+    const blob = createBlob();
+    cryptoMocks.arrayToBlob.mockReturnValue(blob);
+    clientMocks.api.get
+      .mockResolvedValueOnce(["AQID", "BAU="])
+      .mockResolvedValueOnce({
+        contentType: "application/octet-stream",
+        chunkCount: 2,
+      });
+
+    const result = await filesApi.downloadFile("hash-none");
+
+    expect(clientMocks.api.post).not.toHaveBeenCalled();
+    expect(cryptoMocks.decryptFile).not.toHaveBeenCalled();
+    expect(cryptoMocks.arrayToBlob).toHaveBeenCalledWith(
+      new Uint8Array([1, 2, 3, 4, 5]),
+      "application/octet-stream",
+    );
+    expect(result).toBe(blob);
+  });
+
+  it("consumeDownloadKeyGrant 应在发请求前拒绝未知协议", async () => {
+    await expect(
+      filesApi.consumeDownloadKeyGrant(
+        {
+          reference: "U".repeat(43),
+          protocol: "future-v2" as "grant-v1",
+          expiresAt: "2030-01-01T00:00:00Z",
+        },
+        "download-session-1234",
+      ),
+    ).rejects.toThrow("不支持的下载密钥授权协议");
+
+    expect(clientMocks.api.post).not.toHaveBeenCalled();
+  });
+
   it("publicDownloadFile 应走公开接口链路", async () => {
     const blob = createBlob();
     cryptoMocks.arrayToBlob.mockReturnValue(blob);
     clientMocks.api.get.mockResolvedValueOnce(["AQID"]).mockResolvedValueOnce({
-      initialKey: "k2",
+      keyGrant: {
+        reference: "B".repeat(43),
+        protocol: "grant-v1",
+        expiresAt: "2030-01-01T00:00:00Z",
+      },
       contentType: "application/pdf",
+    });
+    clientMocks.api.post.mockResolvedValueOnce({
+      initialKey: "k2",
+      protocol: "grant-v1",
     });
 
     const result = await filesApi.publicDownloadFile("share-public", "hash-2");
@@ -281,8 +395,39 @@ describe("files endpoints", () => {
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       2,
       "/public/shares/share-public/files/hash-2/decrypt-info",
-      { skipAuth: true, skipTenant: true },
+      {
+        skipAuth: true,
+        skipTenant: true,
+        headers: {
+          "X-Key-Delivery-Protocol": "grant-v1",
+          "X-Download-Session-ID": expect.any(String),
+        },
+      },
     );
+    expect(clientMocks.api.post).toHaveBeenCalledWith(
+      "/public/key-grants/consume",
+      { grantReference: "B".repeat(43), sessionId: expect.any(String) },
+      { skipAuth: true, skipTenant: true, retries: 1 },
+    );
+  });
+
+  it("publicDownloadFile 应保留 NONE 公开分享下载且不消费 grant", async () => {
+    const blob = createBlob();
+    cryptoMocks.arrayToBlob.mockReturnValue(blob);
+    clientMocks.api.get.mockResolvedValueOnce(["AQID"]).mockResolvedValueOnce({
+      contentType: "application/octet-stream",
+      chunkCount: 1,
+    });
+
+    const result = await filesApi.publicDownloadFile("share-none", "hash-none");
+
+    expect(clientMocks.api.post).not.toHaveBeenCalled();
+    expect(cryptoMocks.decryptFile).not.toHaveBeenCalled();
+    expect(cryptoMocks.arrayToBlob).toHaveBeenCalledWith(
+      new Uint8Array([1, 2, 3]),
+      "application/octet-stream",
+    );
+    expect(result).toBe(blob);
   });
 
   it("shareDownloadFile 应走私密分享接口链路", async () => {
@@ -303,6 +448,12 @@ describe("files endpoints", () => {
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       2,
       "/shares/share-private/files/hash-3/decrypt-info",
+      {
+        headers: {
+          "X-Key-Delivery-Protocol": "grant-v1",
+          "X-Download-Session-ID": expect.any(String),
+        },
+      },
     );
   });
 

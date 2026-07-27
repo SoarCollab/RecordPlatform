@@ -21,6 +21,7 @@ import cn.flying.dao.mapper.ProofBundleIssuanceMapper;
 import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.mapper.FileSourceMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.DownloadKeyGrantVO;
 import cn.flying.dao.vo.file.FileShareVO;
 import cn.flying.dao.vo.file.ShareInfoVO;
 import cn.flying.dao.vo.file.ShareFileVO;
@@ -38,6 +39,10 @@ import cn.flying.service.FileService;
 import cn.flying.service.QuotaService;
 import cn.flying.service.ShareAuditService;
 import cn.flying.service.key.FileKeyEnvelopeService;
+import cn.flying.service.key.FileKeyGrantAccessKind;
+import cn.flying.service.key.FileKeyGrantEnvelopeBinding;
+import cn.flying.service.key.FileKeyGrantIssueContext;
+import cn.flying.service.key.FileKeyGrantService;
 import cn.flying.service.key.FileParamEnvelopeResult;
 import cn.flying.service.saga.FileSagaOrchestrator;
 import cn.flying.service.saga.FileUploadCommand;
@@ -111,6 +116,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     private final TransactionTemplate transactionTemplate;
     private final QuotaService quotaService;
     private final FileKeyEnvelopeService fileKeyEnvelopeService;
+    private final FileKeyGrantService fileKeyGrantService;
     private final ProofBundleIssuanceMapper proofBundleIssuanceMapper;
 
     @Override
@@ -1958,39 +1964,6 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
-    @OperationLog(module = "FILE_SECURITY", operationType = "KEY_ACCESS", description = "访问文件解密密钥")
-    @io.github.resilience4j.ratelimiter.annotation.RateLimiter(name = "fileKeyAccessRateLimiter", fallbackMethod = "fileKeyAccessRateLimitFallback")
-    public FileDecryptInfoVO getFileDecryptInfo(Long userId, String fileHash) {
-        // 校验文件所有权：用户只能获取自己的文件解密信息，管理员可获取所有
-        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                .eq(File::getFileHash, fileHash);
-
-        if (!SecurityUtils.isAdmin()) {
-            wrapper.eq(File::getUid, userId);
-        }
-
-        File file = this.getOne(wrapper);
-        if (file == null) {
-            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权限访问");
-        }
-
-        // 记录密钥访问审计日志
-        Long tenantId = TenantContext.getTenantId();
-        log.info("访问文件解密密钥: userId={}, fileId={}, fileName={}, fileHash={}, tenantId={}, accessTime={}",
-                userId, file.getId(), file.getFileName(), fileHash, tenantId, new Date());
-
-        return buildFileDecryptInfo(file, fileHash, file.getUid(), userId);
-    }
-
-    /**
-     * Rate limiter fallback for getFileDecryptInfo
-     */
-    private FileDecryptInfoVO fileKeyAccessRateLimitFallback(Long userId, String fileHash, Throwable t) {
-        log.warn("文件解密密钥访问限流触发: userId={}, fileHash={}, error={}", userId, fileHash, t.getMessage());
-        throw new GeneralException(ResultEnum.RATE_LIMIT_EXCEEDED);
-    }
-
-    @Override
     public IPage<FileShareVO> getUserShares(Long userId, Page<?> page) {
         Long tenantId = TenantContext.getTenantId();
 
@@ -2264,8 +2237,15 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         });
     }
 
+    /**
+     * Resolves public-share decrypt metadata with negotiated key delivery.
+     */
     @Override
-    public FileDecryptInfoVO getPublicFileDecryptInfo(String shareCode, String fileHash) {
+    public FileDecryptInfoVO getPublicFileDecryptInfo(String shareCode,
+                                                      String fileHash,
+                                                      String keyDeliveryProtocol,
+                                                      String downloadSessionId,
+                                                      String publicClientIdentity) {
         return callWithPublicShareAccess(shareCode, fileHash, accessContext -> {
             // 查询文件元数据
             LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
@@ -2276,7 +2256,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 throw new GeneralException(ResultEnum.FAIL, "文件不存在");
             }
 
-            return buildShareFileDecryptInfo(file, fileHash, accessContext, null);
+            return buildShareFileDecryptInfo(file, fileHash, accessContext, null,
+                    keyDeliveryProtocol, downloadSessionId, publicClientIdentity, true);
         });
     }
 
@@ -2340,10 +2321,14 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     /**
-     * 登录用户通过分享码获取解密信息（支持私密/公开分享）
+     * Resolves authenticated-share decrypt metadata with negotiated key delivery.
      */
     @Override
-    public FileDecryptInfoVO getSharedFileDecryptInfo(Long userId, String shareCode, String fileHash) {
+    public FileDecryptInfoVO getSharedFileDecryptInfo(Long userId,
+                                                      String shareCode,
+                                                      String fileHash,
+                                                      String keyDeliveryProtocol,
+                                                      String downloadSessionId) {
         // 验证分享有效性（允许公开/私密）
         ShareAccessContext accessContext = resolveShareAccess(shareCode, fileHash, null);
 
@@ -2356,70 +2341,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             throw new GeneralException(ResultEnum.FAIL, "文件不存在");
         }
 
-        return buildShareFileDecryptInfo(file, fileHash, accessContext, userId);
-    }
-
-    /**
-     * Builds decrypt metadata by resolving key envelopes for encrypted files.
-     */
-    private FileDecryptInfoVO buildFileDecryptInfo(File file, String fileHash, Long envelopeOwnerId) {
-        return buildFileDecryptInfo(file, fileHash, envelopeOwnerId, envelopeOwnerId);
-    }
-
-    /**
-     * Builds decrypt metadata for owner/admin access by auditing the requesting actor.
-     */
-    private FileDecryptInfoVO buildFileDecryptInfo(File file, String fileHash, Long envelopeOwnerId, Long actorId) {
-        String fileParam = file.getFileParam();
-        if (CommonUtils.isEmpty(fileParam)) {
-            throw new GeneralException(ResultEnum.FAIL, "文件元数据不完整，缺少解密信息");
-        }
-
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
-
-            String initialKey = null;
-            if (requiresInitialKey(params)) {
-                Optional<String> envelopeInitialKey = fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
-                        file,
-                        fileHash,
-                        envelopeOwnerId,
-                        actorId,
-                        "OWNER_DECRYPT"
-                );
-                initialKey = (envelopeInitialKey != null ? envelopeInitialKey : Optional.<String>empty())
-                        .orElse(null);
-                if (CommonUtils.isEmpty(initialKey)) {
-                    throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
-                }
-            }
-
-            String fileName = (String) params.get("fileName");
-            Long fileSize = params.get("fileSize") instanceof Number
-                    ? ((Number) params.get("fileSize")).longValue() : null;
-            String contentType = (String) params.get("contentType");
-            Integer chunkCount = params.get("chunkCount") instanceof Number
-                    ? ((Number) params.get("chunkCount")).intValue() : null;
-            Long chunkSize = params.get("chunkSize") instanceof Number
-                    ? ((Number) params.get("chunkSize")).longValue() : null;
-
-            return new FileDecryptInfoVO(
-                    initialKey,
-                    fileName != null ? fileName : file.getFileName(),
-                    fileSize,
-                    contentType,
-                    chunkCount,
-                    fileHash,
-                    chunkSize
-            );
-
-        } catch (GeneralException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("解析文件参数失败: fileHash={}, error={}", fileHash, e.getMessage());
-            throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
-        }
+        return buildShareFileDecryptInfo(file, fileHash, accessContext, userId,
+                keyDeliveryProtocol, downloadSessionId, null, false);
     }
 
     /**
@@ -2428,7 +2351,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     private FileDecryptInfoVO buildShareFileDecryptInfo(File file,
                                                         String fileHash,
                                                         ShareAccessContext accessContext,
-                                                        Long actorId) {
+                                                        Long actorId,
+                                                        String keyDeliveryProtocol,
+                                                        String downloadSessionId,
+                                                        String publicClientIdentity,
+                                                        boolean publicAccess) {
         String fileParam = file.getFileParam();
         if (CommonUtils.isEmpty(fileParam)) {
             throw new GeneralException(ResultEnum.FAIL, "文件元数据不完整，缺少解密信息");
@@ -2439,18 +2366,21 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
 
             String initialKey = null;
+            DownloadKeyGrantVO keyGrant = null;
             if (requiresInitialKey(params)) {
-                Optional<String> shareEnvelopeInitialKey = fileKeyEnvelopeService.unwrapActiveShareInitialKey(
-                        file,
-                        fileHash,
-                        accessContext.fileShare(),
-                        actorId,
-                        "SHARE_DECRYPT"
-                );
-                initialKey = (shareEnvelopeInitialKey != null ? shareEnvelopeInitialKey : Optional.<String>empty())
-                        .orElse(null);
-                if (CommonUtils.isEmpty(initialKey)) {
-                    throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+                FileKeyGrantEnvelopeBinding binding = fileKeyEnvelopeService.resolveShareGrantBinding(
+                                file, fileHash, accessContext.fileShare())
+                        .orElseThrow(() -> new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在"));
+                String protocol = normalizeKeyDeliveryProtocol(keyDeliveryProtocol);
+                if (FileKeyGrantService.PROTOCOL_PLAINTEXT_V0.equals(protocol)) {
+                    initialKey = fileKeyGrantService.deliverLegacyPlaintext(file, binding, actorId);
+                } else {
+                    FileKeyGrantAccessKind accessKind = publicAccess
+                            ? FileKeyGrantAccessKind.PUBLIC_SHARE
+                            : FileKeyGrantAccessKind.AUTHENTICATED_SHARE;
+                    keyGrant = fileKeyGrantService.issue(new FileKeyGrantIssueContext(
+                            file, binding, accessKind, actorId,
+                            publicAccess ? publicClientIdentity : null, downloadSessionId));
                 }
             }
 
@@ -2465,6 +2395,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
             return new FileDecryptInfoVO(
                     initialKey,
+                    keyGrant,
                     fileName != null ? fileName : file.getFileName(),
                     fileSize,
                     contentType,
@@ -2480,6 +2411,21 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                     file.getId(), accessContext.fileShare().getId(), e.getClass().getSimpleName());
             throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
         }
+    }
+
+    /**
+     * Normalizes share key delivery negotiation and rejects unknown protocol values.
+     */
+    private String normalizeKeyDeliveryProtocol(String protocol) {
+        if (!org.springframework.util.StringUtils.hasText(protocol)) {
+            return FileKeyGrantService.PROTOCOL_GRANT_V1;
+        }
+        String normalized = protocol.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!FileKeyGrantService.PROTOCOL_GRANT_V1.equals(normalized)
+                && !FileKeyGrantService.PROTOCOL_PLAINTEXT_V0.equals(normalized)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "KEY_DELIVERY_PROTOCOL_UNSUPPORTED");
+        }
+        return normalized;
     }
 
     /**

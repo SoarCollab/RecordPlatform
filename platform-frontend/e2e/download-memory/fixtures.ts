@@ -147,7 +147,7 @@ export function createPlainBytes(offset: number, length: number): Uint8Array {
   return bytes;
 }
 
-/** 构造 NONE 或 framed v2 的 metadata，并绑定固定 hash/尺寸证据。 */
+/** 构造不携带明文 key 的 NONE 或 framed v2 metadata，并绑定固定 hash/尺寸证据。 */
 export function createDownloadMetadata(
   options: DownloadMemoryRunOptions,
 ): FileDownloadMetadataVO {
@@ -188,11 +188,7 @@ export function createDownloadMetadata(
     fileName: `download-memory-${options.format}-${options.sizeMiB}.bin`,
     fileSize: profile.sizeBytes,
     contentType: "application/octet-stream",
-    initialKey: isFramed
-      ? options.failure === "wrong-key"
-        ? WRONG_FILE_DEK_BASE64
-        : FILE_DEK_BASE64
-      : undefined,
+    initialKey: undefined,
     manifestSchemaId: "chunk-manifest.v1",
     manifestHash: manifest.hash,
     canonicalManifestJson: manifest.json,
@@ -204,6 +200,16 @@ export function createDownloadMetadata(
     parts: [part],
     encryption,
   };
+}
+
+/** 模拟 grant-v1 的即时消费，只在 framed 下载开始前返回本次执行所需 DEK。 */
+export function consumeSyntheticDownloadKeyGrant(
+  options: DownloadMemoryRunOptions,
+): string | undefined {
+  if (options.format !== "FRAMED_V2") return undefined;
+  return options.failure === "wrong-key"
+    ? WRONG_FILE_DEK_BASE64
+    : FILE_DEK_BASE64;
 }
 
 /** 写入 framed wire format 使用的无符号大端整数。 */

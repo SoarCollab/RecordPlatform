@@ -96,13 +96,12 @@ public interface FileQueryService {
     List<String> getFileAddress(Long userId, String fileHash);
 
     /**
-     * 获取文件预签名分片下载元数据。
-     *
-     * @param userId 用户ID
-     * @param fileHash 文件哈希
-     * @return 分片下载 URL、manifest、解密和算法元数据
+     * 按版本化密钥交付协议获取下载元数据。
      */
-    FileDownloadMetadataVO getDownloadMetadata(Long userId, String fileHash);
+    FileDownloadMetadataVO getDownloadMetadata(Long userId,
+                                               String fileHash,
+                                               String keyDeliveryProtocol,
+                                               String downloadSessionId);
 
     /**
      * 根据交易哈希获取区块链交易信息
@@ -131,13 +130,12 @@ public interface FileQueryService {
     List<ShareFileVO> getShareFile(String sharingCode);
 
     /**
-     * 获取文件解密信息（客户端解密用）
-     *
-     * @param userId   用户ID
-     * @param fileHash 文件哈希
-     * @return 解密信息（初始密钥、元数据）
+     * 按版本化密钥交付协议获取历史下载解密元数据。
      */
-    FileDecryptInfoVO getFileDecryptInfo(Long userId, String fileHash);
+    FileDecryptInfoVO getFileDecryptInfo(Long userId,
+                                         String fileHash,
+                                         String keyDeliveryProtocol,
+                                         String downloadSessionId);
 
     /**
      * 获取用户创建的分享列表
@@ -190,12 +188,4 @@ public interface FileQueryService {
      */
     CompletableFuture<List<String>> getFileAddressAsync(Long userId, String fileHash);
 
-    /**
-     * 异步获取文件解密信息
-     *
-     * @param userId   用户ID
-     * @param fileHash 文件哈希
-     * @return 异步结果
-     */
-    CompletableFuture<FileDecryptInfoVO> getFileDecryptInfoAsync(Long userId, String fileHash);
 }

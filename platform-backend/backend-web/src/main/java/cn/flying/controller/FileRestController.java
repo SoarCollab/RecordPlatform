@@ -1,6 +1,7 @@
 package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
+import cn.flying.common.annotation.RateLimit;
 import cn.flying.common.constant.FileKeywordMode;
 import cn.flying.common.constant.Result;
 import cn.flying.common.tenant.TenantContext;
@@ -8,17 +9,22 @@ import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.BatchDownloadMetricsReportVO;
+import cn.flying.dao.vo.file.DownloadKeyGrantConsumeRequestVO;
+import cn.flying.dao.vo.file.DownloadKeyMaterialVO;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileDownloadMetadataVO;
 import cn.flying.dao.vo.file.FileVO;
 import cn.flying.service.DownloadBatchMetricsService;
 import cn.flying.service.FileQueryService;
+import cn.flying.service.key.FileKeyGrantService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.HttpHeaders;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,6 +32,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -51,6 +58,8 @@ public class FileRestController {
     private final FileQueryService fileQueryService;
 
     private final DownloadBatchMetricsService downloadBatchMetricsService;
+
+    private final FileKeyGrantService fileKeyGrantService;
 
     /**
      * 获取文件分页列表（REST 新路径）。
@@ -193,10 +202,20 @@ public class FileRestController {
      */
     @GetMapping("/hash/{fileHash}/download-metadata")
     @Operation(summary = "获取文件预签名分片下载元数据（REST）")
-    @OperationLog(module = "文件操作", operationType = "下载", description = "获取文件预签名分片下载元数据（REST）")
+    @OperationLog(module = "文件操作", operationType = "下载",
+            description = "获取文件预签名分片下载元数据（REST）", saveRequestData = false)
+    @RateLimit(limit = 60, period = 60, type = RateLimit.LimitType.USER,
+            key = "download:key-grant:issue")
     public Result<FileDownloadMetadataVO> getDownloadMetadata(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
-                                                              @PathVariable String fileHash) {
-        return Result.success(fileQueryService.getDownloadMetadata(userId, fileHash));
+                                                              @PathVariable String fileHash,
+                                                              @RequestHeader(value = "X-Key-Delivery-Protocol", required = false)
+                                                              String keyDeliveryProtocol,
+                                                              @RequestHeader(value = "X-Download-Session-ID", required = false)
+                                                              String downloadSessionId,
+                                                              HttpServletResponse response) {
+        disableSensitiveResponseCaching(response, true);
+        return Result.success(fileQueryService.getDownloadMetadata(
+                userId, fileHash, keyDeliveryProtocol, downloadSessionId));
     }
 
     /**
@@ -223,10 +242,47 @@ public class FileRestController {
      */
     @GetMapping("/hash/{fileHash}/decrypt-info")
     @Operation(summary = "获取文件解密信息（REST）")
-    @OperationLog(module = "文件操作", operationType = "查询", description = "获取文件解密信息（REST）")
+    @OperationLog(module = "文件操作", operationType = "查询",
+            description = "获取文件解密信息（REST）", saveRequestData = false)
+    @RateLimit(limit = 60, period = 60, type = RateLimit.LimitType.USER,
+            key = "download:key-grant:issue")
     public Result<FileDecryptInfoVO> getFileDecryptInfo(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
-                                                        @PathVariable String fileHash) {
-        return Result.success(fileQueryService.getFileDecryptInfo(userId, fileHash));
+                                                        @PathVariable String fileHash,
+                                                        @RequestHeader(value = "X-Key-Delivery-Protocol", required = false)
+                                                        String keyDeliveryProtocol,
+                                                        @RequestHeader(value = "X-Download-Session-ID", required = false)
+                                                        String downloadSessionId,
+                                                        HttpServletResponse response) {
+        disableSensitiveResponseCaching(response, true);
+        return Result.success(fileQueryService.getFileDecryptInfo(
+                userId, fileHash, keyDeliveryProtocol, downloadSessionId));
+    }
+
+    /**
+     * 原子消费认证用户的短期下载密钥授权。
+     */
+    @PostMapping("/key-grants/consume")
+    @Operation(summary = "消费短期下载密钥授权")
+    @OperationLog(module = "文件操作", operationType = "下载",
+            description = "消费短期下载密钥授权", saveRequestData = false)
+    @RateLimit(limit = 20, period = 60, type = RateLimit.LimitType.USER,
+            key = "download:key-grant:consume")
+    public Result<DownloadKeyMaterialVO> consumeDownloadKeyGrant(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @RequestBody @Valid DownloadKeyGrantConsumeRequestVO request,
+            HttpServletResponse response) {
+        disableSensitiveResponseCaching(response, true);
+        return Result.success(fileKeyGrantService.consumeAuthenticated(
+                request.grantReference(), request.sessionId(), userId));
+    }
+
+    /**
+     * 禁止浏览器、代理与中间缓存保存下载 grant 或瞬时密钥响应。
+     */
+    private void disableSensitiveResponseCaching(HttpServletResponse response, boolean privateResponse) {
+        response.setHeader(HttpHeaders.CACHE_CONTROL,
+                privateResponse ? "no-store, private" : "no-store");
+        response.setHeader(HttpHeaders.PRAGMA, "no-cache");
     }
 
     /**

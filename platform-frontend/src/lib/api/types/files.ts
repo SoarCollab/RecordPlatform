@@ -286,7 +286,10 @@ export interface FileDownloadMetadataVO {
   fileName: string;
   fileSize: number;
   contentType: string;
+  /** 仅 plaintext-v0 迁移协议可能返回；grant-v1 下必须为空。 */
   initialKey?: string;
+  /** 会话绑定、短期且只能通过 POST 请求体消费的密钥授权。 */
+  keyGrant?: DownloadKeyGrantVO;
   manifestSchemaId: string;
   manifestHash: string;
   /** canonical manifest JSON，不包含 initialKey/file DEK。 */
@@ -474,8 +477,10 @@ export interface SaveShareFileRequest {
  * @see FileDecryptInfoVO.java
  */
 export interface FileDecryptInfoVO extends OpenApiSchema<"FileDecryptInfoVO"> {
-  /** 初始密钥（最后一个分片的解密密钥，Base64编码） */
+  /** 仅 plaintext-v0 迁移协议可能返回；grant-v1 下必须为空。 */
   initialKey?: string;
+  /** 会话绑定、短期且只能通过 POST 请求体消费的密钥授权。 */
+  keyGrant?: DownloadKeyGrantVO;
   /** 文件名 */
   fileName: string;
   /** 文件大小（字节） */
@@ -488,6 +493,25 @@ export interface FileDecryptInfoVO extends OpenApiSchema<"FileDecryptInfoVO"> {
   fileHash: string;
   /** 原始上传分片大小；历史文件可能为空。 */
   chunkSize?: number;
+}
+
+/**
+ * 短期下载密钥授权。
+ * @see DownloadKeyGrantVO.java
+ */
+export interface DownloadKeyGrantVO {
+  reference: string;
+  protocol: "grant-v1";
+  expiresAt: string;
+}
+
+/**
+ * 下载密钥授权消费响应。
+ * @see DownloadKeyMaterialVO.java
+ */
+export interface DownloadKeyMaterialVO {
+  initialKey: string;
+  protocol: "grant-v1";
 }
 
 /**

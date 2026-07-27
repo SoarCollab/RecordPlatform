@@ -15,6 +15,7 @@ import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.service.FriendFileShareService;
 import cn.flying.service.key.FileKeyEnvelopeService;
+import cn.flying.service.key.FileKeyGrantService;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import cn.flying.service.remote.FileRemoteClient;
@@ -70,6 +71,9 @@ class FileQueryServiceEdgeCaseTest {
     @Mock
     private FileKeyEnvelopeService fileKeyEnvelopeService;
 
+    @Mock
+    private FileKeyGrantService fileKeyGrantService;
+
     @InjectMocks
     private FileQueryServiceImpl fileQueryService;
 
@@ -78,6 +82,7 @@ class FileQueryServiceEdgeCaseTest {
     private static final Long FILE_ID = 1L;
     private static final String FILE_HASH = "sha256_edge_hash";
     private static final String SHARE_CODE = "EDGE01";
+    private static final String DOWNLOAD_SESSION_ID = "edge-download-session-12345";
 
     /**
      * 为公开分享边界用例提供全局分享码到 owner 租户的最小解析结果。
@@ -477,7 +482,7 @@ class FileQueryServiceEdgeCaseTest {
                 when(friendFileShareService.getActiveShareForFile(USER_ID, FILE_HASH)).thenReturn(createFriendShare());
 
                 GeneralException ex = assertThrows(GeneralException.class, () ->
-                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH));
+                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH, FileKeyGrantService.PROTOCOL_GRANT_V1, DOWNLOAD_SESSION_ID));
 
                 assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED);
             }
@@ -502,7 +507,7 @@ class FileQueryServiceEdgeCaseTest {
                 when(fileMapper.selectOne(any())).thenReturn(file);
 
                 GeneralException ex = assertThrows(GeneralException.class, () ->
-                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH));
+                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH, FileKeyGrantService.PROTOCOL_GRANT_V1, DOWNLOAD_SESSION_ID));
 
                 assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.JSON_PARSE_ERROR);
                 assertThat(ex.getData()).isNotNull();
@@ -528,7 +533,7 @@ class FileQueryServiceEdgeCaseTest {
                 when(fileMapper.selectOne(any())).thenReturn(file);
 
                 GeneralException ex = assertThrows(GeneralException.class, () ->
-                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH));
+                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH, FileKeyGrantService.PROTOCOL_GRANT_V1, DOWNLOAD_SESSION_ID));
 
                 assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.FAIL);
                 assertThat(ex.getData()).isEqualTo("文件解密密钥不存在");

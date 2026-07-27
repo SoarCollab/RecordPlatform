@@ -37,6 +37,7 @@ public class TenantFilter extends OncePerRequestFilter {
     private static final Logger log = LoggerFactory.getLogger(TenantFilter.class);
     private static final String TENANT_HEADER = "X-Tenant-ID";
     private static final String SSE_CONNECT_PATH = "/api/v1/sse/connect";
+    private static final String PUBLIC_KEY_GRANT_CONSUME_PATH = "/api/v1/public/key-grants/consume";
 
     /**
      * 全局公开 proof 路径不依赖租户查询，必须忽略匿名调用者提供的租户头。
@@ -187,6 +188,9 @@ public class TenantFilter extends OncePerRequestFilter {
         if (uri.matches("^/api/v1/shares/[^/]+/files/?$")) {
             return true;
         }
+        if (PUBLIC_KEY_GRANT_CONSUME_PATH.equals(uri)) {
+            return true;
+        }
         return WHITELIST_PATHS.stream().anyMatch(prefix -> matchesPathOrDescendant(uri, prefix));
     }
 
@@ -201,6 +205,9 @@ public class TenantFilter extends OncePerRequestFilter {
         boolean publicProof = TENANT_HEADER_IGNORED_PATHS.stream()
                 .anyMatch(prefix -> matchesPathOrDescendant(uri, prefix));
         if (publicProof) {
+            return true;
+        }
+        if ("POST".equalsIgnoreCase(method) && PUBLIC_KEY_GRANT_CONSUME_PATH.equals(uri)) {
             return true;
         }
         if (!"GET".equalsIgnoreCase(method)) {
@@ -220,7 +227,8 @@ public class TenantFilter extends OncePerRequestFilter {
      */
     private boolean isSharePathFamily(String uri) {
         return matchesPathOrDescendant(uri, "/api/v1/shares")
-                || matchesPathOrDescendant(uri, "/api/v1/public/shares");
+                || matchesPathOrDescendant(uri, "/api/v1/public/shares")
+                || matchesPathOrDescendant(uri, "/api/v1/public/key-grants");
     }
 
     /**

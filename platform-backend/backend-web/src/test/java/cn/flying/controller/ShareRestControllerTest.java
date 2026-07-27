@@ -1,15 +1,19 @@
 package cn.flying.controller;
 
 import cn.flying.common.annotation.RateLimit;
+import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileSharingVO;
 import cn.flying.dao.vo.file.SaveSharingFile;
 import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
+import cn.flying.dao.vo.file.DownloadKeyGrantConsumeRequestVO;
+import cn.flying.dao.vo.file.DownloadKeyMaterialVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
 import cn.flying.service.ShareAuditService;
+import cn.flying.service.key.FileKeyGrantService;
 import cn.flying.security.TrustedClientIpResolver;
 import jakarta.validation.Validation;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +22,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
@@ -49,6 +54,9 @@ class ShareRestControllerTest {
     @Mock
     private TrustedClientIpResolver trustedClientIpResolver;
 
+    @Mock
+    private FileKeyGrantService fileKeyGrantService;
+
     private ShareRestController controller;
 
     /**
@@ -60,7 +68,8 @@ class ShareRestControllerTest {
                 fileService,
                 fileQueryService,
                 shareAuditService,
-                trustedClientIpResolver
+                trustedClientIpResolver,
+                fileKeyGrantService
         );
         lenient().when(trustedClientIpResolver.resolve(any())).thenReturn("203.0.113.7");
     }
@@ -92,25 +101,37 @@ class ShareRestControllerTest {
                 new ShareFileVO("f-1", "n", "document", fileHash, 1L, "text/plain", null, null, null, null)
         ));
         when(fileService.getSharedFileContent(userId, shareCode, fileHash)).thenReturn(List.of("abc".getBytes()));
-        when(fileService.getSharedFileDecryptInfo(userId, shareCode, fileHash))
+        when(fileService.getSharedFileDecryptInfo(
+                userId, shareCode, fileHash, "grant-v1", "session-123456789"))
                 .thenReturn(new FileDecryptInfoVO("k1", "n", 1L, "text/plain", 1, fileHash));
         when(fileService.getPublicFile(shareCode, fileHash)).thenReturn(List.of("def".getBytes()));
-        when(fileService.getPublicFileDecryptInfo(shareCode, fileHash))
+        when(fileService.getPublicFileDecryptInfo(
+                shareCode, fileHash, "grant-v1", "session-123456789", "203.0.113.7"))
                 .thenReturn(new FileDecryptInfoVO("k2", "n", 2L, "text/plain", 2, fileHash));
+        when(fileKeyGrantService.consumePublic(
+                "B".repeat(43), "session-123456789", "203.0.113.7"))
+                .thenReturn(new DownloadKeyMaterialVO("transient-public-key", "grant-v1"));
 
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("X-Forwarded-For", "1.1.1.1, 2.2.2.2");
         request.addHeader("User-Agent", "JUnit");
         request.setRemoteAddr("10.0.0.10");
+        MockHttpServletResponse response = new MockHttpServletResponse();
 
         Result<String> createResult = controller.createShare(userId, createVO);
         Result<String> updateResult = controller.updateShare(userId, shareCode, updateVO);
         Result<List<ShareFileVO>> listResult = controller.getSharedFiles(shareCode, userId, request);
         Result<String> saveResult = controller.saveSharedFiles(shareCode, saveVO, request);
         Result<List<byte[]>> downloadResult = controller.downloadSharedFile(userId, shareCode, fileHash, request);
-        Result<FileDecryptInfoVO> decryptResult = controller.getSharedDecryptInfo(userId, shareCode, fileHash);
+        Result<FileDecryptInfoVO> decryptResult = controller.getSharedDecryptInfo(
+                userId, shareCode, fileHash, "grant-v1", "session-123456789", response);
         Result<List<byte[]>> publicDownloadResult = controller.publicDownload(shareCode, fileHash, request);
-        Result<FileDecryptInfoVO> publicDecryptResult = controller.publicDecryptInfo(shareCode, fileHash);
+        Result<FileDecryptInfoVO> publicDecryptResult = controller.publicDecryptInfo(
+                shareCode, fileHash, "grant-v1", "session-123456789", request, response);
+        Result<DownloadKeyMaterialVO> publicKeyMaterialResult = controller.consumePublicDownloadKeyGrant(
+                new DownloadKeyGrantConsumeRequestVO("B".repeat(43), "session-123456789"),
+                request,
+                response);
 
         assertEquals(shareCode, createResult.getData());
         assertEquals("分享设置已更新", updateResult.getData());
@@ -120,6 +141,9 @@ class ShareRestControllerTest {
         assertEquals(fileHash, decryptResult.getData().fileHash());
         assertEquals(1, publicDownloadResult.getData().size());
         assertEquals(fileHash, publicDecryptResult.getData().fileHash());
+        assertEquals("transient-public-key", publicKeyMaterialResult.getData().initialKey());
+        assertEquals("no-store", response.getHeader("Cache-Control"));
+        assertEquals("no-cache", response.getHeader("Pragma"));
 
         verify(fileService).updateShare(eq(userId), any(UpdateShareVO.class));
         verify(shareAuditService).logShareView(eq(shareCode), eq(userId), eq("203.0.113.7"), eq("JUnit"));
@@ -127,6 +151,8 @@ class ShareRestControllerTest {
                 eq(shareCode), eq(userId), eq(fileHash), eq(null), eq("203.0.113.7"));
         verify(shareAuditService).logShareDownload(
                 eq(shareCode), eq(null), eq(fileHash), eq(null), eq("203.0.113.7"));
+        verify(fileKeyGrantService).consumePublic(
+                "B".repeat(43), "session-123456789", "203.0.113.7");
     }
 
     /**
@@ -157,7 +183,9 @@ class ShareRestControllerTest {
                 .getMethod("publicDownload", String.class, String.class, jakarta.servlet.http.HttpServletRequest.class)
                 .getAnnotation(RateLimit.class);
         RateLimit decryptRateLimit = ShareRestController.class
-                .getMethod("publicDecryptInfo", String.class, String.class)
+                .getMethod("publicDecryptInfo", String.class, String.class, String.class, String.class,
+                        jakarta.servlet.http.HttpServletRequest.class,
+                        jakarta.servlet.http.HttpServletResponse.class)
                 .getAnnotation(RateLimit.class);
 
         assertNotNull(downloadRateLimit);
@@ -171,6 +199,50 @@ class ShareRestControllerTest {
         assertEquals(downloadRateLimit.key(), decryptRateLimit.key());
         assertEquals(30, downloadRateLimit.limit());
         assertEquals(60, downloadRateLimit.period());
+    }
+
+    /**
+     * 验证公开 grant 消费使用独立可信客户端 IP 限流且不保存请求体。
+     */
+    @Test
+    void shouldProtectPublicGrantConsumeContract() throws NoSuchMethodException {
+        var method = ShareRestController.class.getMethod(
+                "consumePublicDownloadKeyGrant",
+                DownloadKeyGrantConsumeRequestVO.class,
+                jakarta.servlet.http.HttpServletRequest.class,
+                jakarta.servlet.http.HttpServletResponse.class);
+        RateLimit rateLimit = method.getAnnotation(RateLimit.class);
+        OperationLog operationLog = method.getAnnotation(OperationLog.class);
+
+        assertNotNull(rateLimit);
+        assertEquals(20, rateLimit.limit());
+        assertEquals(60, rateLimit.period());
+        assertEquals(RateLimit.LimitType.IP, rateLimit.type());
+        assertEquals(RateLimit.ClientIpMode.TRUSTED_PEER, rateLimit.clientIpMode());
+        assertFalse(rateLimit.tenantScoped());
+        assertEquals("public:key-grant:consume", rateLimit.key());
+        assertNotNull(operationLog);
+        assertFalse(operationLog.saveRequestData());
+    }
+
+    /**
+     * 验证登录分享的 grant 签发入口复用认证用户签发限流桶。
+     */
+    @Test
+    void shouldProtectAuthenticatedShareGrantIssueContract() throws NoSuchMethodException {
+        var method = ShareRestController.class.getMethod(
+                "getSharedDecryptInfo", Long.class, String.class, String.class, String.class, String.class,
+                jakarta.servlet.http.HttpServletResponse.class);
+        RateLimit rateLimit = method.getAnnotation(RateLimit.class);
+        OperationLog operationLog = method.getAnnotation(OperationLog.class);
+
+        assertNotNull(rateLimit);
+        assertEquals(60, rateLimit.limit());
+        assertEquals(60, rateLimit.period());
+        assertEquals(RateLimit.LimitType.USER, rateLimit.type());
+        assertEquals("download:key-grant:issue", rateLimit.key());
+        assertNotNull(operationLog);
+        assertFalse(operationLog.saveRequestData());
     }
 
     /**

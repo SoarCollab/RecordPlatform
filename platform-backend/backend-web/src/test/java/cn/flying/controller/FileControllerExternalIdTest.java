@@ -4,6 +4,7 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SecureIdCodec;
+import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.ProofBundleVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
@@ -20,8 +21,11 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -199,5 +203,42 @@ class FileControllerExternalIdTest {
 
         assertEquals(bundle, result.getData());
         verify(proofBundleService).exportByLeafId(88L, internalId);
+    }
+
+    /**
+     * 验证通用文件视图不会把历史 fileParam 中的明文或包封密钥旁路返回给客户端。
+     */
+    @Test
+    void shouldStripKeyMaterialFromFileParamResponse() {
+        File file = new File()
+                .setFileParam("{\"fileName\":\"report.pdf\",\"initialKey\":\"plain-secret\","
+                        + "\"wrappedDataKey\":\"wrapped-secret\",\"kmsKeyId\":\"provider-key\","
+                        + "\"initial_key\":\"snake-secret\",\"key-reference\":\"key-reference-secret\","
+                        + "\"nested\":{\"fileDataKey\":\"nested-secret\","
+                        + "\"wrapping_iv\":\"iv-secret\",\"providerKeyVersion\":\"version-secret\"}}");
+
+        String sanitized = FileController.toFileVO(file).fileParam();
+
+        assertNotNull(sanitized);
+        assertTrue(sanitized.contains("report.pdf"));
+        assertFalse(sanitized.contains("plain-secret"));
+        assertFalse(sanitized.contains("wrapped-secret"));
+        assertFalse(sanitized.contains("provider-key"));
+        assertFalse(sanitized.contains("snake-secret"));
+        assertFalse(sanitized.contains("key-reference-secret"));
+        assertFalse(sanitized.contains("nested-secret"));
+        assertFalse(sanitized.contains("iv-secret"));
+        assertFalse(sanitized.contains("version-secret"));
+        assertFalse(sanitized.toLowerCase().contains("initialkey"));
+    }
+
+    /**
+     * 验证损坏的历史 fileParam 失败关闭，不回显无法安全解析的原始文本。
+     */
+    @Test
+    void shouldOmitMalformedFileParamInsteadOfEchoingIt() {
+        File file = new File().setFileParam("{malformed-initialKey-secret");
+
+        assertNull(FileController.toFileVO(file).fileParam());
     }
 }

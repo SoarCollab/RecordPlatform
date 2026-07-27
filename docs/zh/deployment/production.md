@@ -9,6 +9,8 @@ RecordPlatform 生产环境部署最佳实践。
 - [ ] 显式配置 `FILE_KEY_ENVELOPE_ACTIVE_PROVIDER` 与合同版本
 - [ ] Vault 使用 HTTPS 和最小权限 token，或 local 使用独立且至少 32 字符的 master key
 - [ ] 信封轮换完成前持续提供历史 provider/key 版本
+- [ ] 下载密钥 grant 使用高可用 Redis；`plaintext-v0` 已关闭且截止时间受监控
+- [ ] 代理、WAF、APM 与访问日志不缓存或采集 grant/session/key payload
 - [ ] SSL 证书已安装
 - [ ] 数据库备份已配置
 - [ ] 监控告警已设置
@@ -37,6 +39,12 @@ RecordPlatform 在 `scripts/` 目录提供现成的脚本。
 `application-prod.yml` 不设置默认 active provider，也不回退 `JWT_KEY`。provider 为空、未知、不可用，Vault 使用 HTTP，或显式选择的 local master key 缺失、过短、与 JWT key 相同时，应用会启动失败。
 
 使用 `vault-transit` 时，通过部署 secret 系统注入 `FILE_KEY_ENVELOPE_VAULT_ADDRESS`、`FILE_KEY_ENVELOPE_VAULT_TOKEN`、`FILE_KEY_ENVELOPE_VAULT_KEY_NAME` 和显式 key 版本。禁止把 token 写入 Git 或 Nacos 明文。token 只需对目标 key 的 encrypt、decrypt、rewrap 路径拥有 `update` 能力。Vault Community 能提供外部集中式 KMS，但不构成 HSM 安全边界；HSM-backed 部署需要 Vault Enterprise PKCS#11 seal wrap 或 Managed Keys 及其运维前置条件。
+
+### 生产下载密钥交付
+
+保持 `FILE_KEY_DELIVERY_LEGACY_PLAINTEXT_ENABLED=false`。建议从 60 秒 grant TTL、10 秒重试窗口和一次同会话重试开始；任何调整都必须满足启动边界，并以真实 KMS/Redis 延迟为依据。通过 `app.file.key.grant` 的 `operation`、`outcome` 与闭集 `reason` 标签监控 unavailable、denied、replay 和 legacy 活动，但不得把 tenant、file、grant、session、客户端 IP 或 key 值加入标签。
+
+Redis 必须启用生产认证、传输保护、最小权限、高可用和适合 60 秒 grant namespace 的有界淘汰策略；Redis 丢失时加密下载失败关闭。负载均衡、反向代理、CDN、WAF、APM 与 HTTP access log 必须遵守 `Cache-Control: no-store`，不得记录 POST body 或 `X-Download-Session-ID`，也不得缓存 decrypt-info/consume 响应。若限时回滚需要打开 `plaintext-v0`，必须有变更单、每次兼容使用告警，保持硬截止时间不变，并在受影响客户端升级后立即重新关闭。
 
 ### 启动单个服务
 

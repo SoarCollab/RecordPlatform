@@ -393,7 +393,6 @@ flowchart LR
 
 - `getUserFilesListAsync()`
 - `getFileAddressAsync()`
-- `getFileDecryptInfoAsync()`
 
 ## 文件版本链
 

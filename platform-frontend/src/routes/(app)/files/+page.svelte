@@ -11,7 +11,7 @@
     getFiles,
     deleteFile,
     createShare,
-    getDecryptInfo,
+    getFileByHash,
   } from "$api/endpoints/files";
   import {
     FileStatus,
@@ -207,8 +207,8 @@
         if (file.fileSize && file.fileSize > 0) {
           return { ...file, resolvedSize: file.fileSize };
         }
-        const decryptInfo = await getDecryptInfo(file.fileHash);
-        const resolvedSize = Number(decryptInfo.fileSize);
+        const refreshedFile = await getFileByHash(file.fileHash);
+        const resolvedSize = Number(refreshedFile.fileSize);
         if (!Number.isFinite(resolvedSize) || resolvedSize <= 0) {
           throw new Error(
             `文件“${file.fileName}”缺少有效大小信息，无法加入批量下载`,
