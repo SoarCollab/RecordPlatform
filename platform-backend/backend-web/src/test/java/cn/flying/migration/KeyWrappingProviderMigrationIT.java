@@ -55,7 +55,7 @@ class KeyWrappingProviderMigrationIT {
      */
     @Test
     void shouldInstallProviderMetadataOnFreshDatabase() throws SQLException {
-        Flyway latest = configuredFlyway(null);
+        Flyway latest = configuredFlyway(VERSION_1_18);
         latest.migrate();
         assertCurrentVersion(latest, VERSION_1_18);
 

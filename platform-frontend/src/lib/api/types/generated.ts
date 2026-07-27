@@ -260,6 +260,212 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/key-rotation/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the tenant key rotation policy */
+        get: operations["getPolicy"];
+        /** Create or update the tenant key rotation policy */
+        put: operations["savePolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/key-rotation/policy/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable the tenant key rotation policy */
+        post: operations["disablePolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/key-rotation/policy/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause the tenant key rotation policy */
+        post: operations["pausePolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/key-rotation/policy/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume the tenant key rotation policy */
+        post: operations["resumePolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/key-rotation/policy/retirement/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Acknowledge external old-key retirement */
+        post: operations["acknowledgeRetirement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/key-rotation/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List key rotation runs */
+        get: operations["listRuns_1"];
+        put?: never;
+        /** Start a manual key rotation run */
+        post: operations["startRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/key-rotation/runs/{runId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a key rotation run */
+        get: operations["getRun_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/key-rotation/runs/{runId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a key rotation run */
+        post: operations["cancelRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/key-rotation/runs/{runId}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List key rotation run items */
+        get: operations["listItems_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/key-rotation/runs/{runId}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause a key rotation run */
+        post: operations["pauseRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/key-rotation/runs/{runId}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume a key rotation run */
+        post: operations["resumeRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/key-rotation/runs/{runId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry retryable key rotation items */
+        post: operations["retryRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/manifest-backfill-runs": {
         parameters: {
             query?: never;
@@ -4400,6 +4606,153 @@ export interface components {
              */
             targetKeyVersion?: number;
         };
+        /** @description Automated key rotation item cursor page */
+        KeyRotationItemPageVO: {
+            nextCursor?: string;
+            records?: components["schemas"]["KeyRotationItemVO"][];
+        };
+        /** @description Automated key rotation item */
+        KeyRotationItemVO: {
+            /** Format: int32 */
+            attemptCount?: number;
+            failureCategory?: string;
+            fileId?: string;
+            id?: string;
+            /** Format: date-time */
+            nextRetryAt?: string;
+            outcome?: string;
+            recipientType?: string;
+            retryable?: boolean;
+            runId?: string;
+            status?: string;
+            /** Format: date-time */
+            updateTime?: string;
+        };
+        /** @description Automated key rotation policy request */
+        KeyRotationPolicyRequest: {
+            /** Format: int32 */
+            batchSize: number;
+            /**
+             * @description Expected active provider ID
+             * @example vault-transit
+             */
+            expectedProvider?: string;
+            /**
+             * Format: int32
+             * @description Expected provider contract version
+             * @example 1
+             */
+            expectedProviderContract?: number;
+            /**
+             * @description Expected provider-native key version
+             * @example 2
+             */
+            expectedProviderKeyVersion?: string;
+            /** Format: int64 */
+            gracePeriodSeconds: number;
+            /** Format: int64 */
+            initialBackoffSeconds: number;
+            /** Format: int64 */
+            leaseSeconds: number;
+            /** Format: int32 */
+            maxAttempts: number;
+            /** Format: int64 */
+            maxBackoffSeconds: number;
+            /** Format: int32 */
+            maxItemsPerMinute: number;
+            scheduleEnabled: boolean;
+            /** Format: int64 */
+            scheduleIntervalSeconds?: number;
+            /** Format: int32 */
+            targetLogicalKeyVersion: number;
+        };
+        /** @description Automated key rotation policy */
+        KeyRotationPolicyVO: {
+            /** Format: int32 */
+            batchSize?: number;
+            /** Format: int64 */
+            gracePeriodSeconds?: number;
+            id?: string;
+            /** Format: int64 */
+            initialBackoffSeconds?: number;
+            lastRunId?: string;
+            /** Format: int64 */
+            leaseSeconds?: number;
+            /** Format: int32 */
+            maxAttempts?: number;
+            /** Format: int64 */
+            maxBackoffSeconds?: number;
+            /** Format: int32 */
+            maxItemsPerMinute?: number;
+            /** Format: date-time */
+            nextRunAt?: string;
+            /** Format: int64 */
+            policyVersion?: number;
+            /** Format: date-time */
+            retirementAcknowledgedAt?: string;
+            /** Format: date-time */
+            retirementEligibleAt?: string;
+            retirementStatus?: string;
+            scheduleEnabled?: boolean;
+            /** Format: int64 */
+            scheduleIntervalSeconds?: number;
+            status?: string;
+            /** Format: int32 */
+            targetLogicalKeyVersion?: number;
+            targetProvider?: string;
+            /** Format: int32 */
+            targetProviderContract?: number;
+            targetProviderKeyVersion?: string;
+            /** Format: date-time */
+            updateTime?: string;
+        };
+        /** @description Automated key rotation run */
+        KeyRotationRunVO: {
+            /** Format: date-time */
+            completedAt?: string;
+            /** Format: date-time */
+            createTime?: string;
+            discoveryComplete?: boolean;
+            /** Format: int64 */
+            failedCount?: number;
+            id?: string;
+            lastErrorCategory?: string;
+            mode?: string;
+            /** Format: int64 */
+            pendingCount?: number;
+            policyId?: string;
+            /** Format: int64 */
+            remainingCount?: number;
+            /** Format: date-time */
+            retirementEligibleAt?: string;
+            retirementStatus?: string;
+            /** Format: int64 */
+            runningCount?: number;
+            /** Format: int64 */
+            skippedCount?: number;
+            snapshotBoundary?: string;
+            /** Format: date-time */
+            startedAt?: string;
+            status?: string;
+            /** Format: int64 */
+            succeededCount?: number;
+            /** Format: int32 */
+            targetLogicalKeyVersion?: number;
+            targetProvider?: string;
+            /** Format: int32 */
+            targetProviderContract?: number;
+            targetProviderKeyVersion?: string;
+            /** Format: int64 */
+            totalCount?: number;
+            triggerType?: string;
+            /** Format: date-time */
+            updateTime?: string;
+        };
+        /** @description Manual automated key rotation trigger */
+        KeyRotationStartRequest: {
+            mode: string;
+            requestId: string;
+        };
         /** @description 证明包清单 */
         Manifest: {
             /** @description 批量存证号 */
@@ -5325,6 +5678,39 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
+        ResultKeyRotationItemPageVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["KeyRotationItemPageVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultKeyRotationPolicyVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["KeyRotationPolicyVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultKeyRotationRunVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["KeyRotationRunVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
         ResultListAnnouncementVO: {
             /**
              * Format: int32
@@ -5405,6 +5791,18 @@ export interface components {
             code?: number;
             /** @description 结果数据 */
             data?: components["schemas"]["HighFrequencyOperationVO"][];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultListKeyRotationRunVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            /** @description 结果数据 */
+            data?: components["schemas"]["KeyRotationRunVO"][];
             /** @description 提示信息 */
             message?: string;
         };
@@ -6994,6 +7392,311 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultString"];
+                };
+            };
+        };
+    };
+    getPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultKeyRotationPolicyVO"];
+                };
+            };
+        };
+    };
+    savePolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KeyRotationPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultKeyRotationPolicyVO"];
+                };
+            };
+        };
+    };
+    disablePolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultKeyRotationPolicyVO"];
+                };
+            };
+        };
+    };
+    pausePolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultKeyRotationPolicyVO"];
+                };
+            };
+        };
+    };
+    resumePolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultKeyRotationPolicyVO"];
+                };
+            };
+        };
+    };
+    acknowledgeRetirement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultKeyRotationPolicyVO"];
+                };
+            };
+        };
+    };
+    listRuns_1: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultListKeyRotationRunVO"];
+                };
+            };
+        };
+    };
+    startRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KeyRotationStartRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultKeyRotationRunVO"];
+                };
+            };
+        };
+    };
+    getRun_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultKeyRotationRunVO"];
+                };
+            };
+        };
+    };
+    cancelRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultKeyRotationRunVO"];
+                };
+            };
+        };
+    };
+    listItems_1: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultKeyRotationItemPageVO"];
+                };
+            };
+        };
+    };
+    pauseRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultKeyRotationRunVO"];
+                };
+            };
+        };
+    };
+    resumeRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultKeyRotationRunVO"];
+                };
+            };
+        };
+    };
+    retryRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultKeyRotationRunVO"];
                 };
             };
         };

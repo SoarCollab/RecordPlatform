@@ -181,6 +181,27 @@ Authorization: Bearer <token>
 
 默认启用回填 worker，但禁用 apply；引用 mark/delete 均默认关闭，并使用 30 天保护窗口。完整状态、分类和默认值见[分片 Manifest 与历史数据治理](/zh/architecture/chunk-manifest)。
 
+### 管理员自动密钥轮换（`/api/v1/admin/key-rotation`）
+
+所有操作要求管理员角色，并只使用认证上下文中的当前租户。策略/run 响应不返回原始 provider key ID；item 响应不返回 recipient ID 和源/候选 envelope ID。执行 APPLY 或外部 key 退休前先阅读[自动密钥轮换运维手册](../../operations/key-rotation.md)。
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| PUT | `/api/v1/admin/key-rotation/policy` | 创建或替换有界租户策略 |
+| GET | `/api/v1/admin/key-rotation/policy` | 查询脱敏策略与退休状态 |
+| POST | `/api/v1/admin/key-rotation/policy/pause` | 暂停后续调度 |
+| POST | `/api/v1/admin/key-rotation/policy/resume` | 恢复后续调度 |
+| POST | `/api/v1/admin/key-rotation/policy/disable` | 禁用后续调度 |
+| POST | `/api/v1/admin/key-rotation/policy/retirement/acknowledge` | 全部门禁通过后记录外部退休完成 |
+| POST | `/api/v1/admin/key-rotation/runs` | 幂等启动 `DRY_RUN` 或 `APPLY` |
+| GET | `/api/v1/admin/key-rotation/runs` | 查询有界租户运行历史 |
+| GET | `/api/v1/admin/key-rotation/runs/{runId}` | 查询不可变目标与进度计数 |
+| GET | `/api/v1/admin/key-rotation/runs/{runId}/items` | 游标分页查询脱敏 item 结果 |
+| POST | `/api/v1/admin/key-rotation/runs/{runId}/pause` | 暂停持久化 run |
+| POST | `/api/v1/admin/key-rotation/runs/{runId}/resume` | 保留 cursor 和尝试次数恢复 |
+| POST | `/api/v1/admin/key-rotation/runs/{runId}/cancel` | 停止后续发现与领取 |
+| POST | `/api/v1/admin/key-rotation/runs/{runId}/retry` | 重新排队仍标记为 retryable 的终态失败 item |
+
 ### 管理员完整性告警（`/api/v1/admin/integrity-alerts`）
 
 | 方法 | 端点 | 说明 |

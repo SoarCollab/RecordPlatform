@@ -181,6 +181,27 @@ All operations require the admin role and are tenant-isolated. `SCAN` creates a 
 
 The default backfill worker is enabled but apply is disabled. Reference mark/delete are both disabled and use a 30-day protection window. Detailed states, classifications, and defaults are frozen in [Chunk Manifest and Legacy Governance](/en/architecture/chunk-manifest).
 
+### Admin Key Rotation (`/api/v1/admin/key-rotation`)
+
+All operations require the admin role and use only the authenticated tenant. Policy and run responses omit raw provider key IDs; item responses omit recipient and source/candidate envelope IDs. See the [Key Rotation Runbook](../../operations/key-rotation.md) before APPLY or external key retirement.
+
+| Method | Endpoint | Description |
+|------|------|------|
+| PUT | `/api/v1/admin/key-rotation/policy` | Create or replace the bounded tenant policy |
+| GET | `/api/v1/admin/key-rotation/policy` | Read the sanitized policy and retirement state |
+| POST | `/api/v1/admin/key-rotation/policy/pause` | Pause future scheduling |
+| POST | `/api/v1/admin/key-rotation/policy/resume` | Resume future scheduling |
+| POST | `/api/v1/admin/key-rotation/policy/disable` | Disable future scheduling |
+| POST | `/api/v1/admin/key-rotation/policy/retirement/acknowledge` | Record an externally completed retirement after all gates |
+| POST | `/api/v1/admin/key-rotation/runs` | Idempotently start `DRY_RUN` or `APPLY` |
+| GET | `/api/v1/admin/key-rotation/runs` | List bounded tenant run history |
+| GET | `/api/v1/admin/key-rotation/runs/{runId}` | Read immutable target and progress counters |
+| GET | `/api/v1/admin/key-rotation/runs/{runId}/items` | Cursor-page sanitized per-envelope outcomes |
+| POST | `/api/v1/admin/key-rotation/runs/{runId}/pause` | Pause one durable run |
+| POST | `/api/v1/admin/key-rotation/runs/{runId}/resume` | Resume the same cursor and attempts |
+| POST | `/api/v1/admin/key-rotation/runs/{runId}/cancel` | Stop future discovery and claims |
+| POST | `/api/v1/admin/key-rotation/runs/{runId}/retry` | Requeue terminal items still classified as retryable |
+
 ### Admin Integrity Alerts (`/api/v1/admin/integrity-alerts`)
 
 | Method | Endpoint | Description |

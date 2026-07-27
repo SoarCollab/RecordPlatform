@@ -17,6 +17,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -49,6 +50,9 @@ class FileKeyEnvelopeServiceTest {
     @Mock
     private FileKeyAuditLogMapper fileKeyAuditLogMapper;
 
+    @Mock
+    private KeyEnvelopeRotationActivationService rotationActivationService;
+
     private FileKeyEnvelopeProperties properties;
     private LocalKeyWrappingService wrappingService;
     private KeyWrappingProviderRegistry wrappingRegistry;
@@ -64,14 +68,27 @@ class FileKeyEnvelopeServiceTest {
 
     @BeforeEach
     void setUp() {
+        TenantContext.setTenantId(1L);
         properties = new FileKeyEnvelopeProperties();
         properties.setLocalMasterKey("test-master-key-with-enough-entropy");
         wrappingService = new LocalKeyWrappingService(properties);
         wrappingRegistry = new KeyWrappingProviderRegistry(
                 java.util.List.of(wrappingService), properties, new SimpleMeterRegistry());
         suitePolicy = new CryptoSuitePolicyService(properties);
+        org.mockito.Mockito.lenient()
+                .when(rotationActivationService.activateVerifiedCandidate(any(), any(), any(), any(), any()))
+                .thenReturn("SUCCEEDED");
         envelopeService = new FileKeyEnvelopeService(
-                fileKeyEnvelopeMapper, fileKeyAuditLogMapper, wrappingRegistry, properties, suitePolicy);
+                fileKeyEnvelopeMapper, fileKeyAuditLogMapper, wrappingRegistry, properties, suitePolicy,
+                rotationActivationService);
+    }
+
+    /**
+     * Clears tenant state after every test so later suites cannot inherit an authorization boundary.
+     */
+    @AfterEach
+    void clearTenantContext() {
+        TenantContext.clear();
     }
 
     /**
@@ -925,13 +942,17 @@ class FileKeyEnvelopeServiceTest {
                 .setRecipientId(200L)
                 .setKeyVersion(1)
                 .setStatus(FileKeyEnvelopeService.STATUS_ACTIVE);
-        when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(shareEnvelope));
-        ArgumentCaptor<FileKeyEnvelope> updateCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.selectActiveRecipientForUpdate(
+                1L, FileKeyEnvelopeService.RECIPIENT_TYPE_SHARE, 200L))
+                .thenReturn(java.util.List.of(shareEnvelope));
+        when(fileKeyEnvelopeMapper.compareAndSetStatus(
+                1L, 500L, FileKeyEnvelopeService.STATUS_ACTIVE, FileKeyEnvelopeService.STATUS_REVOKED))
+                .thenReturn(1);
 
         envelopeService.revokeShareEnvelopes(share, 100L, "USER_CANCEL_SHARE");
 
-        verify(fileKeyEnvelopeMapper).updateById(updateCaptor.capture());
-        assertEquals(FileKeyEnvelopeService.STATUS_REVOKED, updateCaptor.getValue().getStatus());
+        verify(fileKeyEnvelopeMapper).compareAndSetStatus(
+                1L, 500L, FileKeyEnvelopeService.STATUS_ACTIVE, FileKeyEnvelopeService.STATUS_REVOKED);
         verify(fileKeyAuditLogMapper).insert(any(FileKeyAuditLog.class));
     }
 
@@ -957,13 +978,17 @@ class FileKeyEnvelopeServiceTest {
                 .setRecipientId(300L)
                 .setKeyVersion(1)
                 .setStatus(FileKeyEnvelopeService.STATUS_ACTIVE);
-        when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(friendShareEnvelope));
-        ArgumentCaptor<FileKeyEnvelope> updateCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.selectActiveRecipientForUpdate(
+                1L, FileKeyEnvelopeService.RECIPIENT_TYPE_FRIEND_SHARE, 300L))
+                .thenReturn(java.util.List.of(friendShareEnvelope));
+        when(fileKeyEnvelopeMapper.compareAndSetStatus(
+                1L, 600L, FileKeyEnvelopeService.STATUS_ACTIVE, FileKeyEnvelopeService.STATUS_REVOKED))
+                .thenReturn(1);
 
         envelopeService.revokeFriendShareEnvelopes(share, 100L, "USER_CANCEL_FRIEND_SHARE");
 
-        verify(fileKeyEnvelopeMapper).updateById(updateCaptor.capture());
-        assertEquals(FileKeyEnvelopeService.STATUS_REVOKED, updateCaptor.getValue().getStatus());
+        verify(fileKeyEnvelopeMapper).compareAndSetStatus(
+                1L, 600L, FileKeyEnvelopeService.STATUS_ACTIVE, FileKeyEnvelopeService.STATUS_REVOKED);
         verify(fileKeyAuditLogMapper).insert(any(FileKeyAuditLog.class));
     }
 
@@ -996,24 +1021,63 @@ class FileKeyEnvelopeServiceTest {
         clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
         properties.setKeyVersion(2);
         when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(previousEnvelope));
-        when(fileKeyEnvelopeMapper.selectCount(any())).thenReturn(0L);
+        when(fileKeyEnvelopeMapper.selectById(501L)).thenReturn(previousEnvelope);
         when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
 
         KeyEnvelopeRotationResult rotation = envelopeService.rotateActiveFileEnvelopes(file, 900L, "ROTATE_TEST");
 
         assertEquals(1, rotation.rotatedCount());
         assertEquals(0, rotation.skippedCount());
-        verify(fileKeyEnvelopeMapper).updateById(any(FileKeyEnvelope.class));
+        verify(rotationActivationService).activateVerifiedCandidate(
+                org.mockito.ArgumentMatchers.eq(1L), org.mockito.ArgumentMatchers.eq(501L),
+                any(), any(), org.mockito.ArgumentMatchers.eq(2));
         verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
         FileKeyEnvelope rotatedEnvelope = envelopeCaptor.getValue().setId(502L);
         assertEquals(2, rotatedEnvelope.getKeyVersion());
+        assertEquals(FileKeyEnvelopeService.STATUS_PENDING_VERIFICATION, rotatedEnvelope.getStatus());
 
         clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
         when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(rotatedEnvelope));
+        when(fileKeyEnvelopeMapper.selectById(502L)).thenReturn(rotatedEnvelope);
         KeyEnvelopeRotationResult secondRotation = envelopeService.rotateActiveFileEnvelopes(file, 900L, "ROTATE_TEST");
 
         assertEquals(0, secondRotation.rotatedCount());
         assertEquals(1, secondRotation.skippedCount());
+    }
+
+    /**
+     * Verifies automated rotation returns stable idempotent outcomes before any provider operation.
+     */
+    @Test
+    void shouldHandleInvalidMissingRevokedAndAlreadyActivatedAutomationSources() {
+        WrappingKeyReference target = wrappingRegistry.activeKeyReference(1).requireValue();
+        FileKeyEnvelope revoked = new FileKeyEnvelope()
+                .setId(502L)
+                .setTenantId(1L)
+                .setStatus(FileKeyEnvelopeService.STATUS_REVOKED);
+        FileKeyEnvelope superseded = new FileKeyEnvelope()
+                .setId(503L)
+                .setTenantId(1L)
+                .setStatus(FileKeyEnvelopeService.STATUS_SUPERSEDED);
+        FileKeyEnvelope activated = new FileKeyEnvelope()
+                .setId(603L)
+                .setTenantId(1L)
+                .setStatus(FileKeyEnvelopeService.STATUS_ACTIVE);
+        when(fileKeyEnvelopeMapper.selectById(501L)).thenReturn(null);
+        when(fileKeyEnvelopeMapper.selectById(502L)).thenReturn(revoked);
+        when(fileKeyEnvelopeMapper.selectById(503L)).thenReturn(superseded);
+        when(fileKeyEnvelopeMapper.selectById(603L)).thenReturn(activated);
+
+        assertEquals("INVALID_REQUEST", envelopeService.rotateEnvelopeForAutomation(
+                null, 601L, target, 1, 900L, "ROTATE_INVALID").failureCategory().name());
+        assertEquals("SKIPPED_SOURCE_CHANGED", envelopeService.rotateEnvelopeForAutomation(
+                501L, 601L, target, 1, 900L, "ROTATE_MISSING").outcome());
+        assertEquals("SKIPPED_REVOKED", envelopeService.rotateEnvelopeForAutomation(
+                502L, 602L, target, 1, 900L, "ROTATE_REVOKED").outcome());
+        AutomatedEnvelopeRotationResult replay = envelopeService.rotateEnvelopeForAutomation(
+                503L, 603L, target, 1, 900L, "ROTATE_REPLAY");
+        assertEquals("SUCCEEDED", replay.outcome());
+        assertEquals(603L, replay.candidateEnvelopeId());
     }
 
     /**
@@ -1108,7 +1172,7 @@ class FileKeyEnvelopeServiceTest {
         properties.setKmsKeyId("local-key-b");
         properties.getProviders().getLocal().setHistoricalKeyIds(Set.of("local-key-a"));
         when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(previous));
-        when(fileKeyEnvelopeMapper.selectCount(any())).thenReturn(0L);
+        when(fileKeyEnvelopeMapper.selectById(501L)).thenReturn(previous);
         when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
 
         KeyEnvelopeRotationResult rotation = envelopeService.rotateActiveFileEnvelopes(file, 900L, "ROTATE_KEY_ID");
@@ -1138,7 +1202,7 @@ class FileKeyEnvelopeServiceTest {
         clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
         properties.setKeyVersion(2);
         when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(previous));
-        when(fileKeyEnvelopeMapper.selectCount(any())).thenReturn(0L);
+        when(fileKeyEnvelopeMapper.selectById(501L)).thenReturn(previous);
 
         assertThatThrownBy(() -> envelopeService.rotateActiveFileEnvelopes(file, 900L, "ROTATE_FAIL"))
                 .isInstanceOf(GeneralException.class);
@@ -1161,7 +1225,8 @@ class FileKeyEnvelopeServiceTest {
                 fileKeyAuditLogMapper,
                 registry,
                 properties,
-                suitePolicy);
+                suitePolicy,
+                rotationActivationService);
         File file = new File().setId(10L).setTenantId(1L).setUid(100L).setFileHash("hash-1");
         WrappingContext sourceContext = new WrappingContext(
                 1L,
@@ -1196,14 +1261,14 @@ class FileKeyEnvelopeServiceTest {
                 .setStatus(FileKeyEnvelopeService.STATUS_ACTIVE)
                 .setDeleted(0);
         when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(previous));
-        when(fileKeyEnvelopeMapper.selectCount(any())).thenReturn(0L);
+        when(fileKeyEnvelopeMapper.selectById(501L)).thenReturn(previous);
         when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
 
         KeyEnvelopeRotationResult result = service.rotateActiveFileEnvelopes(file, 900L, "NATIVE_REWRAP");
 
         assertEquals(1, result.rotatedCount());
         assertEquals(1, provider.rewrapCalls);
-        assertEquals(0, provider.unwrapCalls);
+        assertEquals(2, provider.unwrapCalls);
         assertEquals(0, provider.wrapCalls);
         ArgumentCaptor<FileKeyEnvelope> inserted = ArgumentCaptor.forClass(FileKeyEnvelope.class);
         verify(fileKeyEnvelopeMapper).insert(inserted.capture());
@@ -1230,6 +1295,7 @@ class FileKeyEnvelopeServiceTest {
         clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
         properties.setKeyVersion(2);
         when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(previous));
+        when(fileKeyEnvelopeMapper.selectById(501L)).thenReturn(previous);
 
         assertThatThrownBy(() -> envelopeService.rotateActiveFileEnvelopes(file, 900L, "UNKNOWN_CONTEXT"))
                 .isInstanceOf(GeneralException.class);
@@ -1258,6 +1324,7 @@ class FileKeyEnvelopeServiceTest {
 
         clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
         when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(tampered));
+        when(fileKeyEnvelopeMapper.selectById(501L)).thenReturn(tampered);
 
         assertThatThrownBy(() -> envelopeService.rotateActiveFileEnvelopes(
                 file, 900L, "TAMPERED_IDEMPOTENT_ROTATION"))
@@ -1318,8 +1385,7 @@ class FileKeyEnvelopeServiceTest {
         @Override
         public KeyWrappingResult<PlaintextDataKey> unwrap(KeyUnwrapRequest request) {
             unwrapCalls++;
-            return KeyWrappingResult.failure(KeyWrappingFailure.of(
-                    KeyWrappingFailureCategory.INTERNAL, false));
+            return KeyWrappingResult.success(PlaintextDataKey.of("serialized-key"));
         }
 
         @Override

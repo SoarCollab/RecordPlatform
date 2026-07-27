@@ -240,6 +240,14 @@ file:
       - RP-MERKLE-SHA256-V1
     deprecated-suites: []
 
+# Automated envelope rotation is opt-in; durable tenant policies own business limits.
+key:
+  rotation:
+    enabled: ${KEY_ROTATION_ENABLED:false}
+    poll-interval-ms: ${KEY_ROTATION_POLL_INTERVAL_MS:30000}
+    initial-delay-ms: ${KEY_ROTATION_INITIAL_DELAY_MS:30000}
+    max-tenants-per-poll: ${KEY_ROTATION_MAX_TENANTS_PER_POLL:100}
+
 # Quota governance configuration
 quota:
   enforcement-mode: SHADOW
