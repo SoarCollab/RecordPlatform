@@ -2,6 +2,7 @@ package cn.flying.service.proof.signed;
 
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.service.key.CryptoSuiteIds;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -22,7 +23,7 @@ import java.util.regex.Pattern;
  */
 @Service
 @RequiredArgsConstructor
-public class LocalEd25519ProofSigningProvider implements ProofSigningProvider {
+public class LocalEd25519ProofSigningProvider implements ProofSigningProviderAdapter {
 
     private static final String JCA_ALGORITHM = "Ed25519";
     private static final String JWS_ALGORITHM = "EdDSA";
@@ -34,6 +35,60 @@ public class LocalEd25519ProofSigningProvider implements ProofSigningProvider {
 
     private final ProofSigningProperties properties;
     private final ProofCanonicalizer canonicalizer;
+
+    /**
+     * Returns the stable local Ed25519 provider identity.
+     */
+    @Override
+    public String providerId() {
+        return CryptoSuiteIds.LOCAL_ED25519_PROVIDER;
+    }
+
+    /**
+     * Returns the initial provider contract version.
+     */
+    @Override
+    public int contractVersion() {
+        return CryptoSuiteIds.PROVIDER_CONTRACT_V1;
+    }
+
+    /**
+     * Returns the exact JWS Ed25519 signature suite implemented by this provider.
+     */
+    @Override
+    public String signatureSuite() {
+        return CryptoSuiteIds.ED25519_JWS_V1;
+    }
+
+    /**
+     * Returns the frozen signed-proof format supported by this provider.
+     */
+    @Override
+    public java.util.Set<String> proofSuites() {
+        return java.util.Set.of(CryptoSuiteIds.SIGNED_PROOF_ZIP_V2);
+    }
+
+    /**
+     * Reports whether the configured key pair is executable without exposing its identity or public material.
+     */
+    @Override
+    public ProofSigningProviderDiagnostic diagnostics() {
+        if (!properties.isEnabled()) {
+            return new ProofSigningProviderDiagnostic(
+                    providerId(), contractVersion(), signatureSuite(), proofSuites(),
+                    false, "disabled");
+        }
+        try {
+            loadActiveKey();
+            return new ProofSigningProviderDiagnostic(
+                    providerId(), contractVersion(), signatureSuite(), proofSuites(),
+                    true, "configured");
+        } catch (GeneralException exception) {
+            return new ProofSigningProviderDiagnostic(
+                    providerId(), contractVersion(), signatureSuite(), proofSuites(),
+                    false, "invalid_configuration");
+        }
+    }
 
     /**
      * 仅检查全局导出开关，使应急禁用同时覆盖新签发和历史重建。
@@ -165,6 +220,10 @@ public class LocalEd25519ProofSigningProvider implements ProofSigningProvider {
 
             String publicKeySpki = Base64.getEncoder().encodeToString(publicKey.getEncoded());
             ProofSigningKeyMetadata metadata = new ProofSigningKeyMetadata(
+                    providerId(),
+                    contractVersion(),
+                    signatureSuite(),
+                    CryptoSuiteIds.SIGNED_PROOF_ZIP_V2,
                     JWS_ALGORITHM,
                     properties.getKeyId(),
                     properties.getKeyVersion(),

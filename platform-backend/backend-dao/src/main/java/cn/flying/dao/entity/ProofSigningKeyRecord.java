@@ -33,6 +33,14 @@ public class ProofSigningKeyRecord implements Serializable {
 
     private Integer keyVersion;
 
+    private String signingProvider;
+
+    private Integer signingProviderContract;
+
+    private String signatureSuite;
+
+    private String proofSuite;
+
     private String signatureAlgorithm;
 
     private String publicKeySpki;

@@ -5,6 +5,7 @@ import cn.flying.common.exception.GeneralException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.time.Instant;
 import java.util.LinkedHashSet;
@@ -34,7 +35,11 @@ class CryptoSuitePolicyServiceTest {
         properties = new FileKeyEnvelopeProperties();
         properties.setSupportedAlgorithmSuites(
                 new LinkedHashSet<>(Set.of(LEGACY_SUITE, FRAMED_SUITE)));
-        policyService = new CryptoSuitePolicyService(properties);
+        CryptoAgilityProperties agilityProperties = new CryptoAgilityProperties();
+        CryptoSuiteRegistry suiteRegistry = new CryptoSuiteRegistry(
+                agilityProperties, new SimpleMeterRegistry());
+        policyService = new CryptoSuitePolicyService(
+                properties, agilityProperties, suiteRegistry, null, null);
     }
 
     /**
@@ -94,5 +99,17 @@ class CryptoSuitePolicyServiceTest {
 
         assertThat(error.getResultEnum()).isEqualTo(ResultEnum.PARAM_ERROR);
         assertThat(error.getData()).asString().contains("当前密码套件已废弃");
+    }
+
+    /**
+     * Proves rejected nullable policy fields still produce deterministic non-secret audit fingerprints.
+     */
+    @Test
+    void fingerprint_shouldHandleRejectedNullableFields() {
+        CryptoSuitePolicySnapshot invalid = new CryptoSuitePolicySnapshot(
+                1L, 1L, null, null, null, null, null, 0, null, null, null, 0);
+
+        assertThat(policyService.fingerprint(invalid)).matches("[0-9a-f]{64}");
+        assertThat(policyService.fingerprint(invalid)).isEqualTo(policyService.fingerprint(invalid));
     }
 }

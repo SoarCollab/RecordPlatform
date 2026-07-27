@@ -14,14 +14,16 @@ public record FileParamEnvelopeResult(
         String proofSuite,
         String encryptionAlgorithm,
         Integer keyVersion,
-        String deprecatedAfter
+        String deprecatedAfter,
+        WrappingKeyReference wrappingTarget
 ) {
 
     /**
      * Creates a result for metadata that does not require envelope persistence.
      */
     public static FileParamEnvelopeResult withoutEnvelope(String fileParam) {
-        return new FileParamEnvelopeResult(fileParam, null, null, null, null, null, null, null, null);
+        return new FileParamEnvelopeResult(
+                fileParam, null, null, null, null, null, null, null, null, null);
     }
 
     /**

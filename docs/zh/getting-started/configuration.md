@@ -319,6 +319,29 @@ file:
 
 应用 token 只需对目标 key 的 `transit/encrypt`、`transit/decrypt`、`transit/rewrap` 路径拥有 `update` 能力。所有历史信封完成轮换前必须保留旧 provider/key 版本。context 绑定、迁移与 HSM 部署边界见[密钥管理安全文档](../../security/key-management.md)，dry-run、APPLY、恢复、告警和退休流程见[自动密钥轮换运维手册](../../operations/key-rotation.md)。
 
+## 运行时密码敏捷
+
+`crypto.agility` 只从内建闭集目录中选择真实实现；在配置中写入未知 suite/provider 不会动态加载算法，而会在启动或操作时失败关闭：
+
+```yaml
+crypto:
+  agility:
+    production-mode: true
+    allow-experimental-writes: false
+    signing-provider: local-ed25519
+    signing-provider-contract-version: 1
+    signed-proof-signature-suite: JWS-EDDSA-ED25519-V1
+    signed-proof-suite: RP-SIGNED-PROOF-ZIP-V2
+    suite-lifecycle:
+      RP-AES256-GCM-CHUNK-CHAIN-V1:
+        deprecated-at: 2027-01-01T00:00:00Z
+        disabled-at: 2028-01-01T00:00:00Z
+```
+
+环境变量为 `CRYPTO_AGILITY_PRODUCTION_MODE`、`CRYPTO_AGILITY_ALLOW_EXPERIMENTAL_WRITES`、`CRYPTO_AGILITY_SIGNING_PROVIDER`、`CRYPTO_AGILITY_SIGNING_PROVIDER_CONTRACT_VERSION`、`CRYPTO_AGILITY_SIGNED_PROOF_SIGNATURE_SUITE` 和 `CRYPTO_AGILITY_SIGNED_PROOF_SUITE`。生产必须保持 `production-mode=true` 和 `allow-experimental-writes=false`。当前 ML-DSA/ML-KEM 条目没有 executable provider 且永久拒绝生产写入；打开 experimental 开关也不会把它们变成已实现能力。
+
+租户管理员通过 `/api/v1/admin/crypto-agility` 用 optimistic `expectedVersion` 管理新写策略和读取脱敏 diagnostics。历史 envelope/proof 始终按持久化 provider/contract/suite 路由，不读取当前默认。操作顺序与回滚边界见[运行时密码敏捷运维手册](../../operations/crypto-agility.md)。
+
 ## 前端配置
 
 前端环境变量 (`platform-frontend/.env`):

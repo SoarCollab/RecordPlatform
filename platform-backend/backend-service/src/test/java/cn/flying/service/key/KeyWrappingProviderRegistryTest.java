@@ -73,6 +73,21 @@ class KeyWrappingProviderRegistryTest {
     }
 
     /**
+     * 验证 provider 必须声明非空的闭集算法能力，不能通过空集合充当通配符。
+     */
+    @Test
+    void shouldRejectProviderWithoutDeclaredAlgorithms() {
+        FileKeyEnvelopeProperties properties = new FileKeyEnvelopeProperties();
+        properties.setActiveProvider("test-provider");
+
+        assertThatThrownBy(() -> new KeyWrappingProviderRegistry(
+                List.of(new TrackingProvider("test-provider", 1, Set.of())),
+                properties,
+                new SimpleMeterRegistry()))
+                .isInstanceOf(GeneralException.class);
+    }
+
+    /**
      * 验证未知历史 provider 失败关闭且不会路由 active provider。
      */
     @Test
@@ -109,6 +124,28 @@ class KeyWrappingProviderRegistryTest {
 
         KeyWrappingResult<PlaintextDataKey> result = registry.unwrap(new KeyUnwrapRequest(
                 new PersistedWrappedDataKey("cipher", "iv", unknownVersion, 1),
+                context(WrappingContext.LOCAL_AAD_V1, 1)));
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.failure().category()).isEqualTo(KeyWrappingFailureCategory.CONFIGURATION);
+        assertThat(provider.unwrapCalls).isZero();
+    }
+
+    /**
+     * 验证已知 provider 与 contract 也不能解封未声明的持久化算法。
+     */
+    @Test
+    void shouldFailClosedForUnsupportedPersistedAlgorithm() {
+        FileKeyEnvelopeProperties properties = new FileKeyEnvelopeProperties();
+        properties.setActiveProvider("test-provider");
+        TrackingProvider provider = new TrackingProvider("test-provider", 1);
+        KeyWrappingProviderRegistry registry = new KeyWrappingProviderRegistry(
+                List.of(provider), properties, new SimpleMeterRegistry());
+        WrappingKeyReference unsupported = new WrappingKeyReference(
+                "test-provider", 1, "key", "1", "UNDECLARED", WrappingContext.LOCAL_AAD_V1);
+
+        KeyWrappingResult<PlaintextDataKey> result = registry.unwrap(new KeyUnwrapRequest(
+                new PersistedWrappedDataKey("cipher", "iv", unsupported, 1),
                 context(WrappingContext.LOCAL_AAD_V1, 1)));
 
         assertThat(result.isSuccess()).isFalse();
@@ -169,11 +206,17 @@ class KeyWrappingProviderRegistryTest {
 
         private final String providerId;
         private final int contractVersion;
+        private final Set<String> algorithms;
         private int unwrapCalls;
 
         private TrackingProvider(String providerId, int contractVersion) {
+            this(providerId, contractVersion, Set.of("TEST"));
+        }
+
+        private TrackingProvider(String providerId, int contractVersion, Set<String> algorithms) {
             this.providerId = providerId;
             this.contractVersion = contractVersion;
+            this.algorithms = algorithms;
         }
 
         @Override
@@ -189,6 +232,11 @@ class KeyWrappingProviderRegistryTest {
         @Override
         public Set<KeyWrappingCapability> capabilities() {
             return Set.of(KeyWrappingCapability.WRAP, KeyWrappingCapability.UNWRAP);
+        }
+
+        @Override
+        public Set<String> supportedWrappingAlgorithms() {
+            return algorithms;
         }
 
         @Override

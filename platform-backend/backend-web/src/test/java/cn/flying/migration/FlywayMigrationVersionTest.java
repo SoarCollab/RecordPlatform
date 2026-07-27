@@ -51,6 +51,7 @@ class FlywayMigrationVersionTest {
         assertTrue(migrationFiles.contains("V1.17.0__manifest_backfill_governance.sql"));
         assertTrue(migrationFiles.contains("V1.18.0__key_wrapping_provider_metadata.sql"));
         assertTrue(migrationFiles.contains("V1.19.0__automated_key_rotation.sql"));
+        assertTrue(migrationFiles.contains("V1.20.0__runtime_crypto_agility.sql"));
         assertFalse(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
         assertFalse(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
 
@@ -94,6 +95,26 @@ class FlywayMigrationVersionTest {
         assertTrue(normalizedSql.contains("`claim_token` VARCHAR(64)"));
         assertTrue(normalizedSql.contains("`lease_expires_at` DATETIME"));
         assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `key_rotation_audit_log`"));
+        assertFalse(normalizedSql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
+    }
+
+    /**
+     * Proves V1.20 backfills explicit routing identities before enforcing tenant-safe policy governance.
+     */
+    @Test
+    void shouldAddRuntimeCryptoAgilityThroughForwardMigration() throws IOException {
+        String sql = Files.readString(resolveMigrationDir().resolve(
+                "V1.20.0__runtime_crypto_agility.sql"));
+        String normalizedSql = sql.replaceAll("\\s+", " ").trim();
+
+        assertTrue(normalizedSql.contains("SET `signature_suite` = 'UNSIGNED-V1'"));
+        assertTrue(normalizedSql.contains("SET `kem_suite` = 'NONE-V1'"));
+        assertTrue(normalizedSql.contains("SET `proof_suite` = 'RP-MERKLE-SHA256-V1'"));
+        assertTrue(normalizedSql.contains("ADD COLUMN `signing_provider` VARCHAR(64) NOT NULL DEFAULT 'local-ed25519'"));
+        assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `tenant_crypto_policy`"));
+        assertTrue(normalizedSql.contains("UNIQUE KEY `uk_tenant_crypto_policy_identity` (`tenant_id`, `id`)"));
+        assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `tenant_crypto_policy_audit`"));
+        assertTrue(normalizedSql.contains("FOREIGN KEY (`tenant_id`, `policy_id`) REFERENCES `tenant_crypto_policy` (`tenant_id`, `id`)"));
         assertFalse(normalizedSql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
     }
 

@@ -202,6 +202,18 @@ Authorization: Bearer <token>
 | POST | `/api/v1/admin/key-rotation/runs/{runId}/cancel` | 停止后续发现与领取 |
 | POST | `/api/v1/admin/key-rotation/runs/{runId}/retry` | 重新排队仍标记为 retryable 的终态失败 item |
 
+### 管理员运行时密码敏捷（`/api/v1/admin/crypto-agility`）
+
+所有操作要求当前租户管理员。响应只包含 stable suite/provider/contract、生命周期、能力和策略指纹，不返回 key ID、token、wrapped blob、私钥或 recipient。更新使用 optimistic `expectedVersion`；`0` 表示首次创建租户覆盖。
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/v1/admin/crypto-agility/policy` | 查询当前租户有效策略和 SHA-256 指纹 |
+| PUT | `/api/v1/admin/crypto-agility/policy` | 按期望版本创建或更新新写策略 |
+| GET | `/api/v1/admin/crypto-agility/diagnostics` | 查询闭集 suite 生命周期和脱敏 provider 能力 |
+
+历史 envelope/proof 不读取当前默认，而按持久化 provider/contract/suite 精确路由。弃用、禁用、迁移与回滚顺序见[运行时密码敏捷运维手册](../../operations/crypto-agility.md)。
+
 ### 管理员完整性告警（`/api/v1/admin/integrity-alerts`）
 
 | 方法 | 端点 | 说明 |

@@ -202,6 +202,18 @@ All operations require the admin role and use only the authenticated tenant. Pol
 | POST | `/api/v1/admin/key-rotation/runs/{runId}/cancel` | Stop future discovery and claims |
 | POST | `/api/v1/admin/key-rotation/runs/{runId}/retry` | Requeue terminal items still classified as retryable |
 
+### Admin Runtime Crypto Agility (`/api/v1/admin/crypto-agility`)
+
+All operations require the current tenant's admin role. Responses contain only stable suite/provider/contract identities, lifecycle, capabilities, and policy fingerprints; they omit key IDs, tokens, wrapped blobs, private keys, and recipients. Updates use an optimistic `expectedVersion`; zero creates the first tenant override.
+
+| Method | Endpoint | Description |
+|------|------|------|
+| GET | `/api/v1/admin/crypto-agility/policy` | Read the effective tenant policy and SHA-256 fingerprint |
+| PUT | `/api/v1/admin/crypto-agility/policy` | Create or update the new-write policy at the expected version |
+| GET | `/api/v1/admin/crypto-agility/diagnostics` | Read closed suite lifecycle and sanitized provider capabilities |
+
+Historical envelopes and proofs route strictly by persisted provider/contract/suite identities, not current defaults. See the [Runtime Crypto Agility Runbook](../../operations/crypto-agility.md) for deprecation, disablement, migration, and rollback sequencing.
+
 ### Admin Integrity Alerts (`/api/v1/admin/integrity-alerts`)
 
 | Method | Endpoint | Description |

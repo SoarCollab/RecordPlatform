@@ -319,6 +319,29 @@ file:
 
 The application token needs only `update` capability on the selected key's `transit/encrypt`, `transit/decrypt`, and `transit/rewrap` paths. Keep old provider/key versions available until every historical envelope has been rotated. See [Key Management Security](../../security/key-management.md) for context binding, migration, and HSM deployment boundaries, and the [Key Rotation Runbook](../../operations/key-rotation.md) for dry-run, APPLY, recovery, alert, and retirement procedures.
 
+## Runtime Crypto Agility
+
+`crypto.agility` selects only from the closed built-in catalog of executable capabilities. Naming an unknown suite or provider does not load an algorithm dynamically; startup or the operation fails closed:
+
+```yaml
+crypto:
+  agility:
+    production-mode: true
+    allow-experimental-writes: false
+    signing-provider: local-ed25519
+    signing-provider-contract-version: 1
+    signed-proof-signature-suite: JWS-EDDSA-ED25519-V1
+    signed-proof-suite: RP-SIGNED-PROOF-ZIP-V2
+    suite-lifecycle:
+      RP-AES256-GCM-CHUNK-CHAIN-V1:
+        deprecated-at: 2027-01-01T00:00:00Z
+        disabled-at: 2028-01-01T00:00:00Z
+```
+
+The environment variables are `CRYPTO_AGILITY_PRODUCTION_MODE`, `CRYPTO_AGILITY_ALLOW_EXPERIMENTAL_WRITES`, `CRYPTO_AGILITY_SIGNING_PROVIDER`, `CRYPTO_AGILITY_SIGNING_PROVIDER_CONTRACT_VERSION`, `CRYPTO_AGILITY_SIGNED_PROOF_SIGNATURE_SUITE`, and `CRYPTO_AGILITY_SIGNED_PROOF_SUITE`. Production must keep `production-mode=true` and `allow-experimental-writes=false`. The current ML-DSA/ML-KEM entries have no executable provider and always reject production writes; enabling the experimental switch does not turn them into implemented capabilities.
+
+Tenant administrators use `/api/v1/admin/crypto-agility` with an optimistic `expectedVersion` to govern new writes and inspect sanitized diagnostics. Historical envelopes and proofs always route by their persisted provider/contract/suite identities rather than current defaults. See the [Runtime Crypto Agility Runbook](../../operations/crypto-agility.md) for rollout and rollback boundaries.
+
 ## Frontend Configuration
 
 Frontend environment variables (`platform-frontend/.env`):

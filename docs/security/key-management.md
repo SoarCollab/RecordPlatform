@@ -13,6 +13,21 @@ RecordPlatform 使用 provider-neutral 的文件数据密钥包封边界。文�
 
 新写入只使用显式配置的 active provider。历史读取严格按信封中持久化的 `(kms_provider, provider_contract_version)` 路由，未知 provider、合同版本或 context schema 会失败关闭，不会猜测或回退到 local。
 
+P3-3 在 provider 边界之上增加闭集运行时 suite registry 和租户策略。当前真正可执行的能力如下；目录中出现不等于实现可用：
+
+| 类型 | Stable suite ID | Provider/合同 | 新写 | 历史读 |
+|---|---|---|---|---|
+| 内容加密 | `RP-AES256-GCM-CHUNK-CHAIN-V1` | `file-content`/1 | 支持 | 支持 |
+| 内容加密 | `RP-AES256-GCM-FRAMED-V2` | `file-content`/2 | 支持 | 支持 |
+| 密钥包封 | `AES-256-GCM` | `local`/1 | 支持 | 支持 |
+| 密钥包封 | `VAULT-TRANSIT-AES256-GCM96-DERIVED` | `vault-transit`/1 | 支持 | 支持 |
+| 信封签名/KEM | `UNSIGNED-V1` / `NONE-V1` | `none`/1 | 支持 | 支持 |
+| 结构证明 | `RP-MERKLE-SHA256-V1` | `merkle-local`/1 | 支持 | 支持 |
+| 签名证明 | `JWS-EDDSA-ED25519-V1` + `RP-SIGNED-PROOF-ZIP-V2` | `local-ed25519`/1 | 支持 | 支持 |
+| PQC/KEM 草案 | `ML-DSA-65-DRAFT` / `ML-KEM-768-DRAFT` | `unimplemented-pqc`/0 | 禁止 | 禁止 |
+
+ML-DSA/ML-KEM 只用于显式呈现“尚未实现”的评估边界。即使把 `allow-experimental-writes` 设为 `true`，没有 executable provider 且 `productionWriteAllowed=false` 的条目仍不能被选择，不能据此声明 PQC 支持。
+
 ## 1. 信封与上下文合同
 
 ### 1.1 持久化字段
@@ -149,6 +164,8 @@ Vault 没有可依赖的公开 disabled-key 独立状态码，因此实现不会
 
 Micrometer 指标只使用低基数标签 `provider`、`operation`、`outcome` 和 `failure_category`。Actuator health 只暴露 active provider ID、合同版本、能力列表、availability 和安全配置状态，不使用 `Health.withException`。
 
+Suite 决策指标为 `app.crypto.suite.decision`，标签只包含 `type`、`operation`、`outcome` 和闭集 `reason`；proof provider 分派指标为 `app.crypto.proof_signing.decision`。两者都不允许 tenant、file、key ID、任意请求 suite 文本或 provider 错误体成为标签。稳定失败原因区分 `UNKNOWN_SUITE`、`TYPE_MISMATCH`、`PROVIDER_MISMATCH`、`UNSUPPORTED`、`EXPERIMENTAL_NOT_ALLOWED`、`DEPRECATED_FOR_WRITE`、`DISABLED_FOR_READ`、`DOWNGRADE_BLOCKED` 和 `REENCRYPT_REQUIRED`。
+
 日志脱敏器覆盖 `encryptedDataKey`、`wrappingIv`、`kmsKeyId`/`keyId`、`ciphertext`、Vault token 和 wrapping context 等字段。密钥模型的 `toString()` 对 plaintext、ciphertext、IV 和 key ID 进行固定脱敏。
 
 ## 5. 自动轮换与事务语义
@@ -172,9 +189,37 @@ Micrometer 指标只使用低基数标签 `provider`、`operation`、`outcome` �
 
 dry-run 只记录候选，不调用 provider、不改变信封，也不会覆盖上一轮 APPLY 的退休资格。pause/resume 保留 cursor 和尝试次数；cancel 只阻止后续发现/领取，已进入 provider 调用的 item 按 claim fence 收敛；显式 retry 只重置仍被稳定分类为 retryable 的失败项尝试计数，非重试分类修复后必须创建新的 run。
 
-## 6. 数据库迁移与恢复
+## 6. 运行时策略与弃用治理
 
-`V1.18.0__key_wrapping_provider_metadata.sql` 增加 provider-neutral 元数据；`V1.19.0__automated_key_rotation.sql` 在其后前向增加自动轮换治理：
+租户管理员通过 `/api/v1/admin/crypto-agility` 管理当前租户策略：
+
+- `GET /policy` 返回当前有效策略；没有 tenant row 时 `policyVersion=0`，表示使用已启动校验的 operator defaults；
+- `PUT /policy` 必须携带 `expectedVersion`，首次创建为 `0`；过期版本返回稳定的 `POLICY_VERSION_CONFLICT`，不会局部更新；
+- `GET /diagnostics` 返回 suite 生命周期、provider 合同/能力和当前策略指纹，不返回 key ID、wrapped blob、token、私钥、公钥内容或 recipient；
+- 所有入口要求当前租户管理员，写入请求体不进入 `OperationLog`；成功和失败写入 `tenant_crypto_policy_audit` 时只保留策略 SHA-256 指纹和闭集原因。
+
+新信封和新 proof 使用一次性解析的当前租户策略。历史信封/proof 只按记录中持久化的 suite/provider/contract 路由；修改默认值或租户策略不会重解释历史 ciphertext/JWS。`DEPRECATED` 允许历史读但拒绝新写，`DISABLED` 同时拒绝读写。未知 ID、类型混用、provider 合同漂移或能力不一致不会回退到当前默认。
+
+Operator 可在 `crypto.agility.suite-lifecycle` 中仅收紧内建条目。例如：
+
+```yaml
+crypto:
+  agility:
+    production-mode: true
+    allow-experimental-writes: false
+    suite-lifecycle:
+      RP-AES256-GCM-CHUNK-CHAIN-V1:
+        deprecated-at: 2027-01-01T00:00:00Z
+        disabled-at: 2028-01-01T00:00:00Z
+```
+
+未知条目、把 experimental/unsupported 提升为 active、早于 introduced time 的窗口或 `disabledAt < deprecatedAt` 会阻止启动。内容套件从 chunk-chain v1 切换为 framed v2 需要重新加密内容，不能通过 envelope rewrap 伪装完成；local 与 Vault wrapping suite 间允许迁移，但仍要遵守 P3-2 的候选验证和 active CAS。
+
+详细变更步骤、诊断和回滚门禁见[运行时密码敏捷运维手册](../operations/crypto-agility.md)。
+
+## 7. 数据库迁移与恢复
+
+`V1.18.0__key_wrapping_provider_metadata.sql` 增加 provider-neutral 元数据；`V1.19.0__automated_key_rotation.sql` 前向增加自动轮换治理；`V1.20.0__runtime_crypto_agility.sql` 再增加运行时 suite/provider 身份和租户策略：
 
 - 新增 provider contract version、provider key version 和 context schema；
 - 将 `wrapping_iv` 改为可空，以支持 Vault ciphertext；
@@ -184,8 +229,11 @@ dry-run 只记录候选，不调用 provider、不改变信封，也不会覆盖
 - 迁移前检查历史数据是否存在同 recipient 多个 `ACTIVE`；存在歧义时失败关闭，要求人工核对后重试；
 - 通过生成列唯一键约束单 active，并新增 policy/run/item/audit 四张表；
 - run trigger、item source/candidate、claim token/lease 和索引共同提供幂等与多 worker 栅栏。
+- 把历史信封空白的 signature/KEM/proof 字段确定性回填为 `UNSIGNED-V1`、`NONE-V1`、`RP-MERKLE-SHA256-V1` 后改为 `NOT NULL`；
+- 把既有 signed-proof v2 的 provider/signature/proof 身份回填为 `local-ed25519`/1、`JWS-EDDSA-ED25519-V1`、`RP-SIGNED-PROOF-ZIP-V2`，移除兼容默认后强制未来写入显式提供；
+- 新增 `tenant_crypto_policy` 与脱敏 audit 表，唯一键保证每租户一条有效策略，复合外键禁止 audit 跨租户引用 policy。
 
-已发布迁移不会改写。CI 的真实 MySQL 8 测试覆盖空库安装、V1.18 → V1.19 重复 active 失败预检、单 active 约束、双 worker `SKIP LOCKED`、trigger 唯一键和 claim-token 完成栅栏，且要求 4 个测试零跳过。
+已发布迁移不会改写。CI 除既有 V1.19 门禁外，还要求 `RuntimeCryptoAgilityMigrationIT` 的 fresh install、V1.19 upgrade/backfill、mandatory/tenant constraint、concurrent row lock 四个真实 MySQL 8 场景全部执行且零跳过。
 
 数据库备份必须与 Vault snapshot/raft storage、unseal/recovery 材料和历史 key 可用性一起设计。只恢复数据库但无法访问对应 provider/key 时，wrapped DEK 无法解封。灾难恢复演练至少验证：
 
@@ -194,14 +242,15 @@ dry-run 只记录候选，不调用 provider、不改变信封，也不会覆盖
 3. Vault token 轮换不影响历史信封；
 4. 恢复后 audit、tenant 和 recipient 隔离仍有效。
 
-## 7. 已知限制与后续边界
+## 8. 已知限制与后续边界
 
 - Vault 可用性会直接影响加密文件下载；当前只提供稳定可重试语义，不在请求内做无界重试，也不回退 local。
-- 多套件运行时策略和 provider 协商属于 P3-3。
 - 授权下载/解密 metadata 当前仍可能向前端返回 `initialKey`；更广泛的数据密钥暴露收敛属于 P3-4。
+- 当前不存在可执行的 PQC/KEM provider，ML-DSA/ML-KEM 目录项不构成实现或合规声明。
+- 当前 proof 签名执行 provider 只有 `local-ed25519`/1；registry 已冻结历史路由合同，但新增外部 signer 必须以独立 adapter、真实集成测试和迁移计划验收。
 - AWS KMS adapter 需在仓库具备受控 AWS 账户、OIDC role 和测试 key 后单独验收，不能用 mock 冒充真实云 KMS 证据。
 
-## 8. 运维检查清单
+## 9. 运维检查清单
 
 - [ ] 生产 active provider 与合同版本显式配置。
 - [ ] Vault 地址为 HTTPS，token 为最小权限且由 secret 系统注入。
@@ -212,10 +261,14 @@ dry-run 只记录候选，不调用 provider、不改变信封，也不会覆盖
 - [ ] `remaining` 与 `failed` 归零且回滚宽限期结束前，不禁用或删除旧 provider key。
 - [ ] 退休只由外部变更流程执行；RecordPlatform 仅记录 READY 和管理员 acknowledgement。
 - [ ] 审计、指标、health 和日志采集链路中不存在 token、plaintext DEK、wrapped blob 或原始 key ID。
+- [ ] 变更租户 suite/provider 策略前保存 diagnostics 和 policy fingerprint，并使用正确 `expectedVersion`。
+- [ ] 弃用窗口先进入 `DEPRECATED` 并证明历史读取仍可用；只有历史引用清零后才进入 `DISABLED`。
+- [ ] 任何内容加密 suite 变化都走重新加密任务，不使用 rewrap 冒充。
+- [ ] PQC/experimental 条目未被生产策略选择，也未对外宣称已支持。
 - [ ] 数据库与 Vault 备份、恢复和 HA 故障切换已联合演练。
 - [ ] 若声明 HSM-backed，已验证 Enterprise 许可证、PKCS#11/Managed Keys、实际硬件与故障切换证据。
 
-## 9. 参考资料
+## 10. 参考资料
 
 - [Vault Transit secrets engine](https://developer.hashicorp.com/vault/docs/secrets/transit)
 - [Vault Transit HTTP API](https://developer.hashicorp.com/vault/api-docs/secret/transit)
@@ -226,6 +279,6 @@ dry-run 只记录候选，不调用 provider、不改变信封，也不会覆盖
 
 ---
 
-**文档版本**：v3.0
+**文档版本**：v4.0
 **最后更新**：2026-07-27
 **维护者**：Security Team

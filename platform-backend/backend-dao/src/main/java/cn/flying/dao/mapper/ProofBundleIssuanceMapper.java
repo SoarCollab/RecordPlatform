@@ -22,7 +22,9 @@ public interface ProofBundleIssuanceMapper extends BaseMapper<ProofBundleIssuanc
      */
     @Select("""
             SELECT id, tenant_id, proof_id, file_id, file_version, leaf_id,
-                   manifest_hash, manifest_json, signature_jws, signature_algorithm,
+                   manifest_hash, manifest_json, signature_jws,
+                   signing_provider, signing_provider_contract, signature_suite, proof_suite,
+                   signature_algorithm,
                    key_id, key_version, public_key_spki, public_key_fingerprint,
                    issued_status, status, status_version, status_reason,
                    issued_at, revoked_at, create_time, update_time, deleted

@@ -14,6 +14,7 @@ import cn.flying.dao.entity.AttestationLeaf;
 import cn.flying.dao.mapper.AttestationBatchMapper;
 import cn.flying.dao.mapper.AttestationLeafMapper;
 import cn.flying.dao.mapper.FileMapper;
+import cn.flying.dao.mapper.TenantCryptoPolicyMapper;
 import cn.flying.dao.vo.file.ProofBundleVO;
 import cn.flying.dao.vo.file.ManifestErrorDetail;
 import cn.flying.platformapi.constant.Result;
@@ -22,7 +23,11 @@ import cn.flying.platformapi.response.ContractRegistryEntryResponse;
 import cn.flying.service.attestation.AttestationBatchPersistenceService;
 import cn.flying.service.attestation.MerkleTreeService;
 import cn.flying.service.key.CryptoSuitePolicyService;
+import cn.flying.service.key.CryptoAgilityProperties;
+import cn.flying.service.key.CryptoSuiteRegistry;
 import cn.flying.service.key.FileKeyEnvelopeProperties;
+import cn.flying.service.key.KeyWrappingProviderRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
@@ -85,6 +90,12 @@ class ProofBundleServiceImplTest {
     @Mock
     private AttestationBatchPersistenceService attestationBatchPersistenceService;
 
+    @Mock
+    private TenantCryptoPolicyMapper tenantCryptoPolicyMapper;
+
+    @Mock
+    private KeyWrappingProviderRegistry wrappingProviderRegistry;
+
     private FileKeyEnvelopeProperties suiteProperties;
     private ProofBundleServiceImpl service;
 
@@ -94,6 +105,13 @@ class ProofBundleServiceImplTest {
     @BeforeEach
     void setUp() {
         suiteProperties = new FileKeyEnvelopeProperties();
+        CryptoAgilityProperties agilityProperties = new CryptoAgilityProperties();
+        CryptoSuitePolicyService suitePolicyService = new CryptoSuitePolicyService(
+                suiteProperties,
+                agilityProperties,
+                new CryptoSuiteRegistry(agilityProperties, new SimpleMeterRegistry()),
+                wrappingProviderRegistry,
+                tenantCryptoPolicyMapper);
         service = new ProofBundleServiceImpl(
                 fileMapper,
                 leafMapper,
@@ -101,7 +119,7 @@ class ProofBundleServiceImplTest {
                 fileRemoteClient,
                 chunkManifestService,
                 manifestGovernanceStatusService,
-                new CryptoSuitePolicyService(suiteProperties),
+                suitePolicyService,
                 attestationBatchPersistenceService
         );
         lenient().when(attestationBatchPersistenceService.requireContractRegistry(any()))
