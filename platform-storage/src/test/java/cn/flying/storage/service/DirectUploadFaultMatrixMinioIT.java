@@ -380,7 +380,7 @@ class DirectUploadFaultMatrixMinioIT {
     }
 
     /**
-     * F06：三个目标仅一个可达时必须失败并保留唯一 staging 恢复源。
+     * F06：三个目标仅一个可达时必须在 quorum 或 promotion deadline 边界失败，并保留唯一 staging 恢复源。
      */
     @Test
     @DisplayName("F06 two disconnected targets should fail below quorum and retain staging")
@@ -393,7 +393,9 @@ class DirectUploadFaultMatrixMinioIT {
         assertThatThrownBy(() -> service().promote(
                 quorumCase.part(), DirectUploadDigestAccumulator.sha256()))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("final replica quorum not reached");
+                .satisfies(error -> assertThat(error.getMessage()).isIn(
+                        "direct-upload final replica quorum not reached",
+                        "direct-upload promotion timed out for part 0"));
 
         assertThat(objectExists(quorumCase.source(), quorumCase.part().stagingObjectName())).isTrue();
         verify(receiptStore, never()).recordSuccess(any(), any(), any());
