@@ -29,7 +29,7 @@
         <tomcat.version>10.1.56</tomcat.version>
         <jackson-bom.version>2.21.5</jackson-bom.version>
         <commons-compress.version>1.28.0</commons-compress.version>
-        <jacoco.version>0.8.14</jacoco.version>
+        <jacoco.version>0.8.15</jacoco.version>
         <verifier-sdk.line-coverage.minimum>0.70</verifier-sdk.line-coverage.minimum>
     </properties>
 
@@ -53,7 +53,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.6.2</version>
+                <version>3.6.3</version>
                 <executions>
                     <execution>
                         <id>enforce-java-21</id>
