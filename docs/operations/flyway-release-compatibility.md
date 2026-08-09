@@ -59,23 +59,23 @@ SELECT CASE
           AND SUM(version = '1.0.0'
                   AND type = 'SQL'
                   AND script = 'V1.0.0__init_schema.sql'
-                  AND checksum = -408344945
+                  AND checksum = 1043684703
                   AND success = 1) = 1
           AND SUM(version = '1.0.1') = 0
           AND SUM(version = '1.5.0'
                   AND type = 'SQL'
                   AND script = 'V1.5.0__add_account_nickname.sql'
-                  AND checksum = -441046979
+                  AND checksum = 529309880
                   AND success = 1) = 1
           AND SUM(version = '1.7.0'
                   AND type = 'SQL'
                   AND script = 'V1.7.0__add_soft_delete_columns.sql'
-                  AND checksum = 242259946
+                  AND checksum = 1607980540
                   AND success = 1) = 1
           AND SUM(version = '1.7.3'
                   AND type = 'SQL'
                   AND script = 'V1.7.3__integrity_alert.sql'
-                  AND checksum = -1309397501
+                  AND checksum = 2100652293
                   AND success = 1) = 1
          THEN 'KNOWN_REWRITTEN_KEY_ROWS'
          ELSE 'UNKNOWN_STOP'
@@ -94,10 +94,10 @@ The Flyway checksum values below are the signed CRC values produced by the repos
 
 | Version | Script | Flyway checksum | SHA-256 |
 |---|---|---:|---|
-| `1.0.0` | `V1.0.0__init_schema.sql` | `-1044086721` | `2d62aa70b0f58851579db62034ad12556409201a3cd2e7ad036d709348150645` |
-| `1.0.1` | `V1.0.1__add_account_nickname.sql` | `-441046979` | `72e68808690ae1a44f22181349d1bae83bae3a7466898d02e5b5d6ef798d2b49` |
-| `1.5.0` | `V1.5.0__integrity_alert.sql` | `2125693801` | `f0b90f912d9778ff1712c65e52c4f159dfa0a5c8fdf0c1fe68562a5f29c9edff` |
-| `1.7.0` | `V1.7.0__add_soft_delete_columns.sql` | `-695686335` | `6d43fb11866fa6b4a2c749c736be3612feb941b30d389fa4d253fb317a7a414c` |
+| `1.0.0` | `V1.0.0__init_schema.sql` | `989275442` | `2d62aa70b0f58851579db62034ad12556409201a3cd2e7ad036d709348150645` |
+| `1.0.1` | `V1.0.1__add_account_nickname.sql` | `529309880` | `72e68808690ae1a44f22181349d1bae83bae3a7466898d02e5b5d6ef798d2b49` |
+| `1.5.0` | `V1.5.0__integrity_alert.sql` | `2001697290` | `f0b90f912d9778ff1712c65e52c4f159dfa0a5c8fdf0c1fe68562a5f29c9edff` |
+| `1.7.0` | `V1.7.0__add_soft_delete_columns.sql` | `1349292868` | `6d43fb11866fa6b4a2c749c736be3612feb941b30d389fa4d253fb317a7a414c` |
 | `1.7.3` | absent | n/a | n/a |
 
 All other `v0.0.2` rows must match the released manifest, all rows must have `success = 1`, and there must be no failed row. This state can use the normal migration path without repair.
@@ -106,11 +106,11 @@ All other `v0.0.2` rows must match the released manifest, all rows must have `su
 
 | Version | Script | Flyway checksum | SHA-256 |
 |---|---|---:|---|
-| `1.0.0` | `V1.0.0__init_schema.sql` | `-408344945` | `c11f6518144797c7206ce987c9afeba0ecec491acca9dde4f684acee45f9b979` |
+| `1.0.0` | `V1.0.0__init_schema.sql` | `1043684703` | `c11f6518144797c7206ce987c9afeba0ecec491acca9dde4f684acee45f9b979` |
 | `1.0.1` | absent | n/a | n/a |
-| `1.5.0` | `V1.5.0__add_account_nickname.sql` | `-441046979` | `72e68808690ae1a44f22181349d1bae83bae3a7466898d02e5b5d6ef798d2b49` |
-| `1.7.0` | `V1.7.0__add_soft_delete_columns.sql` | `242259946` | `4aa571d76a83325eeb7d41cc95a267f7896d4f11f39102af85113461897ead6a` |
-| `1.7.3` | `V1.7.3__integrity_alert.sql` | `-1309397501` | `fcf6750113ce50ab50ebcc398709636e4dd97b7f75bc2b7a041feafbe7152584` |
+| `1.5.0` | `V1.5.0__add_account_nickname.sql` | `529309880` | `72e68808690ae1a44f22181349d1bae83bae3a7466898d02e5b5d6ef798d2b49` |
+| `1.7.0` | `V1.7.0__add_soft_delete_columns.sql` | `1607980540` | `4aa571d76a83325eeb7d41cc95a267f7896d4f11f39102af85113461897ead6a` |
+| `1.7.3` | `V1.7.3__integrity_alert.sql` | `2100652293` | `fcf6750113ce50ab50ebcc398709636e4dd97b7f75bc2b7a041feafbe7152584` |
 
 This state must fail normal Flyway validation. Do not weaken validation. The recovery in section 5 is allowed only when the exact classifier returns `KNOWN_REWRITTEN_KEY_ROWS`, every other applied migration matches the candidate artifact, and every schema precondition matches exactly.
 
@@ -187,7 +187,7 @@ mvn -pl backend-web flyway:migrate \
   -Dflyway.target=1.0.1
 ```
 
-Immediately compare the complete history with the saved preflight snapshot and require exactly one new successful `1.0.1` row whose script is `V1.0.1__add_account_nickname.sql` and checksum is `-441046979`. No other row may change. Then run the explicit repair against the same canonical location:
+Immediately compare the complete history with the saved preflight snapshot and require exactly one new successful `1.0.1` row whose script is `V1.0.1__add_account_nickname.sql` and checksum is `529309880`. No other row may change. Then run the explicit repair against the same canonical location:
 
 ```bash
 mvn -pl backend-web flyway:repair \

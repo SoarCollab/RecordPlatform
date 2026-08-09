@@ -48,10 +48,10 @@ class FlywayReleasedMigrationCompatibilityIT {
             "4aa571d76a83325eeb7d41cc95a267f7896d4f11f39102af85113461897ead6a";
     private static final String KNOWN_REWRITTEN_INTEGRITY_SHA256 =
             "fcf6750113ce50ab50ebcc398709636e4dd97b7f75bc2b7a041feafbe7152584";
-    private static final int KNOWN_REWRITTEN_V1_FLYWAY_CHECKSUM = -408344945;
-    private static final int KNOWN_REWRITTEN_NICKNAME_FLYWAY_CHECKSUM = -441046979;
-    private static final int KNOWN_REWRITTEN_SOFT_DELETE_FLYWAY_CHECKSUM = 242259946;
-    private static final int KNOWN_REWRITTEN_INTEGRITY_FLYWAY_CHECKSUM = -1309397501;
+    private static final int KNOWN_REWRITTEN_V1_FLYWAY_CHECKSUM = 1043684703;
+    private static final int KNOWN_REWRITTEN_NICKNAME_FLYWAY_CHECKSUM = 529309880;
+    private static final int KNOWN_REWRITTEN_SOFT_DELETE_FLYWAY_CHECKSUM = 1607980540;
+    private static final int KNOWN_REWRITTEN_INTEGRITY_FLYWAY_CHECKSUM = 2100652293;
     private static final int KNOWN_REWRITTEN_MIGRATION_COUNT = 38;
 
     @Container
