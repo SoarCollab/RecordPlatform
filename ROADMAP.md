@@ -35,7 +35,7 @@
 | 组件 | 当前基线 | 演进原则 |
 | --- | --- | --- |
 | Java | 21 LTS | 新 LTS 先验证构建、容器和依赖兼容性 |
-| Spring Boot | 3.5.14 | 4.x 迁移单独立项，不在依赖更新中顺带升级 |
+| Spring Boot | 3.5.16 | 4.x 迁移单独立项，不在依赖更新中顺带升级 |
 | Dubbo | 3.3.6 Triple | 保持 consumer/provider 契约兼容 |
 | Svelte | 5.55+ | 使用稳定 Runes API |
 | SvelteKit | 2.59+ | 与前端 lockfile 同步验证 |
