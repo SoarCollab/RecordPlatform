@@ -3,20 +3,21 @@ packages:
 
 overrides:
   ajv@6: 6.14.0
-  brace-expansion@>=2.0.0 <3: 5.0.8
-  brace-expansion@>=4.0.0 <6: 5.0.8
+  brace-expansion@>=2.0.0 <3: 5.0.9
+  brace-expansion@>=4.0.0 <6: 5.0.9
   cookie@0.6.0: 0.7.0
   esbuild@0.21.5: 0.25.0
   esbuild@>=0.27.3 <0.28.1: 0.28.1
-  fast-uri: 3.1.4
-  js-yaml@>=4.0.0 <5: 4.3.0
+  fast-uri: 3.1.5
+  js-yaml@>=4.0.0 <5: 4.3.1
   minimatch@3: 3.1.4
   minimatch@5: 5.1.8
   minimatch@9: 9.0.7
   picomatch@<4.0.4: 4.0.4
-  postcss@<8.5.10: 8.5.19
+  nanoid@<3.3.17: 3.3.17
+  postcss@<8.5.23: 8.5.23
   rollup: 4.59.0
-  undici@>=7.0.0 <7.28.0: 7.28.0
+  undici@>=7.0.0 <7.29.0: 7.29.0
   yaml@>=1.0.0 <2: 1.10.3
   yaml@>=2.0.0 <2.8.3: 2.8.3
 
@@ -25,4 +26,4 @@ allowBuilds:
   msw: true
 
 patchedDependencies:
-  brace-expansion@5.0.8: patches/brace-expansion@5.0.8.patch
+  brace-expansion@5.0.9: patches/brace-expansion@5.0.9.patch
