@@ -23,8 +23,9 @@ jobs:
       pull-requests: read
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-      automation: ${{ steps.filter.outputs.automation }}
+      contract: ${{ steps.filter.outputs.contract }}
+      docs: ${{ steps.filter.outputs.docs }}
+      build: ${{ steps.filter.outputs.build }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4
@@ -40,18 +41,63 @@ jobs:
               - 'docs/public/nacos-config-template.yaml'
               - 'pom.xml'
               - '.github/workflows/**'
-            frontend:
+            contract:
+              - 'platform-api/**'
+              - 'platform-verifier/**'
+              - 'platform-backend/**'
+              - 'platform-fisco/src/main/resources/contract-registry/**'
+              - 'platform-frontend/src/lib/api/**'
+              - 'platform-frontend/scripts/generate-api-types.mjs'
+              - 'platform-frontend/package.json'
+              - 'platform-frontend/pnpm-lock.yaml'
+              - 'platform-frontend/pnpm-workspace.yaml'
+              - 'tools/contracts/**'
+              - 'pom.xml'
+              - '.github/workflows/**'
+            docs:
+              - 'ROADMAP*.md'
+              - 'README.md'
+              - 'README_CN.md'
+              - 'API_DOCUMENTATION.md'
+              - 'CONTRIBUTING.md'
+              - 'TESTING.md'
+              - 'docs/**'
+              - 'scripts/*.md'
+              - 'tools/k6/README.md'
+              - 'tools/docs/**'
+              - 'platform-api/pom.xml'
+              - 'platform-verifier/**'
+              - 'platform-backend/pom.xml'
+              - 'platform-fisco/pom.xml'
+              - 'platform-storage/pom.xml'
+              - 'platform-frontend/package.json'
+              - 'platform-frontend/pnpm-lock.yaml'
+              - '.env.example'
+              - 'platform-frontend/.env.example'
+              - 'scripts/env.sh'
+              - 'platform-backend/backend-web/src/main/java/cn/flying/controller/**'
+              - 'platform-backend/backend-web/src/main/java/cn/flying/config/**'
+              - 'platform-backend/backend-web/src/main/resources/application*.yml'
+              - 'platform-backend/backend-web/src/main/resources/db/migration/**'
+              - 'platform-backend/backend-service/src/main/java/**'
+              - 'platform-backend/**/src/test/java/**'
+              - '.github/workflows/docs-consistency.yml'
+              - '.github/workflows/test.yml'
+            build:
+              - 'platform-api/**'
+              - 'platform-verifier/**'
+              - 'platform-backend/**'
+              - 'platform-fisco/**'
+              - 'platform-storage/**'
               - 'platform-frontend/**'
-              - '.github/workflows/**'
-            automation:
-              - '.github/workflows/**'
+              - 'pom.xml'
               - 'config/**'
               - 'scripts/**'
               - 'tools/**'
               - 'docker-compose.infra.yml'
               - '.env.example'
               - 'docs/public/nacos-config-template.yaml'
-              - 'platform-frontend/.env.example'
+              - '.github/workflows/**'
 
   backend-test:
     name: Backend Tests
@@ -713,7 +759,8 @@ jobs:
             platform-backend/backend-service/target/site/jacoco/jacoco.xml
             platform-backend/backend-web/target/site/jacoco/jacoco.xml
           flags: backend
-          fail_ci_if_error: false
+          disable_search: true
+          fail_ci_if_error: true
 
       - name: Upload Verifier Coverage Report
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
@@ -722,7 +769,8 @@ jobs:
           use_oidc: true
           files: platform-verifier/sdk/target/site/jacoco/jacoco.xml
           flags: verifier
-          fail_ci_if_error: false
+          disable_search: true
+          fail_ci_if_error: true
 
       - name: Upload Public Verifier Artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -739,7 +787,6 @@ jobs:
   frontend-test:
     name: Frontend Tests
     needs: [changes]
-    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -791,24 +838,40 @@ jobs:
           use_oidc: true
           files: platform-frontend/coverage/lcov.info
           flags: frontend
-          fail_ci_if_error: false
+          disable_search: true
+          fail_ci_if_error: true
 
   contract-consistency:
     name: Contract Consistency
     runs-on: ubuntu-latest
-    needs: [changes, backend-test]
-    if: needs.changes.outputs.backend == 'true'
+    needs: [changes]
+    if: needs.changes.outputs.contract == 'true'
     permissions:
       contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Download Backend OpenAPI Artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - name: Setup Java 21
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
-          name: backend-openapi
-          path: backend-openapi
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
+
+      - name: Install OpenAPI contract dependencies
+        run: |
+          mvn -f platform-api/pom.xml clean install -DskipTests -q
+          mvn -f platform-verifier/pom.xml -pl sdk -am clean install -DskipTests -q
+
+      - name: Export OpenAPI from the checked-out revision
+        run: >-
+          mvn -f platform-backend/pom.xml
+          -pl backend-web
+          -am
+          -Dtest=OpenApiContractExportTest
+          -Dsurefire.failIfNoSpecifiedTests=false
+          test
 
       - name: Setup pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
@@ -830,7 +893,7 @@ jobs:
 
       - name: Generate And Verify Frontend API Types
         working-directory: platform-frontend
-        run: OPENAPI_SOURCE=../backend-openapi/openapi.json pnpm types:gen:check
+        run: OPENAPI_SOURCE=../platform-backend/backend-web/target/openapi/openapi.json pnpm types:gen:check
 
       - name: Verify Contract Artifact Integrity
         run: |
@@ -842,7 +905,7 @@ jobs:
       - name: Generate Contract Fingerprints
         run: |
           mkdir -p contract-fingerprint
-          shasum -a 256 backend-openapi/openapi.json | awk '{print $1}' > contract-fingerprint/openapi.sha256
+          shasum -a 256 platform-backend/backend-web/target/openapi/openapi.json | awk '{print $1}' > contract-fingerprint/openapi.sha256
           shasum -a 256 platform-frontend/src/lib/api/types/generated.ts | awk '{print $1}' > contract-fingerprint/generated-ts.sha256
           shasum -a 256 platform-fisco/src/main/resources/contract-registry/artifacts.json | awk '{print $1}' > contract-fingerprint/catalog.sha256
           python3 tools/contracts/contract_fingerprint.py refresh \
@@ -860,8 +923,6 @@ jobs:
 
   security-scan:
     name: Security Scan
-    needs: [changes]
-    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.automation == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -881,7 +942,7 @@ jobs:
           exit-code: '0'
 
       - name: Upload Trivy SARIF
-        if: always()
+        if: always() && github.event_name == 'push'
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
         with:
           sarif_file: trivy-pr.sarif
@@ -898,11 +959,19 @@ jobs:
           vuln-type: os,library
           exit-code: '1'
 
+  docs-verification:
+    name: Docs Verification
+    needs: [changes]
+    if: needs.changes.outputs.docs == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/docs-consistency.yml
+
   build-check:
     name: Build Verification
     runs-on: ubuntu-latest
-    needs: [changes, backend-test, frontend-test, contract-consistency]
-    if: always() && !failure() && !cancelled() && (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.automation == 'true')
+    needs: [changes, backend-test, frontend-test, contract-consistency, security-scan]
+    if: always() && !failure() && !cancelled() && needs.changes.outputs.build == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -1136,3 +1205,39 @@ jobs:
           pnpm --version
           pnpm install --frozen-lockfile
           pnpm build
+
+  required-ci:
+    name: Required CI
+    needs:
+      - changes
+      - backend-test
+      - frontend-test
+      - contract-consistency
+      - security-scan
+      - docs-verification
+      - build-check
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Run Required CI policy tests
+        run: python3 -m unittest discover -s tools/ci/tests -v
+
+      - name: Enforce required and inapplicable job results
+        run: |
+          python3 tools/ci/required_ci_gate.py \
+            --backend-changed "${{ needs.changes.outputs.backend }}" \
+            --contract-changed "${{ needs.changes.outputs.contract }}" \
+            --docs-changed "${{ needs.changes.outputs.docs }}" \
+            --build-changed "${{ needs.changes.outputs.build }}" \
+            --changes-result "${{ needs.changes.result }}" \
+            --backend-test-result "${{ needs.backend-test.result }}" \
+            --frontend-test-result "${{ needs.frontend-test.result }}" \
+            --contract-consistency-result "${{ needs.contract-consistency.result }}" \
+            --security-scan-result "${{ needs.security-scan.result }}" \
+            --docs-verification-result "${{ needs.docs-verification.result }}" \
+            --build-check-result "${{ needs.build-check.result }}"
