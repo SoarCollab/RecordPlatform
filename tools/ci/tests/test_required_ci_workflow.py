@@ -46,6 +46,19 @@ class RequiredCiWorkflowTest(unittest.TestCase):
         self.assertNotRegex(security, r"(?m)^    if:")
         self.assertIn("exit-code: '1'", security)
 
+    def test_backend_coverage_files_use_codecov_supported_delimiters(self) -> None:
+        """Prevent newline-delimited paths from becoming one nonexistent Codecov filename."""
+
+        backend = job_block(self.test_workflow, "backend-test")
+        expected_files = (
+            "files: platform-backend/backend-common/target/site/jacoco/jacoco.xml,"
+            "platform-backend/backend-service/target/site/jacoco/jacoco.xml,"
+            "platform-backend/backend-web/target/site/jacoco/jacoco.xml"
+        )
+
+        self.assertIn(expected_files, backend)
+        self.assertNotIn("files: |", backend)
+
     def test_contract_job_exports_openapi_from_the_checked_out_revision(self) -> None:
         """Prevent frontend-only contract changes from consuming a stale backend artifact."""
 
