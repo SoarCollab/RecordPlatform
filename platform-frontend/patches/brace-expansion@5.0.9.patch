@@ -1,8 +1,8 @@
 diff --git a/dist/commonjs/index.js b/dist/commonjs/index.js
-index be9df86be09c7655787a65c55ae6da01858894c3..356f2a045b0a6f1a0490f9a1a801df9f54163872 100644
+index 70af0807c457b0c655212131143d3d2674c8d226..b59003329f3ff13e4ffcb0e50889441615fcaf9a 100644
 --- a/dist/commonjs/index.js
 +++ b/dist/commonjs/index.js
-@@ -261,3 +261,8 @@ function expand_(str, max, maxLength, isTop) {
+@@ -287,3 +287,8 @@ function expand_(str, max, maxLength, isTop) {
      return acc;
  }
  //# sourceMappingURL=index.js.map
