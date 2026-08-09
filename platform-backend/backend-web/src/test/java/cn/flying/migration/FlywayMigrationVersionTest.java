@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FlywayMigrationVersionTest {
@@ -37,8 +38,8 @@ class FlywayMigrationVersionTest {
                     .toList();
         }
 
-        assertTrue(migrationFiles.contains("V1.5.0__add_account_nickname.sql"));
-        assertTrue(migrationFiles.contains("V1.7.3__integrity_alert.sql"));
+        assertTrue(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
+        assertTrue(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
         assertTrue(migrationFiles.contains("V1.7.4__rename_file_contract_hash_to_transaction_hash.sql"));
         assertTrue(migrationFiles.contains("V1.7.5__replace_clean_log_procedures.sql"));
         assertTrue(migrationFiles.contains("V1.10.3__integrity_alert_evidence.sql"));
@@ -52,16 +53,25 @@ class FlywayMigrationVersionTest {
         assertTrue(migrationFiles.contains("V1.18.0__key_wrapping_provider_metadata.sql"));
         assertTrue(migrationFiles.contains("V1.19.0__automated_key_rotation.sql"));
         assertTrue(migrationFiles.contains("V1.20.0__runtime_crypto_agility.sql"));
-        assertFalse(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
-        assertFalse(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
+        assertFalse(migrationFiles.contains("V1.5.0__add_account_nickname.sql"));
+        assertFalse(migrationFiles.contains("V1.7.3__integrity_alert.sql"));
 
-        Set<MigrationVersion> versions = new HashSet<>();
-        for (String fileName : migrationFiles) {
-            Matcher matcher = VERSION_PATTERN.matcher(fileName);
-            assertTrue(matcher.matches(), "Invalid migration filename: " + fileName);
-            MigrationVersion version = MigrationVersion.fromVersion(matcher.group(1));
-            assertTrue(versions.add(version), "Duplicate migration version: " + matcher.group(1));
-        }
+        validateUniqueMigrationVersions(migrationFiles);
+    }
+
+    /**
+     * Proves the migration version guard rejects an artificial duplicate version.
+     */
+    @Test
+    @DisplayName("should fail closed when a migration version is duplicated")
+    void shouldFailClosedWhenMigrationVersionIsDuplicated() {
+        IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> validateUniqueMigrationVersions(List.of(
+                        "V1.7.5__replace_clean_log_procedures.sql",
+                        "V1.7.5__unexpected_duplicate.sql")));
+
+        assertTrue(exception.getMessage().contains("Duplicate migration version: 1.7.5"));
     }
 
     /**
@@ -119,16 +129,16 @@ class FlywayMigrationVersionTest {
     }
 
     /**
-     * 验证初始化迁移保持历史列名，由后续前向迁移负责改名。
+     * Verifies the released initializer keeps the v0.0.2 transaction hash column bytes.
      */
     @Test
-    @DisplayName("should keep initial file migration compatible with forward transaction hash rename")
-    void shouldKeepInitialFileMigrationCompatibleWithForwardTransactionHashRename() throws IOException {
+    @DisplayName("should keep the released transaction hash column in the initial migration")
+    void shouldKeepReleasedTransactionHashColumnInInitialMigration() throws IOException {
         Path migration = resolveMigrationDir().resolve("V1.0.0__init_schema.sql");
         String sql = Files.readString(migration);
 
-        assertTrue(sql.contains("`contract_hash`"));
-        assertFalse(sql.contains("`transaction_hash`     VARCHAR"));
+        assertTrue(sql.contains("`transaction_hash`     VARCHAR"));
+        assertFalse(sql.contains("`contract_hash`        VARCHAR"));
     }
 
     /**
@@ -147,15 +157,16 @@ class FlywayMigrationVersionTest {
     }
 
     /**
-     * 验证所有迁移脚本避免使用 MySQL 8.0 早期版本不支持的存储过程 IF NOT EXISTS 语法。
+     * Verifies post-release migrations avoid unsupported procedure IF NOT EXISTS syntax.
      */
     @Test
-    @DisplayName("should not use unsupported create procedure if not exists syntax")
-    void shouldNotUseUnsupportedCreateProcedureIfNotExistsSyntax() throws IOException {
+    @DisplayName("should not introduce unsupported procedure syntax after the released initializer")
+    void shouldNotIntroduceUnsupportedProcedureSyntaxAfterReleasedInitializer() throws IOException {
         Path migrationDir = resolveMigrationDir();
         try (var stream = Files.list(migrationDir)) {
             List<Path> migrationFiles = stream
                     .filter(path -> path.getFileName().toString().endsWith(".sql"))
+                    .filter(path -> !path.getFileName().toString().equals("V1.0.0__init_schema.sql"))
                     .toList();
 
             for (Path migration : migrationFiles) {
@@ -490,6 +501,25 @@ class FlywayMigrationVersionTest {
             count++;
         }
         return count;
+    }
+
+    /**
+     * Validates Flyway filenames and rejects any reused semantic version.
+     *
+     * @param migrationFiles migration filenames to validate
+     */
+    private void validateUniqueMigrationVersions(List<String> migrationFiles) {
+        Set<MigrationVersion> versions = new HashSet<>();
+        for (String fileName : migrationFiles) {
+            Matcher matcher = VERSION_PATTERN.matcher(fileName);
+            if (!matcher.matches()) {
+                throw new IllegalStateException("Invalid migration filename: " + fileName);
+            }
+            MigrationVersion version = MigrationVersion.fromVersion(matcher.group(1));
+            if (!versions.add(version)) {
+                throw new IllegalStateException("Duplicate migration version: " + matcher.group(1));
+            }
+        }
     }
 
     /**
