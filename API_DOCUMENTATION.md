@@ -1450,6 +1450,20 @@ Lifecycle endpoints:
 
 The deprecated JSON routes still return `proof-bundle.v1.1` for existing integrations. They contain public file/storage/Merkle/chain/registry fields and required `verificationPolicy` suite metadata, but remain `UNSIGNED-V1`. They must not be treated as an authentic signed proof and continue to reject `MANIFEST_HASH` production leaves whose semantics the legacy verifier cannot represent safely.
 
+The compatibility fields have separate, non-interchangeable meanings:
+
+| Field | Meaning |
+| ----- | ------- |
+| `file.fileHash` | Historical single-file chain record ID and Merkle leaf preimage; it is not the original-file SHA-256 |
+| `storage.objects[].plainHash` | SHA-256 of one original plaintext chunk |
+| `storage.objects[].cipherHash` | Digest of one stored object/ciphertext chunk |
+| `storage.objects[].size` | Stored object/ciphertext length, also checked against storage `contentLength` |
+| `storage.objects[].plainSize` | Original plaintext chunk length used to segment the supplied file before checking `plainHash` |
+
+New v1.1 exports always include `plainSize`, using the manifest's explicit plaintext length or `size` only when the producer has no separate plaintext length. A historical object that omits `plainSize` may use `size` solely when normalized `plainHash` and `cipherHash` are equal; within this unsigned compatibility evidence, that equality is accepted as the unencrypted fallback condition rather than as cryptographic proof. An encrypted or ambiguous historical object without `plainSize` fails with `MISSING_REQUIRED_FIELD` at the exact `storage.objects[i].plainSize` path. Missing `plainHash` fails at its own field. The verifier never substitutes `file.fileHash`, `cipherHash`, `size`, or any other evidence for plaintext content evidence.
+
+The verifier consumes objects in their declared order and requires contiguous indexes. Original bytes are segmented by `plainSize` and checked against each `plainHash`; the Merkle leaf is independently recomputed from `file.fileHash`. A structurally correct exporter round trip therefore has no content/chain mismatch, but still returns `AUTHENTICITY_NOT_VERIFIED` because unsigned JSON can be rewritten as a whole. Only signed ZIP v2 can establish issuer authenticity.
+
 `verificationPolicy.algorithmSuite`, `signatureSuite`, `kemSuite`, and `proofSuite` are required fields. Offline verification rejects missing or unsupported suite metadata with `UNSUPPORTED_ALGORITHM`.
 
 `chain.batchConfirmationSource` records how the Merkle root was confirmed. Normal writes use `CHAIN_WRITE`. If a transaction committed but its response was lost, reconciliation uses `CHAIN_QUERY_BEFORE_WRITE` or `CHAIN_QUERY_AFTER_WRITE`; in that case `batchTransactionHash` may be absent because the contract getter can recover the business record but not the historical receipt hash. `batchChainFileHash` remains required and must equal the Merkle root.

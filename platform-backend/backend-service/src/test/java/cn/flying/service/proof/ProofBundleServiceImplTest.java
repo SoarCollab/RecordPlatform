@@ -18,21 +18,28 @@ import cn.flying.dao.mapper.TenantCryptoPolicyMapper;
 import cn.flying.dao.vo.file.ProofBundleVO;
 import cn.flying.dao.vo.file.ManifestErrorDetail;
 import cn.flying.platformapi.constant.Result;
-import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.platformapi.response.ContractRegistryEntryResponse;
+import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.service.attestation.AttestationBatchPersistenceService;
+import cn.flying.service.attestation.MerkleLeafInput;
+import cn.flying.service.attestation.MerkleLeafProof;
+import cn.flying.service.attestation.MerkleTreeResult;
 import cn.flying.service.attestation.MerkleTreeService;
-import cn.flying.service.key.CryptoSuitePolicyService;
 import cn.flying.service.key.CryptoAgilityProperties;
+import cn.flying.service.key.CryptoSuitePolicyService;
 import cn.flying.service.key.CryptoSuiteRegistry;
 import cn.flying.service.key.FileKeyEnvelopeProperties;
 import cn.flying.service.key.KeyWrappingProviderRegistry;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestService;
-import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import cn.flying.service.manifest.ChunkManifestView;
+import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import cn.flying.service.remote.FileRemoteClient;
+import cn.flying.service.verifier.ProofBundleVerifierImpl;
+import cn.flying.service.verifier.ProofVerificationCode;
+import cn.flying.service.verifier.ProofVerificationIssue;
+import cn.flying.service.verifier.ProofVerificationResult;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -43,15 +50,20 @@ import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.Date;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -176,7 +188,10 @@ class ProofBundleServiceImplTest {
             assertThat(storageObject.objectPath()).isEqualTo(STORAGE_PATH);
             assertThat(storageObject.plainHash()).isEqualTo(PLAIN_HASH);
             assertThat(storageObject.cipherHash()).isEqualTo(CIPHER_HASH);
+            assertThat(storageObject.size()).isEqualTo(1024L);
+            assertThat(storageObject.plainSize()).isEqualTo(1024L);
             assertThat(storageObject.metadataHashMatches()).isTrue();
+            assertThat(bundle.verificationGuide().getFirst()).contains("plainSize", "stored object length");
             assertThat(JsonConverter.toJson(bundle)).doesNotContain("initialKey", "secret-key");
             security.verify(SecurityUtils::isAdmin);
         }
@@ -211,6 +226,109 @@ class ProofBundleServiceImplTest {
             String second = JsonConverter.toJson(service.exportByFileId(USER_ID, FILE_ID));
 
             assertThat(second).isEqualTo(first);
+        }
+    }
+
+    /**
+     * Verifies the production exporter-to-JSON-to-production-verifier compatibility path.
+     */
+    @Test
+    void exportByFileId_shouldRoundTripFramedEvidenceThroughCompatibilityVerifier() {
+        byte[] originalFile = "legacy proof".getBytes(StandardCharsets.UTF_8);
+        byte[] firstPlain = Arrays.copyOfRange(originalFile, 0, 7);
+        byte[] secondPlain = Arrays.copyOfRange(originalFile, 7, originalFile.length);
+        String chainRecordId = "chain-record-" + sha256Hex("separate-chain-record".getBytes(StandardCharsets.UTF_8));
+        String firstPlainHash = "sha256:" + sha256Hex(firstPlain);
+        String secondPlainHash = "sha256:" + sha256Hex(secondPlain);
+        String firstCipherHash = "sha256:" + sha256Hex("cipher-object-0".getBytes(StandardCharsets.UTF_8));
+        String secondCipherHash = "sha256:" + sha256Hex("cipher-object-1".getBytes(StandardCharsets.UTF_8));
+        String firstPath = "storage/tenant/7/chunk/round-trip-0";
+        String secondPath = "storage/tenant/7/chunk/round-trip-1";
+        MerkleTreeService treeService = new MerkleTreeService();
+        MerkleTreeResult tree = treeService.buildTree(List.of(new MerkleLeafInput(FILE_ID, chainRecordId)));
+        MerkleLeafProof proof = tree.leaves().getFirst();
+        File framedFile = file()
+                .setFileHash(chainRecordId)
+                .setFileParam("{\"fileSize\":" + originalFile.length
+                        + ",\"contentType\":\"text/plain\",\"chunkCount\":2}");
+        AttestationLeaf framedLeaf = leaf()
+                .setFileHash(chainRecordId)
+                .setEvidenceHash(chainRecordId)
+                .setChainRecordId(chainRecordId)
+                .setLeafHash(proof.leafHash())
+                .setLeafIndex(proof.leafIndex())
+                .setProofPathJson(JsonConverter.toJson(proof.proofPath()));
+        AttestationBatch framedBatch = batch()
+                .setMerkleRoot(tree.merkleRoot())
+                .setChainFileHash(tree.merkleRoot());
+        ChunkManifestView framedManifest = new ChunkManifestView(
+                1001L,
+                FILE_ID,
+                2,
+                "cn.flying.chunk-manifest.v1",
+                chainRecordId,
+                "manifest-hash-framed",
+                "SHA-256",
+                7L,
+                2,
+                44L,
+                null,
+                "FRAMED_V2",
+                "S3",
+                List.of(
+                        new ChunkManifestChunk(
+                                0,
+                                firstPlainHash,
+                                firstCipherHash,
+                                23L,
+                                firstPath,
+                                "S3",
+                                "etag-0",
+                                "SHA-256",
+                                7L,
+                                1),
+                        new ChunkManifestChunk(
+                                1,
+                                secondPlainHash,
+                                secondCipherHash,
+                                21L,
+                                secondPath,
+                                "S3",
+                                "etag-1",
+                                "SHA-256",
+                                (long) secondPlain.length,
+                                1)));
+
+        try (MockedStatic<SecurityUtils> ignored = mockStaticUser()) {
+            when(fileMapper.selectById(FILE_ID)).thenReturn(framedFile);
+            when(leafMapper.selectOne(any())).thenReturn(framedLeaf);
+            when(batchMapper.selectById(BATCH_ID)).thenReturn(framedBatch);
+            when(attestationBatchPersistenceService.requireContractRegistry(any()))
+                    .thenReturn(contractRegistry());
+            when(chunkManifestService.findActiveManifest(null, FILE_ID))
+                    .thenReturn(java.util.Optional.of(framedManifest));
+            when(fileRemoteClient.headObject(firstPath, firstCipherHash))
+                    .thenReturn(Result.success(storageHead(firstPath, firstCipherHash, 23L, "etag-0")));
+            when(fileRemoteClient.headObject(secondPath, secondCipherHash))
+                    .thenReturn(Result.success(storageHead(secondPath, secondCipherHash, 21L, "etag-1")));
+
+            ProofBundleVO exported = service.exportByFileId(USER_ID, FILE_ID);
+            ProofBundleVerifierImpl compatibilityVerifier = new ProofBundleVerifierImpl(treeService);
+            ProofVerificationResult result = compatibilityVerifier
+                    .verify(originalFile, JsonConverter.toJson(exported));
+
+            assertThat(exported.file().fileHash()).isEqualTo(chainRecordId);
+            assertThat(exported.file().fileHash()).isNotEqualTo(sha256Hex(originalFile));
+            assertThat(exported.storage().objects())
+                    .extracting(ProofBundleVO.StorageObjectEvidence::size)
+                    .containsExactly(23L, 21L);
+            assertThat(exported.storage().objects())
+                    .extracting(ProofBundleVO.StorageObjectEvidence::plainSize)
+                    .containsExactly(7L, (long) secondPlain.length);
+            assertThat(result.issues())
+                    .extracting(ProofVerificationIssue::code)
+                    .containsExactly(ProofVerificationCode.AUTHENTICITY_NOT_VERIFIED);
+            assertCompatibilityMutationResults(originalFile, exported, compatibilityVerifier);
         }
     }
 
@@ -510,7 +628,7 @@ class ProofBundleServiceImplTest {
     private ContractRegistryEntryResponse contractRegistry(String status) {
         return new ContractRegistryEntryResponse(
                 "record-platform-contract-registry-entry.v1",
-                "sha256:" + "1".repeat(64),
+                null,
                 "Sharing",
                 "2.0.0",
                 "LOCAL_FISCO",
@@ -525,7 +643,177 @@ class ProofBundleServiceImplTest {
                 null,
                 status,
                 "2026-07-13T00:00:00Z",
-                "REDEPLOY_ADDRESS");
+                "REDEPLOY_ADDRESS")
+                .withCalculatedRegistryFingerprint();
+    }
+
+    /**
+     * Builds one successful storage HEAD result for compatibility round-trip evidence.
+     */
+    private StorageObjectHeadVO storageHead(String path, String cipherHash, long size, String eTag) {
+        return new StorageObjectHeadVO(
+                true,
+                path,
+                cipherHash,
+                TENANT_ID,
+                TENANT_ID,
+                "node-a",
+                size,
+                eTag,
+                cipherHash);
+    }
+
+    /**
+     * Verifies malicious compatibility variants derived from one production exporter result.
+     */
+    private void assertCompatibilityMutationResults(
+            byte[] originalFile,
+            ProofBundleVO exported,
+            ProofBundleVerifierImpl compatibilityVerifier
+    ) {
+        byte[] tamperedOriginal = Arrays.copyOf(originalFile, originalFile.length);
+        tamperedOriginal[0] ^= 1;
+        assertVerificationIssue(
+                compatibilityVerifier.verify(tamperedOriginal, JsonConverter.toJson(exported)),
+                ProofVerificationCode.FILE_HASH_MISMATCH,
+                "storage.objects[0].plainHash");
+
+        ProofVerificationResult tamperedChainResult = compatibilityVerifier.verify(
+                originalFile,
+                JsonConverter.toJson(withFileHash(exported, "different-chain-record-id")));
+        assertVerificationIssue(
+                tamperedChainResult,
+                ProofVerificationCode.LEAF_HASH_MISMATCH,
+                "merkle.leafHash");
+        assertThat(tamperedChainResult.issues())
+                .extracting(ProofVerificationIssue::code)
+                .doesNotContain(ProofVerificationCode.FILE_HASH_MISMATCH);
+
+        List<ProofBundleVO.StorageObjectEvidence> objects = exported.storage().objects();
+        ProofBundleVO.StorageObjectEvidence first = objects.getFirst();
+        ProofBundleVO.StorageObjectEvidence second = objects.get(1);
+        assertVerificationIssue(
+                compatibilityVerifier.verify(
+                        originalFile,
+                        JsonConverter.toJson(withStorageObjects(exported, List.of(
+                                copyStorageObject(first, first.index(), null, first.plainSize()),
+                                second)))),
+                ProofVerificationCode.MISSING_REQUIRED_FIELD,
+                "storage.objects[0].plainHash");
+        assertVerificationIssue(
+                compatibilityVerifier.verify(
+                        originalFile,
+                        JsonConverter.toJson(withStorageObjects(exported, List.of(
+                                copyStorageObject(first, first.index(), first.plainHash(), null),
+                                second)))),
+                ProofVerificationCode.MISSING_REQUIRED_FIELD,
+                "storage.objects[0].plainSize");
+        assertVerificationIssue(
+                compatibilityVerifier.verify(
+                        originalFile,
+                        JsonConverter.toJson(withStorageObjects(exported, List.of(
+                                first,
+                                copyStorageObject(second, first.index(), second.plainHash(), second.plainSize()))))),
+                ProofVerificationCode.FILE_HASH_MISMATCH,
+                "storage.objects[1].index");
+    }
+
+    /**
+     * Replaces the chain record identifier while preserving all other exported evidence.
+     */
+    private ProofBundleVO withFileHash(ProofBundleVO bundle, String fileHash) {
+        ProofBundleVO.FileEvidence source = bundle.file();
+        ProofBundleVO.FileEvidence file = new ProofBundleVO.FileEvidence(
+                source.fileId(),
+                source.fileName(),
+                fileHash,
+                source.transactionHash(),
+                source.fileSize(),
+                source.contentType(),
+                source.chunkCount(),
+                source.version(),
+                source.isLatest(),
+                source.createTime());
+        return new ProofBundleVO(
+                bundle.contractVersion(),
+                bundle.manifest(),
+                file,
+                bundle.storage(),
+                bundle.merkle(),
+                bundle.chain(),
+                bundle.issuer(),
+                bundle.verificationPolicy(),
+                bundle.verificationGuide());
+    }
+
+    /**
+     * Replaces ordered storage evidence while preserving the rest of the exported bundle.
+     */
+    private ProofBundleVO withStorageObjects(
+            ProofBundleVO bundle,
+            List<ProofBundleVO.StorageObjectEvidence> objects
+    ) {
+        return new ProofBundleVO(
+                bundle.contractVersion(),
+                bundle.manifest(),
+                bundle.file(),
+                new ProofBundleVO.StorageEvidence(objects),
+                bundle.merkle(),
+                bundle.chain(),
+                bundle.issuer(),
+                bundle.verificationPolicy(),
+                bundle.verificationGuide());
+    }
+
+    /**
+     * Copies one exporter object while replacing fields used by compatibility mutations.
+     */
+    private ProofBundleVO.StorageObjectEvidence copyStorageObject(
+            ProofBundleVO.StorageObjectEvidence source,
+            Integer index,
+            String plainHash,
+            Long plainSize
+    ) {
+        return new ProofBundleVO.StorageObjectEvidence(
+                index,
+                source.objectPath(),
+                plainHash,
+                source.cipherHash(),
+                source.size(),
+                plainSize,
+                source.checksumAlgorithm(),
+                source.exists(),
+                source.nodeName(),
+                source.contentLength(),
+                source.eTag(),
+                source.metadataHash(),
+                source.metadataHashMatches(),
+                source.tenantMatches());
+    }
+
+    /**
+     * Asserts one stable verifier issue code and field.
+     */
+    private void assertVerificationIssue(
+            ProofVerificationResult result,
+            ProofVerificationCode code,
+            String field
+    ) {
+        assertThat(result.issues()).anySatisfy(issue -> {
+            assertThat(issue.code()).isEqualTo(code);
+            assertThat(issue.field()).isEqualTo(field);
+        });
+    }
+
+    /**
+     * Calculates a lowercase SHA-256 digest for compatibility fixtures.
+     */
+    private String sha256Hex(byte[] value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 digest is unavailable", e);
+        }
     }
 
     /**

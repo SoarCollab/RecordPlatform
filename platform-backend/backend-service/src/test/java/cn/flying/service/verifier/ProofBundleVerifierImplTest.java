@@ -64,54 +64,267 @@ class ProofBundleVerifierImplTest {
     }
 
     /**
-     * 验证原始文件内容与证明包文件哈希不一致时返回机器可读错误码。
+     * Verifies that tampered original bytes fail against the ordered plaintext digest evidence.
      */
     @Test
-    void verify_shouldRejectFileHashMismatch() {
+    void verify_shouldRejectTamperedOriginalContent() {
         ProofBundleVO bundle = validBundle(bytes("hello proof"));
 
-        ProofVerificationResult result = verifier.verify(bytes("tampered"), bundle);
+        ProofVerificationResult result = verifier.verify(bytes("hullo proof"), bundle);
 
         assertThat(result.valid()).isFalse();
         assertThat(result.issues())
-                .extracting(ProofVerificationIssue::code)
-                .contains(ProofVerificationCode.FILE_HASH_MISMATCH);
+                .anySatisfy(issue -> {
+                    assertThat(issue.code()).isEqualTo(ProofVerificationCode.FILE_HASH_MISMATCH);
+                    assertThat(issue.field()).isEqualTo("storage.objects[0].plainHash");
+                });
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::field)
+                .doesNotContain("file.fileHash");
     }
 
     /**
-     * 验证即使存储分片声明被改写为匹配另一份文件，原始文件也必须绑定到链上 fileHash。
+     * Verifies that a changed chain record ID fails the Merkle binding without being treated as content.
      */
     @Test
-    void verify_shouldRejectFileEvidenceHashMismatchWhenStorageEvidenceMatches() {
-        byte[] attestedFile = bytes("hello proof");
-        byte[] substitutedFile = bytes("substituted proof");
-        ProofBundleVO bundle = validBundle(attestedFile);
-        ProofBundleVO.StorageObjectEvidence originalObject = bundle.storage().objects().getFirst();
-        ProofBundleVO substituted = withStorage(
-                bundle,
-                new ProofBundleVO.StorageEvidence(List.of(new ProofBundleVO.StorageObjectEvidence(
-                        originalObject.index(),
-                        originalObject.objectPath(),
-                        "sha256:" + sha256Hex(substitutedFile),
-                        originalObject.cipherHash(),
-                        (long) substitutedFile.length,
-                        originalObject.checksumAlgorithm(),
-                        originalObject.exists(),
-                        originalObject.nodeName(),
-                        (long) substitutedFile.length,
-                        originalObject.eTag(),
-                        originalObject.metadataHash(),
-                        originalObject.metadataHashMatches(),
-                        originalObject.tenantMatches()
-                )))
-        );
+    void verify_shouldRejectTamperedChainRecordIdAsMerkleMismatch() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.FileEvidence file = bundle.file();
+        ProofBundleVO tampered = withFile(bundle, new ProofBundleVO.FileEvidence(
+                file.fileId(),
+                file.fileName(),
+                "different-chain-record-id",
+                file.transactionHash(),
+                file.fileSize(),
+                file.contentType(),
+                file.chunkCount(),
+                file.version(),
+                file.isLatest(),
+                file.createTime()));
 
-        ProofVerificationResult result = verifier.verify(substitutedFile, substituted);
+        ProofVerificationResult result = verifier.verify(originalFile, tampered);
 
         assertThat(result.valid()).isFalse();
         assertThat(result.issues())
                 .extracting(ProofVerificationIssue::code)
-                .contains(ProofVerificationCode.FILE_HASH_MISMATCH);
+                .contains(ProofVerificationCode.LEAF_HASH_MISMATCH)
+                .doesNotContain(ProofVerificationCode.FILE_HASH_MISMATCH);
+    }
+
+    /**
+     * Verifies that a changed plaintext digest is reported at the content-evidence field.
+     */
+    @Test
+    void verify_shouldRejectTamperedPlainHash() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.StorageObjectEvidence object = bundle.storage().objects().getFirst();
+        ProofBundleVO tampered = withStorageObject(
+                bundle,
+                copyStorageObject(object, object.index(), "sha256:" + "0".repeat(64),
+                        object.cipherHash(), object.size(), object.plainSize()));
+
+        ProofVerificationResult result = verifier.verify(originalFile, tampered);
+
+        assertThat(result.issues()).anySatisfy(issue -> {
+            assertThat(issue.code()).isEqualTo(ProofVerificationCode.FILE_HASH_MISMATCH);
+            assertThat(issue.field()).isEqualTo("storage.objects[0].plainHash");
+        });
+    }
+
+    /**
+     * Verifies that plaintext evidence is mandatory and never falls back to the chain record ID.
+     */
+    @Test
+    void verify_shouldRejectMissingPlainHash() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.StorageObjectEvidence object = bundle.storage().objects().getFirst();
+        ProofBundleVO missingHash = withStorageObject(
+                bundle,
+                copyStorageObject(object, object.index(), null, object.cipherHash(),
+                        object.size(), object.plainSize()));
+
+        ProofVerificationResult result = verifier.verify(originalFile, JsonConverter.toJson(missingHash));
+
+        assertThat(result.issues()).anySatisfy(issue -> {
+            assertThat(issue.code()).isEqualTo(ProofVerificationCode.MISSING_REQUIRED_FIELD);
+            assertThat(issue.field()).isEqualTo("storage.objects[0].plainHash");
+        });
+    }
+
+    /**
+     * Verifies that encrypted historical evidence without plaintext length fails closed.
+     */
+    @Test
+    void verify_shouldRejectMissingPlainSizeForEncryptedObject() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.StorageObjectEvidence object = bundle.storage().objects().getFirst();
+        ProofBundleVO missingPlainSize = withStorageObject(
+                bundle,
+                copyStorageObject(object, object.index(), object.plainHash(), object.cipherHash(),
+                        object.size(), null));
+
+        ProofVerificationResult result = verifier.verify(originalFile, JsonConverter.toJson(missingPlainSize));
+
+        assertThat(result.issues()).anySatisfy(issue -> {
+            assertThat(issue.code()).isEqualTo(ProofVerificationCode.MISSING_REQUIRED_FIELD);
+            assertThat(issue.field()).isEqualTo("storage.objects[0].plainSize");
+        });
+    }
+
+    /**
+     * Verifies that a zero plaintext length cannot create an ambiguous empty segment.
+     */
+    @Test
+    void verify_shouldRejectZeroPlainSize() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.StorageObjectEvidence object = bundle.storage().objects().getFirst();
+        ProofBundleVO zeroPlainSize = withStorageObject(
+                bundle,
+                copyStorageObject(object, object.index(), object.plainHash(), object.cipherHash(),
+                        object.size(), 0L));
+
+        ProofVerificationResult result = verifier.verify(originalFile, zeroPlainSize);
+
+        assertThat(result.issues()).anySatisfy(issue -> {
+            assertThat(issue.code()).isEqualTo(ProofVerificationCode.MISSING_REQUIRED_FIELD);
+            assertThat(issue.field()).isEqualTo("storage.objects[0].plainSize");
+        });
+    }
+
+    /**
+     * Verifies that stored object lengths remain positive even when plainSize is explicit.
+     */
+    @Test
+    void verify_shouldRejectZeroStoredSize() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.StorageObjectEvidence object = bundle.storage().objects().getFirst();
+        ProofBundleVO zeroStoredSize = withStorageObject(
+                bundle,
+                copyStorageObject(object, object.index(), object.plainHash(), object.cipherHash(),
+                        0L, object.plainSize()));
+
+        ProofVerificationResult result = verifier.verify(originalFile, zeroStoredSize);
+
+        assertThat(result.issues()).anySatisfy(issue -> {
+            assertThat(issue.code()).isEqualTo(ProofVerificationCode.MISSING_REQUIRED_FIELD);
+            assertThat(issue.field()).isEqualTo("storage.objects[0].size");
+        });
+    }
+
+    /**
+     * Verifies that a missing stored length fails at its own compatibility field.
+     */
+    @Test
+    void verify_shouldRejectMissingStoredSize() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.StorageObjectEvidence object = bundle.storage().objects().getFirst();
+        ProofBundleVO missingStoredSize = withStorageObject(
+                bundle,
+                copyStorageObject(object, object.index(), object.plainHash(), object.cipherHash(),
+                        null, object.plainSize()));
+
+        ProofVerificationResult result = verifier.verify(originalFile, missingStoredSize);
+
+        assertThat(result.issues()).anySatisfy(issue -> {
+            assertThat(issue.code()).isEqualTo(ProofVerificationCode.MISSING_REQUIRED_FIELD);
+            assertThat(issue.field()).isEqualTo("storage.objects[0].size");
+        });
+    }
+
+    /**
+     * Verifies that a plaintext boundary exceeding the supplied file fails before hashing.
+     */
+    @Test
+    void verify_shouldRejectPlainSizeBeyondOriginalFile() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.StorageObjectEvidence object = bundle.storage().objects().getFirst();
+        ProofBundleVO oversizedPlainChunk = withStorageObject(
+                bundle,
+                copyStorageObject(object, object.index(), object.plainHash(), object.cipherHash(),
+                        object.size(), (long) originalFile.length + 1));
+
+        ProofVerificationResult result = verifier.verify(originalFile, oversizedPlainChunk);
+
+        assertThat(result.issues()).anySatisfy(issue -> {
+            assertThat(issue.code()).isEqualTo(ProofVerificationCode.FILE_HASH_MISMATCH);
+            assertThat(issue.field()).isEqualTo("storage.objects[0].plainSize");
+        });
+    }
+
+    /**
+     * Verifies that missing ciphertext evidence cannot unlock the historical length fallback.
+     */
+    @Test
+    void verify_shouldRejectMissingCipherHashForHistoricalLengthFallback() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.StorageObjectEvidence object = bundle.storage().objects().getFirst();
+        ProofBundleVO missingCipherHash = withStorageObject(
+                bundle,
+                copyStorageObject(object, object.index(), object.plainHash(), null,
+                        object.size(), null));
+
+        ProofVerificationResult result = verifier.verify(originalFile, missingCipherHash);
+
+        assertThat(result.issues()).anySatisfy(issue -> {
+            assertThat(issue.code()).isEqualTo(ProofVerificationCode.MISSING_REQUIRED_FIELD);
+            assertThat(issue.field()).isEqualTo("storage.objects[0].plainSize");
+        });
+    }
+
+    /**
+     * Verifies the sole legacy length fallback for demonstrably unencrypted objects.
+     */
+    @Test
+    void verify_shouldUseStoredSizeForHistoricalUnencryptedObject() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.StorageObjectEvidence object = bundle.storage().objects().getFirst();
+        ProofBundleVO legacy = withStorageObject(
+                bundle,
+                copyStorageObject(object, object.index(), object.plainHash(), object.plainHash(),
+                        (long) originalFile.length, null));
+
+        ProofVerificationResult result = verifier.verify(originalFile, JsonConverter.toJson(legacy));
+
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .containsExactly(ProofVerificationCode.AUTHENTICITY_NOT_VERIFIED);
+    }
+
+    /**
+     * Verifies that multi-object evidence must retain an explicit contiguous order.
+     */
+    @Test
+    void verify_shouldRejectAmbiguousMultiObjectOrder() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.StorageObjectEvidence first = bundle.storage().objects().getFirst();
+        ProofBundleVO.StorageObjectEvidence duplicate = copyStorageObject(
+                first,
+                0,
+                "sha256:" + sha256Hex(bytes("proof")),
+                "sha256:" + sha256Hex(bytes("encrypted-proof")),
+                19L,
+                5L);
+        ProofBundleVO ambiguous = withStorage(
+                bundle,
+                new ProofBundleVO.StorageEvidence(List.of(first, duplicate)));
+
+        ProofVerificationResult result = verifier.verify(originalFile, ambiguous);
+
+        assertThat(result.issues()).anySatisfy(issue -> {
+            assertThat(issue.code()).isEqualTo(ProofVerificationCode.FILE_HASH_MISMATCH);
+            assertThat(issue.field()).isEqualTo("storage.objects[1].index");
+        });
     }
 
     /**
@@ -469,7 +682,7 @@ class ProofBundleVerifierImplTest {
      * 构造与原始文件内容匹配的证明包。
      */
     private ProofBundleVO validBundle(byte[] originalFile) {
-        String fileHash = sha256Hex(originalFile);
+        String fileHash = "chain-record-" + sha256Hex(bytes("legacy-chain-record"));
         String plainHash = "sha256:" + sha256Hex(originalFile);
         String cipherHash = "sha256:" + sha256Hex(bytes("cipher"));
         String siblingHash = sha256Hex(bytes("sibling"));
@@ -508,6 +721,7 @@ class ProofBundleVerifierImplTest {
                         "storage/tenant/7/chunk/" + cipherHash,
                         plainHash,
                         cipherHash,
+                        (long) originalFile.length,
                         (long) originalFile.length,
                         "SHA-256",
                         true,
@@ -671,6 +885,44 @@ class ProofBundleVerifierImplTest {
                 bundle.verificationPolicy(),
                 bundle.verificationGuide()
         );
+    }
+
+    /**
+     * Replaces the storage section with one object for focused evidence mutations.
+     */
+    private ProofBundleVO withStorageObject(
+            ProofBundleVO bundle,
+            ProofBundleVO.StorageObjectEvidence object
+    ) {
+        return withStorage(bundle, new ProofBundleVO.StorageEvidence(List.of(object)));
+    }
+
+    /**
+     * Copies one storage object while replacing its content and length evidence fields.
+     */
+    private ProofBundleVO.StorageObjectEvidence copyStorageObject(
+            ProofBundleVO.StorageObjectEvidence source,
+            Integer index,
+            String plainHash,
+            String cipherHash,
+            Long size,
+            Long plainSize
+    ) {
+        return new ProofBundleVO.StorageObjectEvidence(
+                index,
+                source.objectPath(),
+                plainHash,
+                cipherHash,
+                size,
+                plainSize,
+                source.checksumAlgorithm(),
+                source.exists(),
+                source.nodeName(),
+                source.contentLength(),
+                source.eTag(),
+                source.metadataHash(),
+                source.metadataHashMatches(),
+                source.tenantMatches());
     }
 
     /**

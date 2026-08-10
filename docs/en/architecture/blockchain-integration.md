@@ -285,7 +285,7 @@ The evidence entering the Merkle tree is the canonical `manifest_hash`. `file.fi
 
 Automatic flush uses size and maximum-wait thresholds. A tenant administrator may force a below-threshold flush, but both paths retain the configured seed, batch-size, and per-run limits. Scheduled execution has a distributed lock, explicitly enumerates tenants, and restores tenant context after each isolated run.
 
-The `proof-bundle.v1.1` JSON exporter remains for compatibility, but still rejects production `MANIFEST_HASH` leaves. That legacy contract models a file digest as Merkle evidence and cannot safely represent manifest evidence, so the backend does not fabricate compatibility through field fallback.
+The `proof-bundle.v1.1` JSON exporter remains for compatibility, but still rejects production `MANIFEST_HASH` leaves. That legacy contract models a historical chain record ID as Merkle evidence and cannot safely represent manifest evidence, so the backend does not fabricate compatibility through field fallback.
 
 ### Proof Bundle Export
 
@@ -298,6 +298,8 @@ The two routes without `.zip` remain as deprecated, unsigned `proof-bundle.v1.1`
 
 - `GET /api/v1/files/{id}/proof-bundle` exports by external file ID.
 - `GET /api/v1/files/attestation-leaves/{leafId}/proof-bundle` exports by external attestation leaf ID.
+
+The v1.1 compatibility contract keeps evidence semantics separate. `file.fileHash` is the historical chain record ID and the Merkle leaf preimage; it is never compared with the original-file digest. Original bytes are segmented in declared object order by `storage.objects[].plainSize` and each segment is checked only against its `plainHash`. `storage.objects[].size` remains the stored object/ciphertext length and is checked against storage HEAD `contentLength`. New exports always emit `plainSize = manifest plainSize ?? size`. A historical object without `plainSize` may use `size` only when normalized `plainHash` equals `cipherHash`; encrypted, missing-hash, or ambiguously ordered evidence fails closed with the exact field. This compatibility reader deliberately reports `AUTHENTICITY_NOT_VERIFIED` after all structural checks pass because unsigned JSON can be rewritten as a whole.
 
 Before issuance and every repeat export, `SignedProofArchiveService` revalidates tenant plus owner/admin authorization, a successful file version, the structured original-byte `contentHash` against its protected upload source, the canonical active chunk-manifest hash, every storage HEAD record, the `MANIFEST_HASH` leaf/path/root, the completed batch receipt, and the immutable contract-registry snapshot. A historical record without a trusted `contentHash` fails closed; it is never backfilled from `chainRecordId` or a manifest hash.
 
@@ -340,7 +342,7 @@ Verification has three outcomes:
 
 Offline verification can prove local consistency, but it can never produce `VALID`: absent or unavailable key/status/chain resolution is `INDETERMINATE`, not success. CLI online mode must be enabled explicitly and requires trusted issuer/chain endpoints plus an exact host allowlist; plain HTTP and private addresses remain opt-in for local testing. CLI exit codes are `0` for `VALID`, `2` for `INVALID`, and `3` for `INDETERMINATE`.
 
-The backend `ProofBundleVerifierImpl` is a compatibility-only reader for the deprecated unsigned JSON `proof-bundle.v1.1` contract. It is not the signed ZIP verifier, and its structural result must not be promoted to signed-proof authenticity. New integrations must use `platform-verifier` and the signed policy embedded in the archive.
+The backend `ProofBundleVerifierImpl` is a compatibility-only reader for the deprecated unsigned JSON `proof-bundle.v1.1` contract. It independently checks plaintext chunks and the chain-record/Merkle path without cross-semantic fallback. It is not the signed ZIP verifier, and its structural result must not be promoted to signed-proof authenticity. New integrations must use `platform-verifier` and the signed policy embedded in the archive.
 
 ### Transaction Verification
 

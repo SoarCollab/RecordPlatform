@@ -73,7 +73,7 @@ public record ProofBundleVO(
             String fileId,
             @Schema(description = "文件名称")
             String fileName,
-            @Schema(description = "文件哈希")
+            @Schema(description = "历史单文件链记录 ID；不是原文件内容 SHA-256")
             String fileHash,
             @Schema(description = "文件链上交易哈希")
             String transactionHash,
@@ -113,8 +113,13 @@ public record ProofBundleVO(
             String plainHash,
             @Schema(description = "密文分片哈希")
             String cipherHash,
-            @Schema(description = "分片长度")
+            @Schema(description = "存储对象/密文分片长度")
             Long size,
+            @Schema(
+                    description = "原始明文分片长度；新导出必填，旧未加密对象可由 size 兼容推导",
+                    requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+                    nullable = true)
+            Long plainSize,
             @Schema(description = "校验算法")
             String checksumAlgorithm,
             @Schema(description = "对象是否存在")
