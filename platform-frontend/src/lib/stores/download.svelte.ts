@@ -146,6 +146,7 @@ type PresignedUrlMetadata = {
   keyGrant: DownloadKeyGrantVO | null;
   downloadSessionId: string | null;
   legacyInitialKey: string | null;
+  publicAccess: boolean;
 };
 
 /**
@@ -173,8 +174,6 @@ const DEFAULT_CONCURRENCY = 3;
 const DEFAULT_BATCH_CONCURRENCY = 3;
 const MAX_BATCH_FILES = 100;
 const DEFAULT_BATCH_RETRIES = 2;
-const URL_EXPIRY_BUFFER_MS = 60 * 60 * 1000; // 1 hour buffer before 24h expiry
-const PRESIGNED_URL_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 // ===== State =====
 
@@ -217,12 +216,6 @@ function updateTask(id: string, updates: Partial<DownloadTask>): void {
 
 function getTask(id: string): DownloadTask | undefined {
   return tasks.find((t) => t.id === id);
-}
-
-function areUrlsExpired(urlsFetchedAt: number | null): boolean {
-  if (!urlsFetchedAt) return true;
-  const age = Date.now() - urlsFetchedAt;
-  return age > PRESIGNED_URL_TTL_MS - URL_EXPIRY_BUFFER_MS;
 }
 
 /**
@@ -416,39 +409,56 @@ async function executeBatchItem(
 async function fetchPresignedUrls(
   task: DownloadTask,
 ): Promise<PresignedUrlMetadata> {
-  if (task.source.type === "owned") {
-    try {
-      const downloadSessionId = fileApi.createDownloadSessionId();
-      const metadata = await fileApi.getDownloadMetadata(
+  const downloadSessionId = fileApi.createDownloadSessionId();
+  try {
+    let metadata: FileDownloadMetadataVO;
+    if (task.source.type === "owned") {
+      metadata = await fileApi.getDownloadMetadata(
         task.fileHash,
         downloadSessionId,
       );
-      const orderedParts = [...metadata.parts].sort(
-        (a, b) => a.index - b.index,
-      );
-      const urls = orderedParts.map((part) => part.downloadUrl);
-      const decryptInfo: fileApi.FileDecryptInfoVO = {
-        fileName: metadata.fileName,
-        fileSize: metadata.fileSize,
-        contentType: metadata.contentType,
-        chunkCount: metadata.totalChunks,
-        fileHash: metadata.fileHash,
-      };
-      const safeMetadata: FileDownloadMetadataVO = {
-        ...metadata,
-        initialKey: undefined,
-        keyGrant: undefined,
-      };
-      return {
-        urls,
-        decryptInfo,
-        encryptionAlgorithm: metadata.encryptionAlgorithm ?? null,
-        metadata: safeMetadata,
-        keyGrant: metadata.keyGrant ?? null,
-        downloadSessionId,
-        legacyInitialKey: metadata.initialKey ?? null,
-      };
-    } catch (metadataError) {
+    } else {
+      if (!task.source.shareCode) {
+        throw new Error("共享下载缺少 shareCode");
+      }
+      metadata =
+        task.source.type === "public_share"
+          ? await fileApi.getPublicShareDownloadMetadata(
+              task.source.shareCode,
+              task.fileHash,
+              downloadSessionId,
+            )
+          : await fileApi.getAuthenticatedShareDownloadMetadata(
+              task.source.shareCode,
+              task.fileHash,
+              downloadSessionId,
+            );
+    }
+    const urls = metadata.parts.map((part) => part.downloadUrl);
+    const decryptInfo: fileApi.FileDecryptInfoVO = {
+      fileName: metadata.fileName,
+      fileSize: metadata.fileSize,
+      contentType: metadata.contentType,
+      chunkCount: metadata.totalChunks,
+      fileHash: metadata.fileHash,
+    };
+    const safeMetadata: FileDownloadMetadataVO = {
+      ...metadata,
+      initialKey: undefined,
+      keyGrant: undefined,
+    };
+    return {
+      urls,
+      decryptInfo,
+      encryptionAlgorithm: metadata.encryptionAlgorithm ?? null,
+      metadata: safeMetadata,
+      keyGrant: metadata.keyGrant ?? null,
+      downloadSessionId,
+      legacyInitialKey: metadata.initialKey ?? null,
+      publicAccess: task.source.type === "public_share",
+    };
+  } catch (metadataError) {
+    if (task.source.type === "owned") {
       if (!isLegacyDownloadEligible(metadataError)) {
         throw metadataError;
       }
@@ -460,13 +470,8 @@ async function fetchPresignedUrls(
       );
       return fetchLegacyPresignedUrls(task.fileHash);
     }
+    throw metadataError;
   }
-
-  // For shared files, we don't have presigned URL endpoint yet
-  // This will throw if not implemented
-  throw new Error(
-    "Presigned URLs not available for shared files. Use fallback download.",
-  );
 }
 
 /**
@@ -493,6 +498,7 @@ async function fetchLegacyPresignedUrls(
     keyGrant: decryptInfo.keyGrant ?? null,
     downloadSessionId,
     legacyInitialKey: decryptInfo.initialKey ?? null,
+    publicAccess: false,
   };
 }
 
@@ -513,6 +519,7 @@ async function consumeFetchedDownloadKey(
   const material = await fileApi.consumeDownloadKeyGrant(
     fetched.keyGrant,
     fetched.downloadSessionId,
+    fetched.publicAccess,
   );
   if (material.protocol !== fetched.keyGrant.protocol) {
     throw new Error("下载密钥授权协议不一致");
@@ -521,6 +528,27 @@ async function consumeFetchedDownloadKey(
     throw new Error("下载密钥授权未返回可用密钥");
   }
   return material.initialKey;
+}
+
+/**
+ * URL 过期后重新签发并消费一次 grant；仅把去密钥 metadata 交回身份栅栏校验。
+ */
+async function refreshBoundedDownloadMetadata(
+  task: DownloadTask,
+): Promise<FileDownloadMetadataVO> {
+  const refreshed = await fetchPresignedUrls(task);
+  if (!refreshed.metadata) {
+    throw new Error("刷新下载 metadata 时 manifest 不再可用");
+  }
+  // Consume the refreshed one-time grant to prove current authorization; the
+  // active key remains bound to the unchanged file/manifest identity.
+  await consumeFetchedDownloadKey(refreshed);
+  updateTask(task.id, {
+    presignedUrls: refreshed.urls,
+    urlsFetchedAt: Date.now(),
+    downloadMetadata: refreshed.metadata,
+  });
+  return refreshed.metadata;
 }
 
 /**
@@ -560,11 +588,8 @@ async function executeDownload(task: DownloadTask): Promise<void> {
     let fetchedKeyContext: PresignedUrlMetadata | null = null;
     const authContextHash = await getAuthContextHash();
 
-    if (
-      task.source.type === "owned" ||
-      urls.length === 0 ||
-      areUrlsExpired(task.urlsFetchedAt)
-    ) {
+    // Grants and sessions are memory-only, so every execution obtains fresh metadata.
+    {
       updateTask(taskId, { status: "fetching_urls" });
 
       const fetchedMetadata = await fetchPresignedUrls(task);
@@ -634,6 +659,7 @@ async function executeDownload(task: DownloadTask): Promise<void> {
           sink,
           metrics: metricsTracker,
           signal: abortController.signal,
+          refreshMetadata: () => refreshBoundedDownloadMetadata(task),
           onPartComplete: (completed, total) => {
             updateTask(taskId, {
               status: "downloading",
@@ -793,11 +819,8 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
     let downloadMetadata = task.downloadMetadata;
     let fetchedKeyContext: PresignedUrlMetadata | null = null;
 
-    if (
-      task.source.type === "owned" ||
-      urls.length === 0 ||
-      areUrlsExpired(task.urlsFetchedAt)
-    ) {
+    // Grants and sessions are memory-only, so every execution obtains fresh metadata.
+    {
       updateTask(taskId, { status: "fetching_urls" });
 
       const fetchedMetadata = await fetchPresignedUrls(task);
@@ -856,6 +879,7 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
           sink,
           signal: abortController.signal,
           metrics: metricsTracker,
+          refreshMetadata: () => refreshBoundedDownloadMetadata(task),
           onPartComplete: (completed, total) => {
             updateTask(taskId, {
               status: "streaming",
@@ -981,12 +1005,12 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
   }
 }
 
-// ===== Fallback for shared files (backend proxy) =====
+// ===== Bounded strategy rejection =====
 
 const UNSUPPORTED_LARGE_DOWNLOAD_MESSAGE =
   "当前浏览器不支持超过 64 MiB 的有界保存，请使用 Chrome 或 Edge。";
 
-/** 将不允许进入 Blob/backend proxy 的任务置为失败。 */
+/** 将不允许进入 Blob 或其他无界回退的任务置为失败。 */
 function rejectUnboundedDownload(
   taskId: string,
   reason = UNSUPPORTED_LARGE_DOWNLOAD_MESSAGE,
@@ -1000,22 +1024,6 @@ function rejectUnboundedDownload(
 
 /** 按来源、策略和文件大小统一调度下载，避免绕过内存硬上限。 */
 function dispatchDownloadTask(task: DownloadTask): void {
-  if (task.source.type !== "owned") {
-    if (
-      !Number.isSafeInteger(task.fileSize) ||
-      task.fileSize < 0 ||
-      task.fileSize > MAX_SAFE_INMEMORY_SIZE
-    ) {
-      rejectUnboundedDownload(
-        task.id,
-        "共享文件大小无效或超过 64 MiB，当前浏览器不支持有界保存。",
-      );
-      return;
-    }
-    void executeBackendProxyDownload(task);
-    return;
-  }
-
   if (task.strategy === "backend_proxy") {
     rejectUnboundedDownload(task.id);
     return;
@@ -1043,58 +1051,6 @@ function dispatchDownloadTask(task: DownloadTask): void {
     return;
   }
   void executeDownload(task);
-}
-
-async function executeBackendProxyDownload(task: DownloadTask): Promise<void> {
-  const taskId = task.id;
-
-  if (
-    !Number.isSafeInteger(task.fileSize) ||
-    task.fileSize < 0 ||
-    task.fileSize > MAX_SAFE_INMEMORY_SIZE
-  ) {
-    rejectUnboundedDownload(taskId);
-    return;
-  }
-
-  try {
-    updateTask(taskId, { status: "downloading", startedAt: Date.now() });
-
-    let blob: Blob;
-    const source = task.source;
-
-    if (source.type === "public_share" && source.shareCode) {
-      blob = await fileApi.publicDownloadFile(source.shareCode, task.fileHash);
-    } else if (source.type === "private_share" && source.shareCode) {
-      blob = await fileApi.shareDownloadFile(source.shareCode, task.fileHash);
-    } else {
-      // Fallback for owned files without presigned URLs
-      blob = await fileApi.downloadFile(task.fileHash);
-    }
-
-    // 共享文件可能未携带预先知道的大小，必须以响应 Blob 的实际大小再次封顶。
-    if (
-      !blob ||
-      !Number.isSafeInteger(blob.size) ||
-      blob.size > MAX_SAFE_INMEMORY_SIZE ||
-      (task.fileSize > 0 && blob.size !== task.fileSize)
-    ) {
-      throw new Error("共享文件响应超过 64 MiB 或与声明大小不一致");
-    }
-
-    downloadBlob(blob, task.fileName);
-
-    updateTask(taskId, {
-      status: "completed",
-      progress: 100,
-      completedAt: Date.now(),
-    });
-  } catch (error) {
-    updateTask(taskId, {
-      status: "failed",
-      error: (error as Error).message,
-    });
-  }
 }
 
 // ===== Actions =====
@@ -1141,7 +1097,7 @@ async function startDownload(
     if (fileSize) {
       const check = checkFileSize(fileSize);
       strategy = check.decision.strategy;
-    } else if (source.type === "owned" && canUseStreaming()) {
+    } else if (canUseStreaming()) {
       // If size is unknown, prefer streaming (avoids OOM on large files).
       strategy = "streaming";
     }

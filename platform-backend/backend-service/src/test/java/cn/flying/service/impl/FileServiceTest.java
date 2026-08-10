@@ -19,7 +19,9 @@ import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.mapper.FileSourceMapper;
 import cn.flying.dao.mapper.ProofBundleIssuanceMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.FileDownloadMetadataVO;
 import cn.flying.dao.vo.file.DownloadKeyGrantVO;
+import cn.flying.dao.vo.file.ManifestErrorDetail;
 import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.ShareInfoVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
@@ -32,9 +34,17 @@ import cn.flying.service.FileService;
 import cn.flying.service.QuotaService;
 import cn.flying.service.ShareAuditService;
 import cn.flying.service.key.FileKeyEnvelopeService;
+import cn.flying.service.key.FileKeyGrantAccessKind;
 import cn.flying.service.key.FileKeyGrantEnvelopeBinding;
+import cn.flying.service.key.FileKeyGrantIssueContext;
 import cn.flying.service.key.FileKeyGrantService;
 import cn.flying.service.key.FileParamEnvelopeResult;
+import cn.flying.service.manifest.ChunkManifestCanonicalizer;
+import cn.flying.service.manifest.ChunkManifestChunk;
+import cn.flying.service.manifest.ChunkManifestDraft;
+import cn.flying.service.manifest.ChunkManifestService;
+import cn.flying.service.manifest.ChunkManifestView;
+import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.saga.FileSagaOrchestrator;
 import cn.flying.service.saga.FileUploadResult;
@@ -131,6 +141,12 @@ class FileServiceTest {
     private FileKeyGrantService fileKeyGrantService;
 
     @Mock
+    private ChunkManifestService chunkManifestService;
+
+    @Mock
+    private ManifestGovernanceStatusService manifestGovernanceStatusService;
+
+    @Mock
     private FileKeyGrantEnvelopeBinding keyGrantBinding;
 
     @Mock
@@ -152,6 +168,8 @@ class FileServiceTest {
     private static final String PUBLIC_CLIENT_IDENTITY = "203.0.113.7";
     private static final DownloadKeyGrantVO DOWNLOAD_KEY_GRANT = new DownloadKeyGrantVO(
             "B".repeat(43), KEY_DELIVERY_PROTOCOL, Instant.parse("2030-01-01T00:00:00Z"));
+    private static final String MANIFEST_HASH = "sha256:" + "a".repeat(64);
+    private static final ChunkManifestCanonicalizer CANONICALIZER = new ChunkManifestCanonicalizer();
 
     /**
      * 初始化 MyBatis-Plus Lambda 缓存，避免在纯 Mockito 场景下构造 LambdaWrapper 失败。
@@ -172,6 +190,12 @@ class FileServiceTest {
         lenient().when(fileKeyEnvelopeService.resolveShareGrantBinding(any(), anyString(), any()))
                 .thenReturn(Optional.of(keyGrantBinding));
         lenient().when(fileKeyGrantService.issue(any())).thenReturn(DOWNLOAD_KEY_GRANT);
+        lenient().when(chunkManifestService.calculateManifestHash(any())).thenReturn(MANIFEST_HASH);
+        lenient().when(chunkManifestService.calculateCanonicalJson(any()))
+                .thenAnswer(invocation -> CANONICALIZER.canonicalJson(
+                        invocation.getArgument(0, ChunkManifestDraft.class)));
+        lenient().when(manifestGovernanceStatusService.activeManifest())
+                .thenReturn(new ManifestErrorDetail("ACTIVE", "ALREADY_MANIFEST", null, false));
     }
 
     /**
@@ -1175,6 +1199,122 @@ class FileServiceTest {
             assertEquals(1, shareLookups.get());
             assertEquals(99L, TenantContext.getTenantId());
             assertFalse(TenantContext.isIgnoreIsolation());
+        }
+
+        /**
+         * Verifies public metadata delays grant delivery until URL generation and binds the anonymous client.
+         */
+        @Test
+        @DisplayName("should bind public metadata to share tenant and trusted client identity")
+        void shouldBindPublicMetadataToShareTenantAndTrustedClientIdentity() {
+            FileShare share = aFileShare(s -> s.setTenantId(7L).setId(70L));
+            File sourceFile = sharedMetadataFile(7L);
+            ChunkManifestView manifest = sharedMetadataManifest(sourceFile);
+            AtomicInteger shareLookups = stubGlobalThenOwnerShareLookup(share, 99L);
+            when(fileMapper.selectOne(any(), anyBoolean())).thenReturn(sourceFile);
+            when(chunkManifestService.findActiveManifest(USER_ID, sourceFile.getId()))
+                    .thenReturn(Optional.of(manifest));
+            when(fileRemoteClient.getFileUrlListByHash(
+                    List.of("shares/public-0"), List.of("cipher-public-0")))
+                    .thenReturn(Result.success(List.of("https://storage.example/public-0")));
+
+            TenantContext.setTenantId(99L);
+            FileDownloadMetadataVO metadata;
+            try (MockedStatic<IdUtils> idUtils = mockStatic(IdUtils.class)) {
+                idUtils.when(() -> IdUtils.toExternalId(sourceFile.getId())).thenReturn("external-shared-file");
+                metadata = fileService.getPublicFileDownloadMetadata(
+                        SHARE_CODE, FILE_HASH, KEY_DELIVERY_PROTOCOL,
+                        DOWNLOAD_SESSION_ID, PUBLIC_CLIENT_IDENTITY);
+            }
+
+            assertEquals("external-shared-file", metadata.fileId());
+            assertNull(metadata.initialKey());
+            assertEquals(DOWNLOAD_KEY_GRANT, metadata.keyGrant());
+            assertEquals(FileKeyGrantAccessKind.PUBLIC_SHARE.name(), metadata.accessIdentity().accessKind());
+            assertEquals(4, metadata.accessIdentity().fileVersion());
+            assertEquals(MANIFEST_HASH, metadata.accessIdentity().manifestHash());
+            assertTrue(metadata.accessIdentity().identityHash().startsWith("sha256:"));
+            assertEquals(1, shareLookups.get());
+            assertEquals(99L, TenantContext.getTenantId());
+
+            ArgumentCaptor<FileKeyGrantIssueContext> issue = ArgumentCaptor.forClass(FileKeyGrantIssueContext.class);
+            verify(fileKeyGrantService).issue(issue.capture());
+            assertEquals(FileKeyGrantAccessKind.PUBLIC_SHARE, issue.getValue().accessKind());
+            assertNull(issue.getValue().actorId());
+            assertEquals(PUBLIC_CLIENT_IDENTITY, issue.getValue().publicClientIdentity());
+            verify(fileRemoteClient).getFileUrlListByHash(
+                    List.of("shares/public-0"), List.of("cipher-public-0"));
+        }
+
+        /**
+         * Verifies authenticated share metadata binds the actor and never reuses public-client identity.
+         */
+        @Test
+        @DisplayName("should bind authenticated metadata to actor and exact share row")
+        void shouldBindAuthenticatedMetadataToActorAndExactShareRow() {
+            FileShare share = aFileShare(s -> s.setShareType(ShareType.PRIVATE.getCode()).setId(71L));
+            File sourceFile = sharedMetadataFile(1L);
+            ChunkManifestView manifest = sharedMetadataManifest(sourceFile);
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
+            when(fileMapper.selectOne(any(), anyBoolean())).thenReturn(sourceFile);
+            when(chunkManifestService.findActiveManifest(USER_ID, sourceFile.getId()))
+                    .thenReturn(Optional.of(manifest));
+            when(fileRemoteClient.getFileUrlListByHash(
+                    List.of("shares/public-0"), List.of("cipher-public-0")))
+                    .thenReturn(Result.success(List.of("https://storage.example/private-0")));
+
+            FileDownloadMetadataVO metadata;
+            try (MockedStatic<IdUtils> idUtils = mockStatic(IdUtils.class)) {
+                idUtils.when(() -> IdUtils.toExternalId(sourceFile.getId())).thenReturn("external-shared-file");
+                metadata = fileService.getSharedFileDownloadMetadata(
+                        OTHER_USER_ID, SHARE_CODE, FILE_HASH,
+                        KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID);
+            }
+
+            assertEquals(FileKeyGrantAccessKind.AUTHENTICATED_SHARE.name(),
+                    metadata.accessIdentity().accessKind());
+            assertEquals(MANIFEST_HASH, metadata.accessIdentity().manifestHash());
+            assertEquals(DOWNLOAD_KEY_GRANT, metadata.keyGrant());
+
+            ArgumentCaptor<FileKeyGrantIssueContext> issue = ArgumentCaptor.forClass(FileKeyGrantIssueContext.class);
+            verify(fileKeyGrantService).issue(issue.capture());
+            assertEquals(FileKeyGrantAccessKind.AUTHENTICATED_SHARE, issue.getValue().accessKind());
+            assertEquals(OTHER_USER_ID, issue.getValue().actorId());
+            assertNull(issue.getValue().publicClientIdentity());
+        }
+
+        /**
+         * Builds one encrypted shared file with stable version metadata.
+         */
+        private File sharedMetadataFile(Long tenantId) {
+            return new File()
+                    .setId(8L)
+                    .setTenantId(tenantId)
+                    .setUid(USER_ID)
+                    .setVersion(4)
+                    .setFileName("shared.txt")
+                    .setFileHash(FILE_HASH)
+                    .setFileSize(3L)
+                    .setContentType("text/plain")
+                    .setFileParam("""
+                            {"encryptionAlgorithm":"AES-GCM","fileName":"shared.txt","fileSize":3,"contentType":"text/plain","chunkCount":1,"chunkSize":3}
+                            """);
+        }
+
+        /**
+         * Builds the single-part active manifest used by share metadata tests.
+         */
+        private ChunkManifestView sharedMetadataManifest(File file) {
+            return new ChunkManifestView(
+                    80L, file.getId(), 4,
+                    ChunkManifestCanonicalizer.SCHEMA_ID,
+                    FILE_HASH, MANIFEST_HASH,
+                    ChunkManifestCanonicalizer.HASH_ALGORITHM,
+                    3L, 1, 3L, null,
+                    "AES-GCM", "S3", null,
+                    List.of(new ChunkManifestChunk(
+                            0, "plain-public-0", "cipher-public-0", 3L,
+                            "shares/public-0", "S3", "etag-public-0", "SHA-256")));
         }
 
         /**

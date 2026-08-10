@@ -38,6 +38,7 @@ Only these five exact routes are anonymous:
 - `GET /api/v1/shares/{shareCode}/files`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
+- `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/download-metadata`
 - `POST /api/v1/public/key-grants/consume`
 
 They require neither JWT nor a tenant header. Caller-controlled `X-Tenant-ID` values are ignored rather than becoming an authoritative `TenantContext`. The service uses the matching `shareCode` metadata to resolve the owner tenant; only that share-metadata lookup crosses tenant isolation. File metadata, key envelopes, access-count changes, and share-access auditing then execute inside the owner tenant. Checks for public visibility, active/cancelled/expired or unknown state, supported share type, and file membership remain fail closed. The current model has no share-password field; password protection is outside this change.
@@ -121,7 +122,7 @@ The public proof status and historical-key endpoints explicitly opt into a tenan
 
 ### Public Share Shared Bucket
 
-The public chunk and decrypt-info endpoints share `rate:limit:public:share-access:v2:ip:<canonical-ip>` at a fixed 30 requests per 60 seconds. The key contains no tenant, JWT role, endpoint method, or caller-supplied header value, so changing `X-Tenant-ID` or alternating between the two endpoints cannot split the bucket. The trusted-proxy boundary is the same one described above: forwarding headers are ignored unless the immediate peer matches the configured numeric allowlist. The first 30 combined requests may enter the controller; the current 31st request is denied through the existing response wrapper as HTTP 200 with business code `70005`. A Redis result other than `1`, including an exception, fails closed before the controller executes.
+The public chunk, decrypt-info, and download-metadata endpoints share `rate:limit:public:share-access:v2:ip:<canonical-ip>` at a fixed 30 requests per 60 seconds. The key contains no tenant, JWT role, endpoint method, or caller-supplied header value, so changing `X-Tenant-ID` or alternating among the endpoints cannot split the bucket. The trusted-proxy boundary is the same one described above: forwarding headers are ignored unless the immediate peer matches the configured numeric allowlist. The first 30 combined requests may enter the controller; the current 31st request is denied through the existing response wrapper as HTTP 200 with business code `70005`. A Redis result other than `1`, including an exception, fails closed before the controller executes.
 
 ### Distributed Rate Limiter
 

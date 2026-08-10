@@ -391,6 +391,12 @@ class OpenApiContractExportTest {
                 "#/components/schemas/ResultFileDecryptInfoVO",
                 "shareCode",
                 "fileHash");
+        assertPublicOperation(
+                rootNode,
+                "/api/v1/public/shares/{shareCode}/files/{fileHash}/download-metadata",
+                "#/components/schemas/ResultFileDownloadMetadataVO",
+                "shareCode",
+                "fileHash");
         assertAnonymousPostOperation(
                 rootNode,
                 "/api/v1/public/key-grants/consume",
@@ -407,6 +413,10 @@ class OpenApiContractExportTest {
                 rootNode,
                 "/api/v1/shares/{shareCode}/files/{fileHash}/decrypt-info",
                 "get");
+        assertProtectedOperation(
+                rootNode,
+                "/api/v1/shares/{shareCode}/files/{fileHash}/download-metadata",
+                "get");
         assertProtectedOperation(rootNode, "/api/v1/files/key-grants/consume", "post");
         assertSignedProofArchiveResponseContract(
                 rootNode, "/api/v1/files/{id}/proof-bundle.zip");
@@ -421,6 +431,9 @@ class OpenApiContractExportTest {
         assertThat(downloadMetadataSchema.path("properties").has("encryption")).isTrue();
         assertThat(downloadMetadataSchema.path("properties").has("canonicalManifestJson")).isTrue();
         assertThat(downloadMetadataSchema.path("properties").has("keyGrant")).isTrue();
+        assertThat(downloadMetadataSchema.path("properties").has("accessIdentity")).isTrue();
+        assertThat(downloadMetadataSchema.path("required").toString())
+                .contains("\"accessIdentity\"");
         assertThat(downloadMetadataSchema.path("properties").path("canonicalManifestJson")
                 .path("type").asText()).isEqualTo("string");
         JsonNode downloadEncryptionSchema = rootNode.path("components").path("schemas")
@@ -437,6 +450,21 @@ class OpenApiContractExportTest {
                 .path("FileDownloadPartVO");
         assertThat(downloadPartSchema.path("properties").has("plainSize")).isTrue();
         assertThat(downloadPartSchema.path("properties").has("frameCount")).isTrue();
+        JsonNode downloadAccessIdentitySchema = rootNode.path("components").path("schemas")
+                .path("DownloadAccessIdentityVO");
+        assertThat(downloadAccessIdentitySchema.isMissingNode()).isFalse();
+        assertThat(downloadAccessIdentitySchema.path("properties").has("accessKind")).isTrue();
+        assertThat(downloadAccessIdentitySchema.path("properties").has("identityHash")).isTrue();
+        assertThat(downloadAccessIdentitySchema.path("properties").has("fileVersion")).isTrue();
+        assertThat(downloadAccessIdentitySchema.path("properties").has("manifestHash")).isTrue();
+        assertThat(downloadAccessIdentitySchema.path("properties").has("algorithmSuite")).isTrue();
+        assertThat(downloadAccessIdentitySchema.path("required").toString())
+                .contains(
+                        "\"accessKind\"",
+                        "\"identityHash\"",
+                        "\"fileVersion\"",
+                        "\"manifestHash\"",
+                        "\"algorithmSuite\"");
         JsonNode downloadMetadataOperation = rootNode.path("paths")
                 .path("/api/v1/files/hash/{fileHash}/download-metadata").path("get");
         assertThat(downloadMetadataOperation.isMissingNode()).isFalse();

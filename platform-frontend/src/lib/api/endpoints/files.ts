@@ -18,10 +18,14 @@ import type {
   ShareAccessStatsVO,
   FileProvenanceVO,
   FileDownloadMetadataVO,
+  FileDownloadMetadataTransport,
+  FileDownloadPartTransport,
+  FileDownloadPartVO,
+  DownloadAccessIdentityTransport,
+  DownloadAccessIdentityVO,
   DownloadKeyGrantVO,
   DownloadKeyMaterialVO,
 } from "../types";
-import { ShareType } from "../types";
 
 // Re-export types for use in other modules
 export type { FileDecryptInfoVO, FileDownloadMetadataVO } from "../types";
@@ -29,6 +33,181 @@ export type { FileDecryptInfoVO, FileDownloadMetadataVO } from "../types";
 const BASE = "/files";
 
 const KEY_DELIVERY_PROTOCOL = "grant-v1";
+const OWNER_DOWNLOAD_ACCESS_KINDS = new Set(["OWNER", "ADMIN", "FRIEND_SHARE"]);
+const PUBLIC_DOWNLOAD_ACCESS_KINDS = new Set(["PUBLIC_SHARE"]);
+const AUTHENTICATED_SHARE_ACCESS_KINDS = new Set(["AUTHENTICATED_SHARE"]);
+
+/** 将 OpenAPI transport 字段收窄为非空字符串。 */
+function requireDownloadText(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`下载 metadata 字段 ${field} 无效`);
+  }
+  return value;
+}
+
+/** 将 OpenAPI transport 字段收窄为安全整数。 */
+function requireDownloadInteger(
+  value: unknown,
+  field: string,
+  minimum = 0,
+): number {
+  if (!Number.isSafeInteger(value) || (value as number) < minimum) {
+    throw new Error(`下载 metadata 字段 ${field} 无效`);
+  }
+  return value as number;
+}
+
+/** 校验并收窄单个生成的分片 transport。 */
+function validateDownloadPartTransport(
+  part: FileDownloadPartTransport,
+): FileDownloadPartVO {
+  return {
+    ...part,
+    index: requireDownloadInteger(part.index, "parts.index"),
+    size: requireDownloadInteger(part.size, "parts.size", 1),
+    downloadUrl: requireDownloadText(part.downloadUrl, "parts.downloadUrl"),
+    expiresAtEpochSeconds: requireDownloadInteger(
+      part.expiresAtEpochSeconds,
+      "parts.expiresAtEpochSeconds",
+      1,
+    ),
+    storagePath: requireDownloadText(part.storagePath, "parts.storagePath"),
+    plainHash: requireDownloadText(part.plainHash, "parts.plainHash"),
+    cipherHash: requireDownloadText(part.cipherHash, "parts.cipherHash"),
+  };
+}
+
+/** 校验并收窄服务端生成的刷新身份栅栏。 */
+function validateDownloadAccessIdentity(
+  identity: DownloadAccessIdentityTransport | undefined,
+): DownloadAccessIdentityVO {
+  if (!identity) {
+    throw new Error("下载 metadata 缺少 accessIdentity");
+  }
+  const identityHash = requireDownloadText(
+    identity.identityHash,
+    "accessIdentity.identityHash",
+  );
+  const manifestHash = requireDownloadText(
+    identity.manifestHash,
+    "accessIdentity.manifestHash",
+  );
+  if (!/^sha256:[0-9a-f]{64}$/u.test(identityHash)) {
+    throw new Error("下载 metadata 的 accessIdentity.identityHash 无效");
+  }
+  if (
+    identity.fileVersion !== null &&
+    (!Number.isSafeInteger(identity.fileVersion) || identity.fileVersion <= 0)
+  ) {
+    throw new Error("下载 metadata 的 accessIdentity.fileVersion 无效");
+  }
+  return {
+    ...identity,
+    accessKind: requireDownloadText(
+      identity.accessKind,
+      "accessIdentity.accessKind",
+    ),
+    identityHash,
+    manifestHash,
+    algorithmSuite: requireDownloadText(
+      identity.algorithmSuite,
+      "accessIdentity.algorithmSuite",
+    ),
+  };
+}
+
+/**
+ * 将生成的 OpenAPI transport 收窄为下载器可执行合同，拒绝缺失字段而不是使用类型断言。
+ */
+function validateDownloadMetadataTransport(
+  transport: FileDownloadMetadataTransport,
+  allowedAccessKinds: ReadonlySet<string>,
+): FileDownloadMetadataVO {
+  if (!Array.isArray(transport.parts)) {
+    throw new Error("下载 metadata 缺少 parts");
+  }
+  const parts = transport.parts.map(validateDownloadPartTransport);
+  const accessIdentity = validateDownloadAccessIdentity(
+    transport.accessIdentity,
+  );
+  if (!allowedAccessKinds.has(accessIdentity.accessKind)) {
+    throw new Error("下载 metadata 的 accessIdentity.accessKind 与端点不一致");
+  }
+  const manifestHash = requireDownloadText(
+    transport.manifestHash,
+    "manifestHash",
+  );
+  if (accessIdentity.manifestHash !== manifestHash) {
+    throw new Error("下载 metadata 的 accessIdentity.manifestHash 不一致");
+  }
+  if (transport.keyGrant) {
+    requireDownloadText(transport.keyGrant.reference, "keyGrant.reference");
+    if (transport.keyGrant.protocol !== KEY_DELIVERY_PROTOCOL) {
+      throw new Error("下载 metadata 的 keyGrant.protocol 无效");
+    }
+    requireDownloadText(transport.keyGrant.expiresAt, "keyGrant.expiresAt");
+  }
+  if (typeof transport.legacyDownloadAllowed !== "boolean") {
+    throw new Error("下载 metadata 字段 legacyDownloadAllowed 无效");
+  }
+  const keyGrant: DownloadKeyGrantVO | null = transport.keyGrant
+    ? {
+        reference: requireDownloadText(
+          transport.keyGrant.reference,
+          "keyGrant.reference",
+        ),
+        protocol: KEY_DELIVERY_PROTOCOL,
+        expiresAt: requireDownloadText(
+          transport.keyGrant.expiresAt,
+          "keyGrant.expiresAt",
+        ),
+      }
+    : null;
+  const { keyGrant: _transportKeyGrant, ...safeTransport } = transport;
+  return {
+    ...safeTransport,
+    fileId: requireDownloadText(transport.fileId, "fileId"),
+    fileHash: requireDownloadText(transport.fileHash, "fileHash"),
+    fileName: requireDownloadText(transport.fileName, "fileName"),
+    fileSize: requireDownloadInteger(transport.fileSize, "fileSize"),
+    contentType: requireDownloadText(transport.contentType, "contentType"),
+    manifestSchemaId: requireDownloadText(
+      transport.manifestSchemaId,
+      "manifestSchemaId",
+    ),
+    manifestHash,
+    canonicalManifestJson: requireDownloadText(
+      transport.canonicalManifestJson,
+      "canonicalManifestJson",
+    ),
+    manifestStatus: requireDownloadText(
+      transport.manifestStatus,
+      "manifestStatus",
+    ),
+    manifestClassification: requireDownloadText(
+      transport.manifestClassification,
+      "manifestClassification",
+    ),
+    legacyDownloadAllowed: transport.legacyDownloadAllowed,
+    hashAlgorithm: requireDownloadText(
+      transport.hashAlgorithm,
+      "hashAlgorithm",
+    ),
+    storageBackend: requireDownloadText(
+      transport.storageBackend,
+      "storageBackend",
+    ),
+    chunkSize: requireDownloadInteger(transport.chunkSize, "chunkSize", 1),
+    totalChunks: requireDownloadInteger(
+      transport.totalChunks,
+      "totalChunks",
+      1,
+    ),
+    parts,
+    accessIdentity,
+    ...(keyGrant ? { keyGrant } : {}),
+  };
+}
 
 /**
  * 创建仅保存在当前下载执行作用域内的随机会话标识。
@@ -316,7 +495,7 @@ export async function getDownloadMetadata(
   fileHash: string,
   sessionId: string,
 ): Promise<FileDownloadMetadataVO> {
-  return api.get<FileDownloadMetadataVO>(
+  const transport = await api.get<FileDownloadMetadataTransport>(
     `${BASE}/hash/${fileHash}/download-metadata`,
     {
       headers: {
@@ -324,6 +503,54 @@ export async function getDownloadMetadata(
         "X-Download-Session-ID": sessionId,
       },
     },
+  );
+  return validateDownloadMetadataTransport(
+    transport,
+    OWNER_DOWNLOAD_ACCESS_KINDS,
+  );
+}
+
+/** 获取公开分享的 manifest 驱动下载元数据。 */
+export async function getPublicShareDownloadMetadata(
+  shareCode: string,
+  fileHash: string,
+  sessionId: string,
+): Promise<FileDownloadMetadataVO> {
+  const transport = await api.get<FileDownloadMetadataTransport>(
+    `/public/shares/${shareCode}/files/${fileHash}/download-metadata`,
+    {
+      skipAuth: true,
+      skipTenant: true,
+      headers: {
+        "X-Key-Delivery-Protocol": KEY_DELIVERY_PROTOCOL,
+        "X-Download-Session-ID": sessionId,
+      },
+    },
+  );
+  return validateDownloadMetadataTransport(
+    transport,
+    PUBLIC_DOWNLOAD_ACCESS_KINDS,
+  );
+}
+
+/** 获取认证分享的 manifest 驱动下载元数据。 */
+export async function getAuthenticatedShareDownloadMetadata(
+  shareCode: string,
+  fileHash: string,
+  sessionId: string,
+): Promise<FileDownloadMetadataVO> {
+  const transport = await api.get<FileDownloadMetadataTransport>(
+    `/shares/${shareCode}/files/${fileHash}/download-metadata`,
+    {
+      headers: {
+        "X-Key-Delivery-Protocol": KEY_DELIVERY_PROTOCOL,
+        "X-Download-Session-ID": sessionId,
+      },
+    },
+  );
+  return validateDownloadMetadataTransport(
+    transport,
+    AUTHENTICATED_SHARE_ACCESS_KINDS,
   );
 }
 
@@ -378,157 +605,6 @@ export async function downloadFile(fileHash: string): Promise<Blob> {
   );
 
   return materializeDownloadedChunks(chunks, decryptInfo, sessionId);
-}
-
-// ==================== 公开分享端点（无需认证）====================
-
-/**
- * 公开分享下载加密分片（无需登录）。
- *
- * @param shareCode 分享码
- * @param fileHash 文件哈希
- * @returns 分片数组
- */
-export async function publicDownloadEncryptedChunks(
-  shareCode: string,
-  fileHash: string,
-): Promise<string[]> {
-  return api.get<string[]>(
-    `/public/shares/${shareCode}/files/${fileHash}/chunks`,
-    {
-      skipAuth: true,
-      skipTenant: true,
-    },
-  );
-}
-
-/**
- * 公开分享获取解密信息（无需登录）。
- *
- * @param shareCode 分享码
- * @param fileHash 文件哈希
- * @returns 解密信息
- */
-export async function publicGetDecryptInfo(
-  shareCode: string,
-  fileHash: string,
-  sessionId: string,
-): Promise<FileDecryptInfoVO> {
-  return api.get<FileDecryptInfoVO>(
-    `/public/shares/${shareCode}/files/${fileHash}/decrypt-info`,
-    {
-      skipAuth: true,
-      skipTenant: true,
-      headers: {
-        "X-Key-Delivery-Protocol": KEY_DELIVERY_PROTOCOL,
-        "X-Download-Session-ID": sessionId,
-      },
-    },
-  );
-}
-
-/**
- * 公开分享下载并解密文件（无需登录）。
- *
- * @param shareCode 分享码
- * @param fileHash 文件哈希
- * @returns 解密后的 Blob
- */
-export async function publicDownloadFile(
-  shareCode: string,
-  fileHash: string,
-): Promise<Blob> {
-  const chunksBase64 = await publicDownloadEncryptedChunks(shareCode, fileHash);
-  const sessionId = createDownloadSessionId();
-  const decryptInfo = await publicGetDecryptInfo(
-    shareCode,
-    fileHash,
-    sessionId,
-  );
-
-  const chunks = chunksBase64.map((base64) =>
-    Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
-  );
-
-  return materializeDownloadedChunks(chunks, decryptInfo, sessionId, true);
-}
-
-/**
- * 登录用户分享下载加密分片（需要登录）。
- *
- * @param shareCode 分享码
- * @param fileHash 文件哈希
- * @returns 分片数组
- */
-export async function shareDownloadEncryptedChunks(
-  shareCode: string,
-  fileHash: string,
-): Promise<string[]> {
-  return api.get<string[]>(`/shares/${shareCode}/files/${fileHash}/chunks`);
-}
-
-/**
- * 登录用户分享获取解密信息（需要登录）。
- *
- * @param shareCode 分享码
- * @param fileHash 文件哈希
- * @returns 解密信息
- */
-export async function shareGetDecryptInfo(
-  shareCode: string,
-  fileHash: string,
-  sessionId: string,
-): Promise<FileDecryptInfoVO> {
-  return api.get<FileDecryptInfoVO>(
-    `/shares/${shareCode}/files/${fileHash}/decrypt-info`,
-    {
-      headers: {
-        "X-Key-Delivery-Protocol": KEY_DELIVERY_PROTOCOL,
-        "X-Download-Session-ID": sessionId,
-      },
-    },
-  );
-}
-
-/**
- * 登录用户通过分享码下载并解密文件（需要登录）。
- *
- * @param shareCode 分享码
- * @param fileHash 文件哈希
- * @returns 解密后的 Blob
- */
-export async function shareDownloadFile(
-  shareCode: string,
-  fileHash: string,
-): Promise<Blob> {
-  const chunksBase64 = await shareDownloadEncryptedChunks(shareCode, fileHash);
-  const sessionId = createDownloadSessionId();
-  const decryptInfo = await shareGetDecryptInfo(shareCode, fileHash, sessionId);
-
-  const chunks = chunksBase64.map((base64) =>
-    Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
-  );
-
-  return materializeDownloadedChunks(chunks, decryptInfo, sessionId);
-}
-
-/**
- * 根据分享类型选择下载方式。
- *
- * @param shareCode 分享码
- * @param fileHash 文件哈希
- * @param shareType 分享类型
- * @returns 解密后的 Blob
- */
-export async function downloadSharedFile(
-  shareCode: string,
-  fileHash: string,
-  shareType: ShareType,
-): Promise<Blob> {
-  if (shareType === ShareType.PUBLIC) {
-    return publicDownloadFile(shareCode, fileHash);
-  }
-  return shareDownloadFile(shareCode, fileHash);
 }
 
 // ==================== 审计端点 ====================

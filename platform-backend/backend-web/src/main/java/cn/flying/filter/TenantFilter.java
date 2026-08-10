@@ -216,7 +216,7 @@ public class TenantFilter extends OncePerRequestFilter {
         if (uri.matches("^/api/v1/shares/[^/]+/(info|files)/?$")) {
             return true;
         }
-        return uri.matches("^/api/v1/public/shares/[^/]+/files/[^/]+/(chunks|decrypt-info)/?$");
+        return uri.matches("^/api/v1/public/shares/[^/]+/files/[^/]+/(chunks|decrypt-info|download-metadata)/?$");
     }
 
     /**

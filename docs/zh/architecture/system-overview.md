@@ -161,8 +161,8 @@ sequenceDiagram
     participant S3 as S3 Cluster
 
     Note over Client, Backend: 阶段 1: 获取基于 manifest 的下载元数据
-    Client->>Backend: GET /api/v1/files/hash/{fileHash}/download-metadata
-    Backend->>Backend: 校验权限 & 要求 active chunk manifest
+    Client->>Backend: GET owner/public/authenticated download-metadata
+    Backend->>Backend: 校验精确访问身份 & 要求 active chunk manifest
     Backend->>Storage: RPC: getFileUrlListByHash(storagePath[], cipherHash[])
     Storage->>S3: 生成预签名 URL
     S3-->>Storage: 预签名 URL 列表
@@ -171,7 +171,11 @@ sequenceDiagram
 
     Note over Client, S3: 阶段 2: 有界有序读取
     loop 按 manifest index 顺序处理分片
-        Client->>S3: GET 预签名 URL
+        Client->>S3: GET 当前预签名 URL
+        alt 仅首次 401/403
+            Client->>Backend: 刷新匹配的 metadata/grant 一次
+            Backend-->>Client: 身份/manifest/分片不变，URL 换新
+        end
         S3-->>Client: 带背压的响应块（每块最大 1 MiB）
         Client->>Client: 校验长度/哈希并解密 framed 或 legacy 格式
         Client->>Client: 带背压写入所选 sink
@@ -190,7 +194,7 @@ sequenceDiagram
 | **文件系统流式 sink** | 大于 64 MiB | 要求 File System Access API 与 Streams，reader 直接有界写入用户选择的文件 |
 | **浏览器不支持** | 大于 64 MiB 且无流式 sink | 失败闭合并提示浏览器能力；不存在无界后端代理回退 |
 
-有界 reader 显式支持 `NONE`、历史 v1 AEAD 和 framed AEAD v2。历史密文分片上限约为 80 MiB + 4 KiB，单文件最多 10,000 个分片，响应网络块最大 1 MiB。单次获取最多三次尝试；401/403 立即要求刷新下载元数据，只有 5xx 才进行有限重试。长度、顺序、哈希、密钥、解密、取消或 sink 任一异常都会中止 sink。
+有界 reader 为自有、公开分享和认证分享统一支持 `NONE`、历史 v1 AEAD 和 framed AEAD v2。历史密文分片上限约为 80 MiB + 4 KiB，单文件最多 10,000 个分片，响应网络块最大 1 MiB。首次 401/403 最多刷新一次 metadata，仅在 file/version/manifest/suite/access 及稳定分片身份精确一致时从当前分片续传；二次过期或任何漂移都失败闭合，只有 5xx 才进行有限重试。长度、顺序、哈希、密钥、解密、取消或 sink 任一异常都会中止 sink。
 
 ### 文件分享流程
 

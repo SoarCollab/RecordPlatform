@@ -49,6 +49,9 @@ public record FileDownloadMetadataVO(
         int totalChunks,
         @Schema(description = "版本化加密格式描述；历史 manifest 可为空")
         FileDownloadEncryptionVO encryption,
+        @Schema(description = "刷新预签名 URL 时必须保持完全一致的下载身份",
+                requiredMode = Schema.RequiredMode.REQUIRED)
+        DownloadAccessIdentityVO accessIdentity,
         @Schema(description = "有序分片下载 URL 列表")
         List<FileDownloadPartVO> parts
 ) {
@@ -76,6 +79,6 @@ public record FileDownloadMetadataVO(
                 manifestSchemaId, manifestHash, null,
                 "ACTIVE", "ALREADY_MANIFEST", null, false,
                 hashAlgorithm, encryptionAlgorithm,
-                storageBackend, chunkSize, totalChunks, null, parts);
+                storageBackend, chunkSize, totalChunks, null, null, parts);
     }
 }

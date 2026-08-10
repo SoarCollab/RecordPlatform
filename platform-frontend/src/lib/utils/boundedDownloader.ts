@@ -65,6 +65,21 @@ export interface BoundedDownloadOptions {
   fetchImpl?: typeof fetch;
   metrics?: DownloadMetricsTracker;
   onPartComplete?: (completed: number, total: number) => void;
+  /** 401/403 时重新授权并返回同一身份的新 metadata；最多调用一次。 */
+  refreshMetadata?: (
+    error: DownloadMetadataExpiredError,
+  ) => Promise<FileDownloadMetadataVO>;
+}
+
+/** 预签名 URL 已失效；调用方只能在身份栅栏一致时刷新一次 metadata。 */
+export class DownloadMetadataExpiredError extends Error {
+  constructor(
+    readonly status: 401 | 403,
+    readonly partIndex: number,
+  ) {
+    super(`分片 ${partIndex + 1} 下载地址已过期`);
+    this.name = "DownloadMetadataExpiredError";
+  }
 }
 
 /** 无 manifest 历史接口使用的有界下载参数。 */
@@ -410,7 +425,7 @@ async function fetchDownloadUrl(
 
     if (response.status === 401 || response.status === 403) {
       await cancelErrorResponse(response);
-      throw new Error("下载地址已过期，请重新发起下载");
+      throw new DownloadMetadataExpiredError(response.status, index);
     }
     if (response.ok) return response;
 
@@ -427,6 +442,149 @@ async function fetchDownloadUrl(
     );
   }
   throw lastError ?? new Error("分片下载失败");
+}
+
+/** 比较刷新前后的可选字段，避免 `undefined`/`null` 漂移被忽略。 */
+function requireRefreshFieldEqual(
+  current: unknown,
+  refreshed: unknown,
+  field: string,
+): void {
+  if (current !== refreshed) {
+    throw new Error(`下载 metadata 刷新后 ${field} 发生漂移`);
+  }
+}
+
+/**
+ * 校验刷新只替换 downloadUrl、expiresAt 和一次性 key grant，不得改变任何文件或 manifest 身份。
+ */
+function validateRefreshedMetadata(
+  current: FileDownloadMetadataVO,
+  refreshed: FileDownloadMetadataVO,
+  expectedFileHash?: string,
+): FileDownloadPartVO[] {
+  const refreshedParts = validateParts(refreshed);
+  const refreshedFormat = resolveDownloadFormat(refreshed);
+  validateCanonicalManifest(
+    refreshed,
+    refreshedParts,
+    refreshedFormat,
+    expectedFileHash,
+  );
+
+  const stableTopLevelFields: Array<keyof FileDownloadMetadataVO> = [
+    "fileId",
+    "fileHash",
+    "fileName",
+    "fileSize",
+    "contentType",
+    "manifestSchemaId",
+    "manifestHash",
+    "canonicalManifestJson",
+    "manifestStatus",
+    "manifestClassification",
+    "manifestErrorCode",
+    "legacyDownloadAllowed",
+    "hashAlgorithm",
+    "encryptionAlgorithm",
+    "storageBackend",
+    "chunkSize",
+    "totalChunks",
+  ];
+  for (const field of stableTopLevelFields) {
+    requireRefreshFieldEqual(current[field], refreshed[field], field);
+  }
+  if (
+    JSON.stringify(current.encryption ?? null) !==
+    JSON.stringify(refreshed.encryption ?? null)
+  ) {
+    throw new Error("下载 metadata 刷新后 encryption 发生漂移");
+  }
+  if (
+    current.accessIdentity.accessKind !== refreshed.accessIdentity.accessKind ||
+    current.accessIdentity.identityHash !==
+      refreshed.accessIdentity.identityHash ||
+    current.accessIdentity.fileVersion !==
+      refreshed.accessIdentity.fileVersion ||
+    current.accessIdentity.manifestHash !==
+      refreshed.accessIdentity.manifestHash ||
+    current.accessIdentity.algorithmSuite !==
+      refreshed.accessIdentity.algorithmSuite
+  ) {
+    throw new Error("下载 metadata 刷新后 accessIdentity 发生漂移");
+  }
+
+  for (let index = 0; index < current.parts.length; index++) {
+    const before = current.parts[index];
+    const after = refreshedParts[index];
+    const stablePartFields: Array<keyof FileDownloadPartVO> = [
+      "index",
+      "size",
+      "storagePath",
+      "storageBackend",
+      "etag",
+      "plainHash",
+      "cipherHash",
+      "checksumAlgorithm",
+      "plainSize",
+      "frameCount",
+    ];
+    for (const field of stablePartFields) {
+      requireRefreshFieldEqual(
+        before[field],
+        after[field],
+        `parts[${index}].${field}`,
+      );
+    }
+  }
+  return refreshedParts;
+}
+
+/** 创建只允许一次身份一致 metadata 刷新的分片响应解析器。 */
+function createRefreshablePartFetcher(params: {
+  metadata: FileDownloadMetadataVO;
+  parts: FileDownloadPartVO[];
+  expectedFileHash?: string;
+  signal?: AbortSignal;
+  fetchImpl: typeof fetch;
+  refreshMetadata?: (
+    error: DownloadMetadataExpiredError,
+  ) => Promise<FileDownloadMetadataVO>;
+}): {
+  fetchPart(index: number): Promise<Response>;
+} {
+  let currentMetadata = params.metadata;
+  let currentParts = params.parts;
+  let refreshAttempted = false;
+
+  return {
+    async fetchPart(index: number): Promise<Response> {
+      try {
+        return await fetchPart(
+          currentParts[index],
+          params.signal,
+          params.fetchImpl,
+        );
+      } catch (error) {
+        if (
+          !(error instanceof DownloadMetadataExpiredError) ||
+          !params.refreshMetadata ||
+          refreshAttempted
+        ) {
+          throw error;
+        }
+        refreshAttempted = true;
+        const refreshed = await params.refreshMetadata(error);
+        currentParts = validateRefreshedMetadata(
+          currentMetadata,
+          refreshed,
+          params.expectedFileHash,
+        );
+        currentMetadata = refreshed;
+        return fetchPart(currentParts[index], params.signal, params.fetchImpl);
+      }
+    },
+  };
 }
 
 /** 对带 manifest 的分片调用有界 URL 获取逻辑。 */
@@ -781,7 +939,7 @@ async function downloadLegacyFile(params: {
   sink: DownloadSink;
   metrics: DownloadMetricsTracker;
   signal?: AbortSignal;
-  fetchImpl: typeof fetch;
+  fetchPart: (index: number) => Promise<Response>;
   onPartComplete?: (completed: number, total: number) => void;
 }): Promise<void> {
   if (!params.sink.supportsRandomAccess && params.metadata.fileSize > 0) {
@@ -797,11 +955,7 @@ async function downloadLegacyFile(params: {
 
   let completed = 0;
   const lastPart = params.parts.at(-1)!;
-  const lastResponse = await fetchPart(
-    lastPart,
-    params.signal,
-    params.fetchImpl,
-  );
+  const lastResponse = await params.fetchPart(lastPart.index);
   const lastCipher = await downloadLegacyCipherPart({
     response: lastResponse,
     part: lastPart,
@@ -834,7 +988,7 @@ async function downloadLegacyFile(params: {
   let currentKey = firstKey;
   for (let index = 0; index < params.parts.length - 1; index++) {
     const part = params.parts[index];
-    const response = await fetchPart(part, params.signal, params.fetchImpl);
+    const response = await params.fetchPart(part.index);
     const ciphertext = await downloadLegacyCipherPart({
       response,
       part,
@@ -1085,6 +1239,14 @@ export async function executeBoundedDownload(
       format,
       options.expectedFileHash,
     );
+    const partFetcher = createRefreshablePartFetcher({
+      metadata: options.metadata,
+      parts,
+      expectedFileHash: options.expectedFileHash,
+      signal: options.signal,
+      fetchImpl,
+      refreshMetadata: options.refreshMetadata,
+    });
     if (format === "NONE") {
       const totalCipherSize = parts.reduce((sum, part) => sum + part.size, 0);
       if (totalCipherSize !== options.metadata.fileSize) {
@@ -1092,7 +1254,7 @@ export async function executeBoundedDownload(
       }
       for (let index = 0; index < parts.length; index++) {
         const part = parts[index];
-        const response = await fetchPart(part, options.signal, fetchImpl);
+        const response = await partFetcher.fetchPart(index);
         await downloadPlainPart({
           response,
           part,
@@ -1103,6 +1265,7 @@ export async function executeBoundedDownload(
         options.onPartComplete?.(index + 1, parts.length);
       }
     } else if (format === "FRAMED_V2") {
+      // validateFramedEncryption above proves every required v2 descriptor field.
       const encryption = options.metadata.encryption as ChunkManifestEncryption;
       if (!transientInitialKey) {
         throw new Error("framed AEAD 文件缺少 file DEK");
@@ -1119,7 +1282,7 @@ export async function executeBoundedDownload(
       options.initialKey = null;
       for (let index = 0; index < parts.length; index++) {
         const part = parts[index];
-        const response = await fetchPart(part, options.signal, fetchImpl);
+        const response = await partFetcher.fetchPart(index);
         await downloadFramedPart({
           response,
           part,
@@ -1143,7 +1306,7 @@ export async function executeBoundedDownload(
         sink: options.sink,
         metrics,
         signal: options.signal,
-        fetchImpl,
+        fetchPart: partFetcher.fetchPart,
         onPartComplete: options.onPartComplete,
       });
     }

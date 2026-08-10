@@ -161,8 +161,8 @@ sequenceDiagram
     participant S3 as S3 Cluster
 
     Note over Client, Backend: Phase 1: Get Manifest-Backed Download Metadata
-    Client->>Backend: GET /api/v1/files/hash/{fileHash}/download-metadata
-    Backend->>Backend: Verify permissions & require active chunk manifest
+    Client->>Backend: GET owner/public/authenticated download-metadata
+    Backend->>Backend: Verify exact access identity & require active chunk manifest
     Backend->>Storage: RPC: getFileUrlListByHash(storagePath[], cipherHash[])
     Storage->>S3: Generate presigned URLs
     S3-->>Storage: Presigned URL list
@@ -171,7 +171,11 @@ sequenceDiagram
 
     Note over Client, S3: Phase 2: Bounded Ordered Read
     loop Each manifest part in index order
-        Client->>S3: GET presigned URL
+        Client->>S3: GET current presigned URL
+        alt First 401/403 only
+            Client->>Backend: Refresh matching metadata/grant once
+            Backend-->>Client: Same access/manifest/part identity, fresh URLs
+        end
         S3-->>Client: Backpressured response chunks (max 1 MiB each)
         Client->>Client: Verify length/hash; decrypt framed or legacy format
         Client->>Client: Write to selected sink with backpressure
@@ -190,7 +194,7 @@ sequenceDiagram
 | **File-system stream sink** | Files above 64 MiB | Requires File System Access API plus Streams; bounded reader writes directly to the chosen file |
 | **Unsupported browser** | Files above 64 MiB without a stream sink | Fails closed with a browser-capability message; there is no unbounded backend-proxy fallback |
 
-The bounded reader accepts explicit `NONE`, legacy v1 AEAD, and framed AEAD v2 formats. Legacy ciphertext parts are capped at about 80 MiB + 4 KiB, every file at 10,000 parts, and each response chunk at 1 MiB. A fetch has at most three attempts; 401/403 requires fresh download metadata immediately, while only 5xx responses receive finite retry. Every length, order, hash, key, decrypt, cancellation, or sink error aborts the sink.
+The bounded reader accepts explicit `NONE`, legacy v1 AEAD, and framed AEAD v2 formats for owned, public-share, and authenticated-share downloads. Legacy ciphertext parts are capped at about 80 MiB + 4 KiB, every file at 10,000 parts, and each response chunk at 1 MiB. A fetch has at most three attempts; the first 401/403 may refresh metadata once and resume the current part only after exact file/version/manifest/suite/access and stable-part identity comparison. A second expiry or any drift fails closed; only 5xx responses receive finite retry. Every length, order, hash, key, decrypt, cancellation, or sink error aborts the sink.
 
 ### File Sharing Flow
 

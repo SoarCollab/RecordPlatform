@@ -22,6 +22,7 @@ import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.mapper.FileSourceMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.DownloadKeyGrantVO;
+import cn.flying.dao.vo.file.FileDownloadMetadataVO;
 import cn.flying.dao.vo.file.FileShareVO;
 import cn.flying.dao.vo.file.ShareInfoVO;
 import cn.flying.dao.vo.file.ShareFileVO;
@@ -38,12 +39,16 @@ import cn.flying.platformapi.response.SharingVO;
 import cn.flying.service.FileService;
 import cn.flying.service.QuotaService;
 import cn.flying.service.ShareAuditService;
+import cn.flying.service.download.FileDownloadMetadataBuilder;
+import cn.flying.service.download.FileDownloadMetadataBuilder.DownloadAccessBinding;
 import cn.flying.service.key.FileKeyEnvelopeService;
 import cn.flying.service.key.FileKeyGrantAccessKind;
 import cn.flying.service.key.FileKeyGrantEnvelopeBinding;
 import cn.flying.service.key.FileKeyGrantIssueContext;
 import cn.flying.service.key.FileKeyGrantService;
 import cn.flying.service.key.FileParamEnvelopeResult;
+import cn.flying.service.manifest.ChunkManifestService;
+import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import cn.flying.service.saga.FileSagaOrchestrator;
 import cn.flying.service.saga.FileUploadCommand;
 import cn.flying.service.saga.FileUploadResult;
@@ -118,6 +123,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     private final FileKeyEnvelopeService fileKeyEnvelopeService;
     private final FileKeyGrantService fileKeyGrantService;
     private final ProofBundleIssuanceMapper proofBundleIssuanceMapper;
+    private final ChunkManifestService chunkManifestService;
+    private final ManifestGovernanceStatusService manifestGovernanceStatusService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -2247,17 +2254,44 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                                                       String downloadSessionId,
                                                       String publicClientIdentity) {
         return callWithPublicShareAccess(shareCode, fileHash, accessContext -> {
-            // 查询文件元数据
-            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                    .eq(File::getUid, accessContext.ownerId())
-                    .eq(File::getFileHash, fileHash);
-            File file = this.getOne(wrapper);
-            if (file == null) {
-                throw new GeneralException(ResultEnum.FAIL, "文件不存在");
-            }
-
+            File file = requireSharedOwnerFile(accessContext.ownerId(), fileHash);
             return buildShareFileDecryptInfo(file, fileHash, accessContext, null,
-                    keyDeliveryProtocol, downloadSessionId, publicClientIdentity, true);
+                    keyDeliveryProtocol, downloadSessionId, publicClientIdentity, true, true);
+        });
+    }
+
+    /**
+     * Builds public-share presigned metadata after owner-tenant recovery and exact share authorization.
+     */
+    @Override
+    public FileDownloadMetadataVO getPublicFileDownloadMetadata(String shareCode,
+                                                                String fileHash,
+                                                                String keyDeliveryProtocol,
+                                                                String downloadSessionId,
+                                                                String publicClientIdentity) {
+        return callWithPublicShareAccess(shareCode, fileHash, accessContext -> {
+            File file = requireSharedOwnerFile(accessContext.ownerId(), fileHash);
+            FileDecryptInfoVO decryptInfo = buildShareFileDecryptInfo(
+                    file, fileHash, accessContext, null,
+                    keyDeliveryProtocol, downloadSessionId, publicClientIdentity, true, false);
+            DownloadAccessBinding accessBinding = new DownloadAccessBinding(
+                    FileKeyGrantAccessKind.PUBLIC_SHARE.name(),
+                    resolveDownloadTenantId(file, accessContext.fileShare()),
+                    null,
+                    accessContext.fileShare().getId(),
+                    publicClientIdentity);
+            return FileDownloadMetadataBuilder.build(
+                    file,
+                    fileHash,
+                    decryptInfo,
+                    () -> buildShareFileDecryptInfo(
+                            file, fileHash, accessContext, null,
+                            keyDeliveryProtocol, downloadSessionId,
+                            publicClientIdentity, true, true),
+                    accessBinding,
+                    chunkManifestService,
+                    manifestGovernanceStatusService,
+                    fileRemoteClient);
         });
     }
 
@@ -2331,18 +2365,43 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                                                       String downloadSessionId) {
         // 验证分享有效性（允许公开/私密）
         ShareAccessContext accessContext = resolveShareAccess(shareCode, fileHash, null);
-
-        // 查询文件元数据
-        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                .eq(File::getUid, accessContext.ownerId())
-                .eq(File::getFileHash, fileHash);
-        File file = this.getOne(wrapper);
-        if (file == null) {
-            throw new GeneralException(ResultEnum.FAIL, "文件不存在");
-        }
+        File file = requireSharedOwnerFile(accessContext.ownerId(), fileHash);
 
         return buildShareFileDecryptInfo(file, fileHash, accessContext, userId,
-                keyDeliveryProtocol, downloadSessionId, null, false);
+                keyDeliveryProtocol, downloadSessionId, null, false, true);
+    }
+
+    /**
+     * Builds authenticated share-code metadata with the actor and share row bound into refresh identity.
+     */
+    @Override
+    public FileDownloadMetadataVO getSharedFileDownloadMetadata(Long userId,
+                                                                String shareCode,
+                                                                String fileHash,
+                                                                String keyDeliveryProtocol,
+                                                                String downloadSessionId) {
+        ShareAccessContext accessContext = resolveShareAccess(shareCode, fileHash, null);
+        File file = requireSharedOwnerFile(accessContext.ownerId(), fileHash);
+        FileDecryptInfoVO decryptInfo = buildShareFileDecryptInfo(
+                file, fileHash, accessContext, userId,
+                keyDeliveryProtocol, downloadSessionId, null, false, false);
+        DownloadAccessBinding accessBinding = new DownloadAccessBinding(
+                FileKeyGrantAccessKind.AUTHENTICATED_SHARE.name(),
+                resolveDownloadTenantId(file, accessContext.fileShare()),
+                userId,
+                accessContext.fileShare().getId(),
+                null);
+        return FileDownloadMetadataBuilder.build(
+                file,
+                fileHash,
+                decryptInfo,
+                () -> buildShareFileDecryptInfo(
+                        file, fileHash, accessContext, userId,
+                        keyDeliveryProtocol, downloadSessionId, null, false, true),
+                accessBinding,
+                chunkManifestService,
+                manifestGovernanceStatusService,
+                fileRemoteClient);
     }
 
     /**
@@ -2355,7 +2414,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                                                         String keyDeliveryProtocol,
                                                         String downloadSessionId,
                                                         String publicClientIdentity,
-                                                        boolean publicAccess) {
+                                                        boolean publicAccess,
+                                                        boolean deliverKey) {
         String fileParam = file.getFileParam();
         if (CommonUtils.isEmpty(fileParam)) {
             throw new GeneralException(ResultEnum.FAIL, "文件元数据不完整，缺少解密信息");
@@ -2367,7 +2427,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
             String initialKey = null;
             DownloadKeyGrantVO keyGrant = null;
-            if (requiresInitialKey(params)) {
+            if (deliverKey && requiresInitialKey(params)) {
                 FileKeyGrantEnvelopeBinding binding = fileKeyEnvelopeService.resolveShareGrantBinding(
                                 file, fileHash, accessContext.fileShare())
                         .orElseThrow(() -> new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在"));
@@ -2411,6 +2471,33 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                     file.getId(), accessContext.fileShare().getId(), e.getClass().getSimpleName());
             throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
         }
+    }
+
+    /**
+     * Loads the exact owner file inside the already-authorized share tenant.
+     */
+    private File requireSharedOwnerFile(Long ownerId, String fileHash) {
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getUid, ownerId)
+                .eq(File::getFileHash, fileHash);
+        File file = this.getOne(wrapper);
+        if (file == null) {
+            throw new GeneralException(ResultEnum.FAIL, "文件不存在");
+        }
+        return file;
+    }
+
+    /**
+     * Resolves the tenant that is already enforced for the metadata operation.
+     */
+    private Long resolveDownloadTenantId(File file, FileShare fileShare) {
+        if (file.getTenantId() != null) {
+            return file.getTenantId();
+        }
+        if (fileShare != null && fileShare.getTenantId() != null) {
+            return fileShare.getTenantId();
+        }
+        return TenantContext.getTenantIdOrDefault();
     }
 
     /**

@@ -38,6 +38,7 @@ EventSource 不支持自定义 Header，因此 SSE 使用 URL Token：
 - `GET /api/v1/shares/{shareCode}/files`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
+- `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/download-metadata`
 - `POST /api/v1/public/key-grants/consume`
 
 它们既不需要 JWT，也不需要租户头。调用者控制的 `X-Tenant-ID` 会被忽略，不会成为权威 `TenantContext`。服务端通过匹配的 `shareCode` 元数据解析 owner tenant；只有这次分享元数据查询跨越租户隔离。文件元数据、key envelope、访问计数变更和分享访问审计随后都在 owner tenant 内执行。公开性、有效/取消/过期或未知状态、合法分享类型和文件归属校验继续失败关闭。当前模型没有分享密码字段；密码保护不属于本次变更。
@@ -121,7 +122,7 @@ public Result<File> getFile(@PathVariable Long id) { ... }
 
 ### 公开分享共享桶
 
-公开 chunks 与 decrypt-info 端点按 `rate:limit:public:share-access:v2:ip:<canonical-ip>` 共享固定 30 次/60 秒额度。key 不包含 tenant、JWT 角色、端点方法或调用者提供的 header 值，因此修改 `X-Tenant-ID` 或在两个端点间交替都不能拆桶。可信代理边界与上文一致：只有立即 peer 命中已配置的数字 allowlist 时才处理转发头。前 30 次合计请求可以进入 controller；当前第 31 次通过现有响应包装保持 HTTP 200，并返回业务码 `70005`。Redis 结果不是 `1`（包括依赖异常）时会在 controller 执行前失败关闭。
+公开 chunks、decrypt-info 与 download-metadata 端点按 `rate:limit:public:share-access:v2:ip:<canonical-ip>` 共享固定 30 次/60 秒额度。key 不包含 tenant、JWT 角色、端点方法或调用者提供的 header 值，因此修改 `X-Tenant-ID` 或在这些端点间交替都不能拆桶。可信代理边界与上文一致：只有立即 peer 命中已配置的数字 allowlist 时才处理转发头。前 30 次合计请求可以进入 controller；当前第 31 次通过现有响应包装保持 HTTP 200，并返回业务码 `70005`。Redis 结果不是 `1`（包括依赖异常）时会在 controller 执行前失败关闭。
 
 ### 分布式限流器
 

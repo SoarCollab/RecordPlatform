@@ -36,7 +36,7 @@
 | P2-Q1 前端依赖修复 | 完整前端开发依赖图阻断新 High/Critical，且不削弱测试 | frontend workspace/lockfile 与 CI audit | 指定 Dependabot 告警真实 fixed，未 dismissal |
 | P2-Q2 Jackson 运行时修复 | API/backend/FISCO/storage/verifier 的 Jackson 2.x/3.x 安全补丁保持一致 | 五个 Maven 依赖树与 JSON/日志兼容测试 | 运行时告警 fixed，刷新后的依赖证据不含旧版本 |
 | P2-1A 测试依赖修复 | storage test scope 固定安全 Commons Compress/Lang3 并设置最低版本门禁 | storage POM/enforcer 与 test/runtime 依赖树 | 真实容器测试通过；test-only 依赖未进入生产 runtime |
-| P2-2 有界下载 | 明确区分 `NONE`、legacy v1、framed AEAD v2；支持的浏览器通过事务型 File System Access sink 写盘 | `boundedDownloader.ts`、`downloadSink.ts`、`fileSize.ts`、framed v2 迁移/fixture | Chromium 64/256/512 MiB 门禁证明应用缓冲不随文件增长，篡改/截断/取消/sink 失败均在提交前 abort |
+| P2-2 有界下载 | 自有/公开分享/认证分享共用一个 manifest reader；明确区分 `NONE`、legacy v1、framed AEAD v2；支持的浏览器通过事务型 File System Access sink 写盘；允许一次身份栅栏保护的 401/403 当前分片续传 | `FileDownloadMetadataBuilder`、generated OpenAPI alias、`boundedDownloader.ts`、`downloadSink.ts`、`fileSize.ts`、framed v2 迁移/fixture | Chromium 64/256/512 MiB 门禁证明应用缓冲不随文件增长、稳定身份刷新可恢复，漂移/篡改/截断/取消/sink 失败均在提交前 abort |
 | P2-3 Manifest 治理 | 租户级 `SCAN`/`DRY_RUN`/`APPLY`、insert-only 发布、确定性分类、引用 census 与独立开关 sweep | 管理控制器/服务与 `V1.17.0__manifest_backfill_governance.sql` | 事务/并发/崩溃恢复/安全测试；不根据 map 顺序、ETag、文件名或链记录 ID 猜测 |
 | P2-4 负载与故障证据 | direct-path k6 与强制 MinIO/Redis/Toxiproxy 矩阵覆盖上传、下载、quorum、降级修复、超时、竞态和清理 | `tools/k6/direct-path.js`、`perf-smoke.yml`、storage fault/load IT | exact-main Test Suite `30209115456`；Linux amd64/Java 21.0.11 受限 smoke 完成 8/8 文件且生命周期残留为零 |
 | P2-Q3 docs 依赖公告修复 | docs workspace 固定 DOMPurify 3.4.12 与 PostCSS 8.5.18 | `docs/pnpm-workspace.yaml` 与可复现 lockfile | PR #315、exact-main docs deploy、docs low audit 零公告；#588/#590 fixed 且未 dismissal |

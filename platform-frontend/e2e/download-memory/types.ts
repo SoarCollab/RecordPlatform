@@ -9,6 +9,7 @@ export type DownloadMemoryFailure =
   | "duplicate"
   | "wrong-key"
   | "cross-file"
+  | "refresh-stable"
   | "expired-401"
   | "expired-403";
 
