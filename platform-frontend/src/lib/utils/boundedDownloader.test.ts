@@ -128,10 +128,19 @@ function canonicalValue(value: unknown): unknown {
 function withCanonicalManifest(
   metadata: Omit<
     FileDownloadMetadataVO,
-    "canonicalManifestJson" | "manifestHash"
+    | "canonicalManifestJson"
+    | "manifestHash"
+    | "manifestStatus"
+    | "manifestClassification"
+    | "legacyDownloadAllowed"
+    | "accessIdentity"
   > & {
     manifestHash?: string;
     initialKey?: string | undefined;
+    manifestStatus?: string;
+    manifestClassification?: string;
+    legacyDownloadAllowed?: boolean;
+    accessIdentity?: FileDownloadMetadataVO["accessIdentity"];
   },
 ): FileDownloadMetadataVO {
   const format = metadata.encryption?.formatVersion;
@@ -163,12 +172,27 @@ function withCanonicalManifest(
     })),
   });
   const canonicalManifestJson = JSON.stringify(payload);
+  const manifestHash = `sha256:${bytesToHex(
+    sha256(new TextEncoder().encode(canonicalManifestJson)),
+  )}`;
   return {
     ...metadata,
-    manifestHash: `sha256:${bytesToHex(
-      sha256(new TextEncoder().encode(canonicalManifestJson)),
-    )}`,
+    manifestHash,
     canonicalManifestJson,
+    manifestStatus: metadata.manifestStatus ?? "ACTIVE",
+    manifestClassification:
+      metadata.manifestClassification ?? "ALREADY_MANIFEST",
+    legacyDownloadAllowed: metadata.legacyDownloadAllowed ?? false,
+    accessIdentity: metadata.accessIdentity ?? {
+      accessKind: "OWNER",
+      identityHash: `sha256:${"a".repeat(64)}`,
+      fileVersion: 1,
+      manifestHash,
+      algorithmSuite:
+        metadata.encryption?.algorithmSuite ??
+        metadata.encryptionAlgorithm ??
+        "NONE",
+    },
   };
 }
 
@@ -388,6 +412,115 @@ describe("boundedDownloader", () => {
     });
     expect(metrics.bytesWritten).toBe(metadata.fileSize);
     expect(new TextDecoder().decode(sink.getData())).toBe("hello world");
+  });
+
+  it("should refresh expired metadata once and resume at the current part boundary", async () => {
+    const first = new Uint8Array([1]);
+    const second = new Uint8Array([2]);
+    const metadata = withCanonicalManifest({
+      fileId: "refresh-file",
+      fileHash: "refresh-hash",
+      fileName: "refresh.bin",
+      fileSize: 2,
+      contentType: "application/octet-stream",
+      manifestSchemaId: "v1",
+      hashAlgorithm: "SHA-256",
+      encryptionAlgorithm: "NONE",
+      storageBackend: "S3",
+      chunkSize: 1,
+      totalChunks: 2,
+      parts: [part(0, first, "old-0"), part(1, second, "old-1")],
+    });
+    const refreshed: FileDownloadMetadataVO = {
+      ...metadata,
+      accessIdentity: { ...metadata.accessIdentity },
+      parts: metadata.parts.map((current) => ({
+        ...current,
+        downloadUrl: `new-${current.index}`,
+        expiresAtEpochSeconds: current.expiresAtEpochSeconds + 60,
+      })),
+    };
+    const requestedUrls: string[] = [];
+    const refreshMetadata = vi.fn(async () => refreshed);
+    const sink = new MemoryDownloadSink(2, 64);
+
+    await executeBoundedDownload({
+      metadata,
+      expectedFileHash: "refresh-hash",
+      sink,
+      refreshMetadata,
+      fetchImpl: async (url) => {
+        const value = String(url);
+        requestedUrls.push(value);
+        if (value === "old-1") {
+          return new Response(null, { status: 403 });
+        }
+        return responseFor(value.endsWith("0") ? first : second);
+      },
+    });
+
+    expect(refreshMetadata).toHaveBeenCalledOnce();
+    expect(requestedUrls).toEqual(["old-0", "old-1", "new-1"]);
+    expect([...sink.getData()]).toEqual([1, 2]);
+  });
+
+  it("should abort when refreshed access identity drifts", async () => {
+    const bytes = new Uint8Array([7]);
+    const metadata = plainMetadata(bytes);
+    const drifted: FileDownloadMetadataVO = {
+      ...metadata,
+      accessIdentity: {
+        ...metadata.accessIdentity,
+        identityHash: `sha256:${"d".repeat(64)}`,
+      },
+      parts: metadata.parts.map((current) => ({
+        ...current,
+        downloadUrl: "new-url",
+      })),
+    };
+    const sink = trackingSink();
+    const refreshMetadata = vi.fn(async () => drifted);
+
+    await expect(
+      executeBoundedDownload({
+        metadata,
+        sink,
+        refreshMetadata,
+        fetchImpl: async () => new Response(null, { status: 401 }),
+      }),
+    ).rejects.toThrow("accessIdentity 发生漂移");
+    expect(refreshMetadata).toHaveBeenCalledOnce();
+    expect(sink.aborted).toBe(true);
+    expect(sink.closed).toBe(false);
+  });
+
+  it("should abort after a second expiry without refreshing twice", async () => {
+    const bytes = new Uint8Array([9]);
+    const metadata = plainMetadata(bytes);
+    const refreshed: FileDownloadMetadataVO = {
+      ...metadata,
+      accessIdentity: { ...metadata.accessIdentity },
+      parts: metadata.parts.map((current) => ({
+        ...current,
+        downloadUrl: "still-expired",
+      })),
+    };
+    const sink = trackingSink();
+    const refreshMetadata = vi.fn(async () => refreshed);
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 403 }));
+
+    await expect(
+      executeBoundedDownload({
+        metadata,
+        sink,
+        refreshMetadata,
+        fetchImpl,
+      }),
+    ).rejects.toThrow("下载地址已过期");
+    expect(refreshMetadata).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(sink.aborted).toBe(true);
+    expect(sink.closed).toBe(false);
   });
 
   it("should authenticate a framed v2 part through the bounded dispatcher", async () => {
@@ -1098,11 +1231,21 @@ describe("boundedDownloader", () => {
           manifestSchemaId: "v1",
           manifestHash: "sha256:00",
           canonicalManifestJson: "{}",
+          manifestStatus: "ACTIVE",
+          manifestClassification: "ALREADY_MANIFEST",
+          legacyDownloadAllowed: false,
           hashAlgorithm: "SHA-256",
           encryptionAlgorithm: "NONE",
           storageBackend: "S3",
           chunkSize: 1,
           totalChunks: 0,
+          accessIdentity: {
+            accessKind: "OWNER",
+            identityHash: `sha256:${"a".repeat(64)}`,
+            fileVersion: 1,
+            manifestHash: "sha256:00",
+            algorithmSuite: "NONE",
+          },
           parts: [],
         },
         sink,

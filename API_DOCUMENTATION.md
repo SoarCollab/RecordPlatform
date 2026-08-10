@@ -82,13 +82,14 @@ POST /api/v1/auth/login
 - `GET /api/v1/shares/{shareCode}/files` - Get shared files by code
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` - Public share download
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` - Public share decrypt metadata
+- `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/download-metadata` - Public manifest-backed download metadata
 - `GET /api/v1/images/download/images/**` - Download images
 - `GET /api/v1/shares/{shareCode}/info` - Get share basic info (public)
 - `GET /api/v1/public/proofs/{proofId}/status` - Resolve current signed-proof status
 - `GET /api/v1/public/proof-keys/{keyId}/versions/{keyVersion}` - Resolve a versioned proof verification key
 - `GET /api/v1/sse/connect?token=...&x-tenant-id=...` - SSE connect entry (short-lived token required; tenant value is an untrusted Redis namespace hint)
 
-The anonymous public-share allowlist is exactly `GET /api/v1/shares/{shareCode}/info`, `GET /api/v1/shares/{shareCode}/files`, `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`, and `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`. No other share route is public by implication. These four routes require neither JWT nor `X-Tenant-ID`; a supplied tenant header is ignored. Share writes, saving shared files, and the authenticated share download/decrypt routes still require a Bearer token.
+The anonymous public-share allowlist is exactly `GET /api/v1/shares/{shareCode}/info`, `GET /api/v1/shares/{shareCode}/files`, `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`, `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`, and `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/download-metadata`. No other share route is public by implication. These five routes require neither JWT nor `X-Tenant-ID`; a supplied tenant header is ignored. Share writes, saving shared files, and the authenticated share download/decrypt/metadata routes still require a Bearer token.
 
 `POST /api/v1/auth/logout` is also handled by Spring Security (non-controller endpoint) and requires authenticated context.
 
@@ -1099,8 +1100,9 @@ GET /api/v1/files/hash/{fileHash}/download-metadata
     "fileSize": 2048,
     "contentType": "application/pdf",
     "initialKey": null,
+    "keyGrant": null,
     "manifestSchemaId": "cn.flying.chunk-manifest.v1",
-    "manifestHash": "sha256:manifest",
+    "manifestHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "canonicalManifestJson": "{\"schema\":\"cn.flying.chunk-manifest.v1\",...}",
     "manifestStatus": "ACTIVE",
     "manifestClassification": "ALREADY_MANIFEST",
@@ -1111,6 +1113,13 @@ GET /api/v1/files/hash/{fileHash}/download-metadata
     "storageBackend": "S3",
     "chunkSize": 1024,
     "totalChunks": 2,
+    "accessIdentity": {
+      "accessKind": "OWNER",
+      "identityHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileVersion": 1,
+      "manifestHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "algorithmSuite": "NONE"
+    },
     "parts": [
       {
         "index": 0,
@@ -1127,7 +1136,9 @@ GET /api/v1/files/hash/{fileHash}/download-metadata
 }
 ```
 
-For encrypted files, `initialKey` contains the authorized envelope-unwrapped key. For unencrypted direct multipart uploads, `initialKey` is `null` and `encryptionAlgorithm` is `NONE`.
+For encrypted files, the default `grant-v1` response keeps `initialKey` null and returns a short-lived `keyGrant`, which must be consumed through the matching authenticated or public grant-consume POST immediately before decryption. For unencrypted direct multipart uploads, both key fields are null and `encryptionAlgorithm` is `NONE`.
+
+Owner, friend-share, authenticated-share, and public-share metadata use this same manifest contract. The share-code endpoints are `GET /api/v1/shares/{shareCode}/files/{fileHash}/download-metadata` (Bearer required) and `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/download-metadata` (anonymous). `accessIdentity` binds the server-authorized access kind, tenant/actor-or-client/share identity, file version, manifest hash, and algorithm suite without exposing those raw authorization fields. A client may refresh metadata once after a part returns 401/403 only when the complete stable identity and part evidence remain unchanged; a second expiry or any identity drift fails closed.
 
 For an active manifest, `manifestStatus=ACTIVE`, `manifestClassification=ALREADY_MANIFEST`, `manifestErrorCode=null`, and `legacyDownloadAllowed=false`. `canonicalManifestJson` excludes secret key material and binds the ordered part contract.
 
@@ -1262,10 +1273,11 @@ GET /api/v1/shares/{shareCode}/files
 | GET | `/api/v1/shares/{shareCode}/files` | Not part of the 30/60 transfer bucket |
 | GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` | Shared canonical-IP bucket, 30/60 seconds |
 | GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` | Shared canonical-IP bucket, 30/60 seconds |
+| GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/download-metadata` | Shared canonical-IP bucket, 30/60 seconds |
 
-All four routes ignore caller-supplied `X-Tenant-ID`, including `0`, another tenant, or malformed values. The server derives the owner tenant from `shareCode`; public/private, active/cancelled/expired, unknown type/status, and included-file checks remain fail closed. The current model has no share-password field; password-protected shares require a separate end-to-end feature. Anonymous `sys_operation_log` rows use system tenant `0`, while emitted `share_access_log` rows use the owner tenant. Both audit paths use the same canonical trusted-client IP used by public-share rate limiting.
+All five routes ignore caller-supplied `X-Tenant-ID`, including `0`, another tenant, or malformed values. The server derives the owner tenant from `shareCode`; public/private, active/cancelled/expired, unknown type/status, and included-file checks remain fail closed. The current model has no share-password field; password-protected shares require a separate end-to-end feature. Anonymous `sys_operation_log` rows use system tenant `0`, while emitted `share_access_log` rows use the owner tenant. Both audit paths use the same canonical trusted-client IP used by public-share rate limiting.
 
-The public chunk and decrypt-info routes share `rate:limit:public:share-access:v2:ip:<canonical-ip>`. The key contains no tenant, JWT role, endpoint method, or raw forwarding-header value. Unless the direct peer matches the configured numeric trusted-proxy allowlist, `X-Forwarded-For` and `X-Real-IP` are ignored. The first 30 combined requests may enter the controller; the current 31st request remains HTTP 200 with business code `70005`.
+The public chunk, decrypt-info, and download-metadata routes share `rate:limit:public:share-access:v2:ip:<canonical-ip>`. The key contains no tenant, JWT role, endpoint method, or raw forwarding-header value. Unless the direct peer matches the configured numeric trusted-proxy allowlist, `X-Forwarded-For` and `X-Real-IP` are ignored. The first 30 combined requests may enter the controller; the current 31st request remains HTTP 200 with business code `70005`.
 
 ---
 
@@ -4019,8 +4031,10 @@ Operational defaults: backfill worker enabled, apply disabled, run lease 300 sec
 - `DELETE /api/v1/files/share/{shareCode}`
 - `GET /api/v1/shares/{shareCode}/files/{fileHash}/chunks`
 - `GET /api/v1/shares/{shareCode}/files/{fileHash}/decrypt-info`
+- `GET /api/v1/shares/{shareCode}/files/{fileHash}/download-metadata`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
+- `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/download-metadata`
 - `POST /api/v1/files/download-batches/report`
 - `GET /api/v1/files/quota`
 - `POST /api/v1/admin/quota/rollout/audits`

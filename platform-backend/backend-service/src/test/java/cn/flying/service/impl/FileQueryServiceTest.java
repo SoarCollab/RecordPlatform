@@ -13,14 +13,16 @@ import cn.flying.dao.entity.FriendFileShare;
 import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
-import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.DownloadAccessIdentityVO;
 import cn.flying.dao.vo.file.DownloadKeyGrantVO;
+import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileVersionVO;
 import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FriendFileShareService;
+import cn.flying.service.download.FileDownloadMetadataBuilder;
 import cn.flying.service.encryption.FramedAeadCrypto;
 import cn.flying.service.key.FileKeyEnvelopeService;
 import cn.flying.service.key.FileKeyGrantAccessKind;
@@ -52,6 +54,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.time.Instant;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -157,6 +161,81 @@ class FileQueryServiceTest {
     class DownloadMetadata {
 
         /**
+         * Verifies the closed access-kind set and exact share-record requirements.
+         */
+        @Test
+        @DisplayName("should reject unsupported or incomplete download access bindings")
+        void shouldRejectUnsupportedOrIncompleteDownloadAccessBindings() {
+            FileDownloadMetadataBuilder.DownloadAccessBinding owner =
+                    new FileDownloadMetadataBuilder.DownloadAccessBinding(
+                            FileKeyGrantAccessKind.OWNER.name(), 1L, USER_ID, null, null);
+            assertDoesNotThrow(() -> invokeDownloadBuilder("validateAccessBinding", owner));
+
+            FileDownloadMetadataBuilder.DownloadAccessBinding unsupported =
+                    new FileDownloadMetadataBuilder.DownloadAccessBinding(
+                            "FUTURE_ACCESS", 1L, USER_ID, null, null);
+            assertThrows(GeneralException.class,
+                    () -> invokeDownloadBuilder("validateAccessBinding", unsupported));
+
+            FileDownloadMetadataBuilder.DownloadAccessBinding missingShare =
+                    new FileDownloadMetadataBuilder.DownloadAccessBinding(
+                            FileKeyGrantAccessKind.AUTHENTICATED_SHARE.name(),
+                            1L, USER_ID, null, null);
+            assertThrows(GeneralException.class,
+                    () -> invokeDownloadBuilder("validateAccessBinding", missingShare));
+
+            FileDownloadMetadataBuilder.DownloadAccessBinding ownerWithShare =
+                    new FileDownloadMetadataBuilder.DownloadAccessBinding(
+                            FileKeyGrantAccessKind.OWNER.name(),
+                            1L, USER_ID, 99L, null);
+            assertThrows(GeneralException.class,
+                    () -> invokeDownloadBuilder("validateAccessBinding", ownerWithShare));
+        }
+
+        /**
+         * Verifies deterministic identity while every stable authorization dimension remains bound.
+         */
+        @Test
+        @DisplayName("should bind every stable authorization dimension into download identity")
+        void shouldBindEveryStableAuthorizationDimensionIntoDownloadIdentity() {
+            File file = new File().setId(FILE_ID).setVersion(1);
+            ChunkManifestView manifest = framedManifest(
+                    "FRAMED_AEAD_V2", framedEncryption(),
+                    framedChunk(V2_CIPHER_SIZE, V2_FILE_SIZE, 2));
+            FileDownloadMetadataBuilder.DownloadAccessBinding binding =
+                    new FileDownloadMetadataBuilder.DownloadAccessBinding(
+                            FileKeyGrantAccessKind.OWNER.name(), 1L, USER_ID, null, null);
+
+            String baseline = ((DownloadAccessIdentityVO) invokeDownloadBuilder(
+                    "buildAccessIdentity", binding, file, manifest)).identityHash();
+            assertEquals(baseline,
+                    ((DownloadAccessIdentityVO) invokeDownloadBuilder(
+                            "buildAccessIdentity", binding, file, manifest)).identityHash());
+
+            List<String> changedIdentities = List.of(
+                    ((DownloadAccessIdentityVO) invokeDownloadBuilder(
+                            "buildAccessIdentity",
+                            new FileDownloadMetadataBuilder.DownloadAccessBinding(
+                                    FileKeyGrantAccessKind.OWNER.name(), 2L, USER_ID, null, null),
+                            file, manifest)).identityHash(),
+                    ((DownloadAccessIdentityVO) invokeDownloadBuilder(
+                            "buildAccessIdentity",
+                            new FileDownloadMetadataBuilder.DownloadAccessBinding(
+                                    FileKeyGrantAccessKind.OWNER.name(), 1L, OTHER_USER_ID, null, null),
+                            file, manifest)).identityHash(),
+                    ((DownloadAccessIdentityVO) invokeDownloadBuilder(
+                            "buildAccessIdentity", binding,
+                            new File().setId(FILE_ID).setVersion(2), manifest)).identityHash(),
+                    ((DownloadAccessIdentityVO) invokeDownloadBuilder(
+                            "buildAccessIdentity", binding, file,
+                            copyDownloadManifest(
+                                    manifest, "manifestHash", "sha256:" + "e".repeat(64))))
+                            .identityHash());
+
+            assertThat(changedIdentities).doesNotContain(baseline).doesNotHaveDuplicates();
+        }
+
+        /**
          * 验证下载 metadata 从已授权文件的 active manifest 生成，并按 manifest 顺序签发 URL。
          */
         @Test
@@ -221,6 +300,9 @@ class FileQueryServiceTest {
                 assertEquals(2, metadata.totalChunks());
                 assertEquals("url-0", metadata.parts().get(0).downloadUrl());
                 assertEquals("chunks/1", metadata.parts().get(1).storagePath());
+                assertEquals(FileKeyGrantAccessKind.OWNER.name(), metadata.accessIdentity().accessKind());
+                assertEquals(metadata.manifestHash(), metadata.accessIdentity().manifestHash());
+                assertThat(metadata.accessIdentity().identityHash()).startsWith("sha256:");
                 verify(fileRemoteClient).getFileUrlListByHash(
                         List.of("chunks/0", "chunks/1"),
                         List.of("cipher-0", "cipher-1")
@@ -588,26 +670,25 @@ class FileQueryServiceTest {
             ChunkManifestView valid = framedManifest(
                     "FRAMED_AEAD_V2", framedEncryption(), framedChunk(V2_CIPHER_SIZE, V2_FILE_SIZE, 2));
 
-            assertThat((Long) ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "resolveDownloadFileSize", file, framedDecryptInfo(null, 1, V2_FILE_SIZE)))
+            assertThat((Long) invokeDownloadBuilder(
+                    "resolveDownloadFileSize", file, framedDecryptInfo(null, 1, V2_FILE_SIZE)))
                     .isEqualTo(V2_FILE_SIZE);
             File withoutPersistedSize = framedOwnedFile("{}").setFileSize(null);
-            assertThat((Long) ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "resolveDownloadFileSize", withoutPersistedSize,
+            assertThat((Long) invokeDownloadBuilder(
+                    "resolveDownloadFileSize", withoutPersistedSize,
                     framedDecryptInfo(V2_FILE_SIZE, 1, V2_FILE_SIZE))).isEqualTo(V2_FILE_SIZE);
-            assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "resolveDownloadFileSize", withoutPersistedSize,
+            assertThrows(GeneralException.class, () -> invokeDownloadBuilder(
+                    "resolveDownloadFileSize", withoutPersistedSize,
                     framedDecryptInfo(null, 1, V2_FILE_SIZE)));
-            assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "resolveDownloadFileSize", withoutPersistedSize,
+            assertThrows(GeneralException.class, () -> invokeDownloadBuilder(
+                    "resolveDownloadFileSize", withoutPersistedSize,
                     framedDecryptInfo(0L, 1, V2_FILE_SIZE)));
 
-            ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "validateEncryptionCoherence", valid, true, false);
+            invokeDownloadBuilder("validateEncryptionCoherence", valid, true, false);
             assertDownloadEncryptionFailure(
                     framedManifest("FRAMED_AEAD_V2", null, valid.chunks().getFirst()), false, false);
-            ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "validateEncryptionCoherence",
+            invokeDownloadBuilder(
+                    "validateEncryptionCoherence",
                     framedManifest("AES-GCM", null, valid.chunks().getFirst()), false, false);
             assertDownloadEncryptionFailure(
                     framedManifest("AES-GCM", encryptionWithFormat(ChunkManifestEncryption.FORMAT_NONE),
@@ -627,25 +708,25 @@ class FileQueryServiceTest {
             for (Map.Entry<String, Object> drift : chunkDrifts.entrySet()) {
                 ChunkManifestChunk chunk = copyDownloadChunk(
                         valid.chunks().getFirst(), drift.getKey(), drift.getValue());
-                assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
-                        fileQueryService, "validateFramedChunk",
+                assertThrows(GeneralException.class, () -> invokeDownloadBuilder(
+                        "validateFramedChunk",
                         copyDownloadManifest(valid, "chunks", List.of(chunk)), chunk, 0));
             }
             ChunkManifestChunk zeroPlain = copyDownloadChunk(valid.chunks().getFirst(), "plainSize", 0L);
-            assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "validateFramedChunk",
+            assertThrows(GeneralException.class, () -> invokeDownloadBuilder(
+                    "validateFramedChunk",
                     copyDownloadManifest(valid, "chunks", List.of(zeroPlain)), zeroPlain, 0));
             ChunkManifestChunk zeroFrames = copyDownloadChunk(valid.chunks().getFirst(), "frameCount", 0);
-            assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "validateFramedChunk",
+            assertThrows(GeneralException.class, () -> invokeDownloadBuilder(
+                    "validateFramedChunk",
                     copyDownloadManifest(valid, "chunks", List.of(zeroFrames)), zeroFrames, 0));
             ChunkManifestChunk oversizedPlain = copyDownloadChunk(
                     valid.chunks().getFirst(), "plainSize", V2_FILE_SIZE + 1);
-            assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "validateFramedChunk",
+            assertThrows(GeneralException.class, () -> invokeDownloadBuilder(
+                    "validateFramedChunk",
                     copyDownloadManifest(valid, "chunks", List.of(oversizedPlain)), oversizedPlain, 0));
-            assertThat((Long) ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "validateFramedChunk", valid, valid.chunks().getFirst(), 0))
+            assertThat((Long) invokeDownloadBuilder(
+                    "validateFramedChunk", valid, valid.chunks().getFirst(), 0))
                     .isEqualTo(V2_FILE_SIZE);
 
             ChunkManifestEncryption missingFrameSize = new ChunkManifestEncryption(
@@ -659,8 +740,8 @@ class FileQueryServiceTest {
                     FramedAeadCrypto.TAG_SIZE);
             ChunkManifestView missingFrameSizeManifest = framedManifest(
                     "FRAMED_AEAD_V2", missingFrameSize, valid.chunks().getFirst());
-            assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "validateFramedChunk",
+            assertThrows(GeneralException.class, () -> invokeDownloadBuilder(
+                    "validateFramedChunk",
                     missingFrameSizeManifest, valid.chunks().getFirst(), 0));
 
             ChunkManifestEncryption missingTagSize = new ChunkManifestEncryption(
@@ -674,8 +755,8 @@ class FileQueryServiceTest {
                     null);
             ChunkManifestView missingTagSizeManifest = framedManifest(
                     "FRAMED_AEAD_V2", missingTagSize, valid.chunks().getFirst());
-            assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "validateFramedChunk",
+            assertThrows(GeneralException.class, () -> invokeDownloadBuilder(
+                    "validateFramedChunk",
                     missingTagSizeManifest, valid.chunks().getFirst(), 0));
 
             Map<String, String> fileParamDrifts = new LinkedHashMap<>();
@@ -699,21 +780,16 @@ class FileQueryServiceTest {
                     .replace("\"tagSize\":16", "\"tagSize\":12"));
             fileParamDrifts.put("malformed", "{not-json");
             for (String fileParam : fileParamDrifts.values()) {
-                assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
-                        fileQueryService, "validateV2FileParam",
+                assertThrows(GeneralException.class, () -> invokeDownloadBuilder(
+                        "validateV2FileParam",
                         framedOwnedFile(fileParam), valid, true));
             }
-            ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "validateV2FileParam", file, valid, true);
-            ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "validateV2FileParam", file, valid, false);
+            invokeDownloadBuilder("validateV2FileParam", file, valid, true);
+            invokeDownloadBuilder("validateV2FileParam", file, valid, false);
 
-            assertThat((Boolean) ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "numericEquals", 2L, 2)).isTrue();
-            assertThat((Boolean) ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "numericEquals", "2", 2)).isFalse();
-            assertThat((Boolean) ReflectionTestUtils.invokeMethod(
-                    fileQueryService, "numericEquals", 2, null)).isFalse();
+            assertThat((Boolean) invokeDownloadBuilder("numericEquals", 2L, 2)).isTrue();
+            assertThat((Boolean) invokeDownloadBuilder("numericEquals", "2", 2)).isFalse();
+            assertThat((Boolean) invokeDownloadBuilder("numericEquals", 2, null)).isFalse();
         }
     }
 
@@ -1834,14 +1910,14 @@ class FileQueryServiceTest {
             ChunkManifestView manifest,
             long fileSize
     ) {
-        assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
-                fileQueryService,
+        assertThrows(GeneralException.class, () -> invokeDownloadBuilder(
                 "validateDownloadManifest",
                 file,
                 requestedHash,
                 decryptInfo,
                 manifest,
-                fileSize));
+                fileSize,
+                chunkManifestService));
     }
 
     /**
@@ -1852,8 +1928,30 @@ class FileQueryServiceTest {
             boolean framedV2,
             boolean unencrypted
     ) {
-        assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
-                fileQueryService, "validateEncryptionCoherence", manifest, framedV2, unencrypted));
+        assertThrows(GeneralException.class, () -> invokeDownloadBuilder(
+                "validateEncryptionCoherence", manifest, framedV2, unencrypted));
+    }
+
+    /**
+     * Invokes a private shared metadata-builder invariant without duplicating production validation in tests.
+     */
+    private Object invokeDownloadBuilder(String methodName, Object... arguments) {
+        Method method = java.util.Arrays.stream(FileDownloadMetadataBuilder.class.getDeclaredMethods())
+                .filter(candidate -> candidate.getName().equals(methodName))
+                .filter(candidate -> candidate.getParameterCount() == arguments.length)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Missing metadata builder method: " + methodName));
+        method.setAccessible(true);
+        try {
+            return method.invoke(null, arguments);
+        } catch (InvocationTargetException failure) {
+            if (failure.getCause() instanceof RuntimeException runtimeFailure) {
+                throw runtimeFailure;
+            }
+            throw new AssertionError(failure.getCause());
+        } catch (ReflectiveOperationException failure) {
+            throw new AssertionError(failure);
+        }
     }
 
     /**

@@ -1992,6 +1992,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/shares/{shareCode}/files/{fileHash}/download-metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取公开分享的预签名分片下载元数据
+         * @description 匿名 GET；不需要 JWT，X-Tenant-ID 不参与授权。服务端从 shareCode 恢复 owner tenant，并返回与公开下载身份严格绑定的 manifest 和预签名 URL。
+         */
+        get: operations["publicDownloadMetadata"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/shares": {
         parameters: {
             query?: never;
@@ -2089,6 +2109,23 @@ export interface paths {
         };
         /** 分享获取解密信息（REST，需登录） */
         get: operations["getSharedDecryptInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/shares/{shareCode}/files/{fileHash}/download-metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取认证分享的预签名分片下载元数据 */
+        get: operations["getSharedDownloadMetadata"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3943,6 +3980,22 @@ export interface components {
              */
             totalChunks: number;
         };
+        /** @description 下载 URL 刷新身份栅栏 */
+        DownloadAccessIdentityVO: {
+            /** @description 授权来源：OWNER/ADMIN/FRIEND_SHARE/AUTHENTICATED_SHARE/PUBLIC_SHARE */
+            accessKind: string;
+            /** @description 身份栅栏绑定的加密套件或 NONE */
+            algorithmSuite: string;
+            /**
+             * Format: int32
+             * @description 文件版本；历史数据可能为空
+             */
+            fileVersion: number | null;
+            /** @description 绑定 tenant/share/actor/file/version/manifest/suite 的 SHA-256 摘要 */
+            identityHash: string;
+            /** @description 身份栅栏绑定的 manifest hash */
+            manifestHash: string;
+        };
         /** @description 下载密钥授权消费请求 */
         DownloadKeyGrantConsumeRequestVO: {
             /** @description 不透明授权引用 */
@@ -4078,6 +4131,7 @@ export interface components {
         };
         /** @description 文件预签名分片下载元数据 */
         FileDownloadMetadataVO: {
+            accessIdentity: components["schemas"]["DownloadAccessIdentityVO"];
             /** @description 不含密钥材料的 canonical manifest JSON */
             canonicalManifestJson?: string;
             /**
@@ -10096,6 +10150,32 @@ export interface operations {
             };
         };
     };
+    publicDownloadMetadata: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Download-Session-ID"?: string;
+                "X-Key-Delivery-Protocol"?: string;
+            };
+            path: {
+                fileHash: string;
+                shareCode: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultFileDownloadMetadataVO"];
+                };
+            };
+        };
+    };
     createShare: {
         parameters: {
             query?: never;
@@ -10239,6 +10319,32 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultFileDecryptInfoVO"];
+                };
+            };
+        };
+    };
+    getSharedDownloadMetadata: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Download-Session-ID"?: string;
+                "X-Key-Delivery-Protocol"?: string;
+            };
+            path: {
+                fileHash: string;
+                shareCode: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultFileDownloadMetadataVO"];
                 };
             };
         };

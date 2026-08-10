@@ -3,6 +3,7 @@ package cn.flying.service;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.FileDownloadMetadataVO;
 import cn.flying.dao.vo.file.ShareInfoVO;
 import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
@@ -338,6 +339,15 @@ public interface FileService extends IService<File> {
                                                String publicClientIdentity);
 
     /**
+     * 获取公开分享的 manifest 驱动预签名下载元数据。
+     */
+    FileDownloadMetadataVO getPublicFileDownloadMetadata(String shareCode,
+                                                         String fileHash,
+                                                         String keyDeliveryProtocol,
+                                                         String downloadSessionId,
+                                                         String publicClientIdentity);
+
+    /**
      * 登录用户通过分享码下载文件（支持私密/公开分享）
      * @param userId 用户ID
      * @param shareCode 分享码
@@ -354,6 +364,15 @@ public interface FileService extends IService<File> {
                                                String fileHash,
                                                String keyDeliveryProtocol,
                                                String downloadSessionId);
+
+    /**
+     * 获取认证分享的 manifest 驱动预签名下载元数据。
+     */
+    FileDownloadMetadataVO getSharedFileDownloadMetadata(Long userId,
+                                                         String shareCode,
+                                                         String fileHash,
+                                                         String keyDeliveryProtocol,
+                                                         String downloadSessionId);
 
     /**
      * 创建文件新版本（PREPARE 状态）

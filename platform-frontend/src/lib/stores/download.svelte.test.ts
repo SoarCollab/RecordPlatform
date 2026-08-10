@@ -18,11 +18,11 @@ const mocks = vi.hoisted(() => {
     fileApi: {
       getDownloadAddress: vi.fn(),
       getDownloadMetadata: vi.fn(),
+      getPublicShareDownloadMetadata: vi.fn(),
+      getAuthenticatedShareDownloadMetadata: vi.fn(),
       getDecryptInfo: vi.fn(),
       createDownloadSessionId: vi.fn(),
       consumeDownloadKeyGrant: vi.fn(),
-      publicDownloadFile: vi.fn(),
-      shareDownloadFile: vi.fn(),
       downloadFile: vi.fn(),
       reportBatchDownloadMetrics: vi.fn(),
     },
@@ -215,12 +215,23 @@ function createDownloadMetadata(fileHash = "hash-1", downloadUrl = "u1") {
       expiresAt: "2026-07-27T12:00:00Z",
     },
     manifestSchemaId: "cn.flying.chunk-manifest.v1",
-    manifestHash: "sha256:manifest",
+    manifestHash: `sha256:${"b".repeat(64)}`,
+    canonicalManifestJson: "{}",
+    manifestStatus: "ACTIVE",
+    manifestClassification: "ALREADY_MANIFEST",
+    legacyDownloadAllowed: false,
     hashAlgorithm: "SHA-256",
     encryptionAlgorithm: "AES-GCM",
     storageBackend: "S3",
     chunkSize: 1024,
     totalChunks: 1,
+    accessIdentity: {
+      accessKind: "OWNER",
+      identityHash: `sha256:${"a".repeat(64)}`,
+      fileVersion: 1,
+      manifestHash: `sha256:${"b".repeat(64)}`,
+      algorithmSuite: "AES-GCM",
+    },
     parts: [
       {
         index: 0,
@@ -257,6 +268,14 @@ describe("download store", () => {
     mocks.fileApi.getDownloadMetadata.mockResolvedValue(
       createDownloadMetadata(),
     );
+    mocks.fileApi.getPublicShareDownloadMetadata.mockImplementation(
+      async (_shareCode: string, fileHash: string) =>
+        createDownloadMetadata(fileHash),
+    );
+    mocks.fileApi.getAuthenticatedShareDownloadMetadata.mockImplementation(
+      async (_shareCode: string, fileHash: string) =>
+        createDownloadMetadata(fileHash),
+    );
     mocks.fileApi.getDecryptInfo.mockResolvedValue({
       keyGrant: {
         reference: "grant-reference",
@@ -275,10 +294,7 @@ describe("download store", () => {
       initialKey: "k1",
       protocol: "grant-v1",
     });
-    mocks.fileApi.publicDownloadFile.mockResolvedValue(createBlob());
-    mocks.fileApi.shareDownloadFile.mockResolvedValue(createBlob());
     mocks.fileApi.downloadFile.mockResolvedValue(createBlob());
-    mocks.fileApi.reportBatchDownloadMetrics.mockResolvedValue("ok");
     mocks.fileApi.reportBatchDownloadMetrics.mockResolvedValue("ok");
     mocks.apiClient.getToken.mockReturnValue("test-token");
 
@@ -597,7 +613,7 @@ describe("download store", () => {
     expect(mocks.crypto.downloadBlob).toHaveBeenCalled();
   });
 
-  it("public/private share 应走 backend proxy 下载分支", async () => {
+  it("public/private share 应统一走 metadata 与有界下载分支", async () => {
     const download = await loadDownloadStore();
 
     const publicId = await download.startDownload("hash-public", "public.pdf", {
@@ -620,13 +636,92 @@ describe("download store", () => {
       "completed",
     );
 
-    expect(mocks.fileApi.publicDownloadFile).toHaveBeenCalledWith(
+    expect(mocks.fileApi.getPublicShareDownloadMetadata).toHaveBeenCalledWith(
       "share-public",
       "hash-public",
+      "download-session-123456",
     );
-    expect(mocks.fileApi.shareDownloadFile).toHaveBeenCalledWith(
+    expect(
+      mocks.fileApi.getAuthenticatedShareDownloadMetadata,
+    ).toHaveBeenCalledWith(
       "share-private",
       "hash-private",
+      "download-session-123456",
+    );
+    expect(
+      mocks.boundedDownloader.executeBoundedDownload,
+    ).toHaveBeenCalledTimes(2);
+  });
+
+  it("公开分享刷新 metadata 时应同步消费新 grant 并保留公开身份", async () => {
+    const initialMetadata = createDownloadMetadata(
+      "hash-refresh-share",
+      "https://storage.example/old-part",
+    );
+    const refreshedMetadata = {
+      ...createDownloadMetadata(
+        "hash-refresh-share",
+        "https://storage.example/new-part",
+      ),
+      keyGrant: {
+        reference: "refreshed-grant-reference",
+        protocol: "grant-v1",
+        expiresAt: "2026-07-27T12:05:00Z",
+      },
+    };
+    mocks.fileApi.getPublicShareDownloadMetadata
+      .mockResolvedValueOnce(initialMetadata)
+      .mockResolvedValueOnce(refreshedMetadata);
+    mocks.fileApi.consumeDownloadKeyGrant
+      .mockResolvedValueOnce({ initialKey: "k1", protocol: "grant-v1" })
+      .mockResolvedValueOnce({ initialKey: "k2", protocol: "grant-v1" });
+    mocks.boundedDownloader.executeBoundedDownload.mockImplementationOnce(
+      async (options: {
+        sink: {
+          write(data: Uint8Array): Promise<void>;
+          close(): Promise<void>;
+        };
+        metadata: ReturnType<typeof createDownloadMetadata>;
+        refreshMetadata?: () => Promise<
+          ReturnType<typeof createDownloadMetadata>
+        >;
+        onPartComplete?: (completed: number, total: number) => void;
+      }) => {
+        const refreshed = await options.refreshMetadata?.();
+        expect(refreshed?.parts[0]?.downloadUrl).toBe(
+          "https://storage.example/new-part",
+        );
+        return completeBoundedDownload(options);
+      },
+    );
+    const download = await loadDownloadStore();
+
+    const id = await download.startDownload(
+      "hash-refresh-share",
+      "refresh.bin",
+      { type: "public_share", shareCode: "share-refresh" },
+      1024,
+      "inmemory",
+    );
+
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "completed",
+    );
+    expect(mocks.fileApi.getPublicShareDownloadMetadata).toHaveBeenCalledTimes(
+      2,
+    );
+    expect(mocks.fileApi.consumeDownloadKeyGrant).toHaveBeenNthCalledWith(
+      1,
+      initialMetadata.keyGrant,
+      "download-session-123456",
+      true,
+    );
+    expect(mocks.fileApi.consumeDownloadKeyGrant).toHaveBeenNthCalledWith(
+      2,
+      refreshedMetadata.keyGrant,
+      "download-session-123456",
+      true,
     );
   });
 
@@ -1046,8 +1141,6 @@ describe("download store extra branches", () => {
       fileName: "report.pdf",
       fileSize: 1024,
     });
-    mocks.fileApi.publicDownloadFile.mockResolvedValue(createBlob());
-    mocks.fileApi.shareDownloadFile.mockResolvedValue(createBlob());
     mocks.fileApi.downloadFile.mockResolvedValue(createBlob());
     mocks.apiClient.getToken.mockReturnValue("test-token");
 
@@ -1088,7 +1181,7 @@ describe("download store extra branches", () => {
     });
   });
 
-  it("backend proxy 在 shareCode 缺失时应回退 downloadFile", async () => {
+  it("共享 metadata 缺少 shareCode 时应失败且不得回退 backend proxy", async () => {
     const download = await loadDownloadStore();
     const id = await download.startDownload("hash-fallback", "fallback.bin", {
       type: "private_share",
@@ -1096,16 +1189,21 @@ describe("download store extra branches", () => {
 
     await waitForStatus(
       () => download.tasks.find((task) => task.id === id)?.status,
-      "completed",
+      "failed",
     );
 
-    expect(mocks.fileApi.downloadFile).toHaveBeenCalledWith("hash-fallback");
+    expect(mocks.fileApi.downloadFile).not.toHaveBeenCalled();
+    expect(download.tasks.find((task) => task.id === id)?.error).toContain(
+      "shareCode",
+    );
   });
 
-  it("backend proxy 响应超过 64 MiB 时应失败且不提交 Blob", async () => {
-    mocks.fileApi.publicDownloadFile.mockResolvedValueOnce({
-      size: 64 * 1024 * 1024 + 1,
-    } as Blob);
+  it("无 FSA 的未知大小共享文件应在 metadata 后、对象读取前执行 64 MiB 硬上限", async () => {
+    mocks.fileSize.isStreamingSupported.mockReturnValue(false);
+    mocks.fileApi.getPublicShareDownloadMetadata.mockResolvedValueOnce({
+      ...createDownloadMetadata("hash-oversized-share"),
+      fileSize: 64 * 1024 * 1024 + 1,
+    });
     const download = await loadDownloadStore();
     const id = await download.startDownload(
       "hash-oversized-share",
@@ -1122,28 +1220,56 @@ describe("download store extra branches", () => {
     expect(download.tasks.find((task) => task.id === id)?.error).toContain(
       "64 MiB",
     );
+    expect(
+      mocks.boundedDownloader.executeBoundedDownload,
+    ).not.toHaveBeenCalled();
   });
 
-  it("backend proxy 响应大小与声明不一致时应失败", async () => {
-    mocks.fileApi.publicDownloadFile.mockResolvedValueOnce(
-      new Blob(["tiny"], { type: "application/octet-stream" }),
+  it("有 FSA 时超过 64 MiB 的公开分享应走事务性 streaming sink", async () => {
+    const largeSize = 64 * 1024 * 1024 + 1;
+    mocks.fileSize.performPreDownloadCheck.mockReturnValue({
+      canProceed: true,
+      decision: { strategy: "streaming" },
+      capabilities: { memoryEstimate: 1024 },
+    });
+    mocks.fileApi.getPublicShareDownloadMetadata.mockResolvedValueOnce({
+      ...createDownloadMetadata("hash-large-share"),
+      fileSize: largeSize,
+    });
+    mocks.boundedDownloader.executeBoundedDownload.mockImplementationOnce(
+      async (options: {
+        sink: { close(): Promise<void> };
+        onPartComplete?: (completed: number, total: number) => void;
+      }) => {
+        options.onPartComplete?.(1, 1);
+        await options.sink.close();
+        return {
+          currentBufferedBytes: 0,
+          peakBufferedBytes: 1,
+          framesAuthenticated: 0,
+          partsCompleted: 1,
+          bytesWritten: largeSize,
+        };
+      },
     );
     const download = await loadDownloadStore();
     const id = await download.startDownload(
-      "hash-size-mismatch",
-      "mismatch.bin",
-      { type: "public_share", shareCode: "share-mismatch" },
-      8,
+      "hash-large-share",
+      "large.bin",
+      { type: "public_share", shareCode: "share-large" },
+      largeSize,
     );
 
     await waitForStatus(
       () => download.tasks.find((task) => task.id === id)?.status,
-      "failed",
+      "completed",
     );
 
     expect(mocks.crypto.downloadBlob).not.toHaveBeenCalled();
-    expect(download.tasks.find((task) => task.id === id)?.error).toBe(
-      "共享文件响应超过 64 MiB 或与声明大小不一致",
+    expect(mocks.fileApi.getPublicShareDownloadMetadata).toHaveBeenCalledWith(
+      "share-large",
+      "hash-large-share",
+      "download-session-123456",
     );
   });
 
@@ -1195,7 +1321,7 @@ describe("download store extra branches", () => {
 
     expect(
       download.tasks.find((task) => task.id === oversizedShareId)?.error,
-    ).toContain("共享文件大小无效或超过 64 MiB");
+    ).toContain("Chrome 或 Edge");
     expect(
       download.tasks.find((task) => task.id === backendProxyId)?.error,
     ).toContain("Chrome 或 Edge");
@@ -1208,7 +1334,6 @@ describe("download store extra branches", () => {
     expect(
       mocks.boundedDownloader.executeBoundedDownload,
     ).toHaveBeenCalledOnce();
-    expect(mocks.fileApi.publicDownloadFile).not.toHaveBeenCalled();
   });
 
   it("streaming 缺少文件保存 API 时应明确失败", async () => {

@@ -203,7 +203,7 @@ class TenantFilterTest {
     }
 
     /**
-     * 四类匿名公开分享 GET 及其等价编码形式必须完整忽略调用者租户头。
+     * 匿名公开分享 GET 及其等价编码形式必须完整忽略调用者租户头。
      */
     @Test
     @DisplayName("should ignore every tenant header form for anonymous public share GET endpoints")
@@ -223,6 +223,7 @@ class TenantFilterTest {
                 "/api/v1/shares/abc/files",
                 "/api/v1/public/shares/abc/files/hash-1/chunks",
                 "/api/v1/public/shares/abc/files/hash-1/decrypt-info",
+                "/api/v1/public/shares/abc/files/hash-1/download-metadata",
                 "/api/v1/sh%61res/abc/info",
                 "/api/v1/shares;x=1/abc/files",
                 "/api/v1/public/sh%61res/abc/f%69les/hash-1/chunks",
@@ -252,8 +253,8 @@ class TenantFilterTest {
             }
         }
 
-        assertEquals(65L, chainCalls.get());
-        verify(filterChain, times(65)).doFilter(any(), any());
+        assertEquals((long) paths.length * tenantHeaders.length, chainCalls.get());
+        verify(filterChain, times(paths.length * tenantHeaders.length)).doFilter(any(), any());
     }
 
     /**
@@ -268,6 +269,7 @@ class TenantFilterTest {
                 "/api/v1/shares/abc/files",
                 "/api/v1/public/shares/abc/files/hash-1/chunks",
                 "/api/v1/public/shares/abc/files/hash-1/decrypt-info",
+                "/api/v1/public/shares/abc/files/hash-1/download-metadata",
                 "/api/v1/public/sh%61res/abc/f%69les/hash-1/chunks",
                 "/api/v1/public/shares/%2E/abc/files/hash-1/chunks"}) {
             MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
@@ -283,7 +285,7 @@ class TenantFilterTest {
             assertNull(TenantContext.getTenantId());
         }
 
-        verify(filterChain, times(6)).doFilter(any(), any());
+        verify(filterChain, times(7)).doFilter(any(), any());
     }
 
     /**
@@ -532,8 +534,10 @@ class TenantFilterTest {
                 {"POST", "/api/v1/shares/abc/files/save"},
                 {"POST", "/api/v1/shares/abc/files/hash-1/chunks"},
                 {"POST", "/api/v1/shares/abc/files/hash-1/decrypt-info"},
+                {"GET", "/api/v1/shares/abc/files/hash-1/download-metadata"},
                 {"POST", "/api/v1/public/shares/abc/files/hash-1/chunks"},
                 {"POST", "/api/v1/public/shares/abc/files/hash-1/decrypt-info"},
+                {"POST", "/api/v1/public/shares/abc/files/hash-1/download-metadata"},
                 {"GET", "/api/v1/public/shares/abc/files/hash-1/metadata"},
                 {"GET", "/api/v1/public/key-grants/consume"},
                 {"POST", "/api/v1/public/key-grants/consume/extra"}

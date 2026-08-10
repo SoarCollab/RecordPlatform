@@ -1,7 +1,11 @@
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import type { ChunkManifestEncryption, FileDownloadPartVO } from "$api/types";
+import type {
+  ChunkManifestEncryption,
+  FileDownloadEncryptionVO,
+  FileDownloadPartVO,
+} from "$api/types";
 import type { DownloadSink } from "./downloadSink";
 import { assertSha256, createSha256, decodeBase64 } from "./downloadIntegrity";
 import type { DownloadMetricsTracker } from "./downloadMetrics";
@@ -138,8 +142,10 @@ export function deriveFramedKeyMaterial(params: {
 
 /** 校验 metadata descriptor 只使用当前实现支持的 v2 套件。 */
 export function validateFramedEncryption(
-  encryption: ChunkManifestEncryption,
+  encryption: FileDownloadEncryptionVO,
 ): Uint8Array {
+  const framePlainSize = encryption.framePlainSize;
+  const fileNonceValue = encryption.fileNonce;
   if (
     encryption.formatVersion !== FRAMED_AEAD_FORMAT_VERSION ||
     encryption.algorithmSuite !== FRAMED_AEAD_SUITE ||
@@ -147,13 +153,15 @@ export function validateFramedEncryption(
     encryption.nonceDerivation !== "HKDF-SHA256" ||
     encryption.aadSchema !== FRAMED_AEAD_AAD_SCHEMA ||
     encryption.tagSize !== FRAMED_AEAD_TAG_BYTES ||
-    !Number.isSafeInteger(encryption.framePlainSize) ||
-    encryption.framePlainSize < MIN_FRAME_PLAIN_BYTES ||
-    encryption.framePlainSize > MAX_FRAME_PLAIN_BYTES
+    typeof framePlainSize !== "number" ||
+    !Number.isSafeInteger(framePlainSize) ||
+    framePlainSize < MIN_FRAME_PLAIN_BYTES ||
+    framePlainSize > MAX_FRAME_PLAIN_BYTES ||
+    typeof fileNonceValue !== "string"
   ) {
     throw new Error("不支持的 framed AEAD 下载合同");
   }
-  const fileNonce = decodeBase64(encryption.fileNonce);
+  const fileNonce = decodeBase64(fileNonceValue);
   if (fileNonce.byteLength !== 16) {
     throw new Error("framed AEAD fileNonce 必须为 16 字节");
   }

@@ -41,17 +41,48 @@ function createBlob(): Blob {
   return new Blob(["plain"], { type: "text/plain" });
 }
 
-/**
- * 将普通对象转换为 URLSearchParams 断言友好的键值对。
- *
- * @param value 待断言对象。
- * @returns 标准对象形式。
- */
-function normalizeParams(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object") {
-    return {};
-  }
-  return value as Record<string, unknown>;
+/** 构造通过 OpenAPI transport 运行时收窄的下载 metadata。 */
+function createDownloadMetadataTransport(
+  fileHash = "h1",
+  accessKind = "OWNER",
+) {
+  const manifestHash = `sha256:${"b".repeat(64)}`;
+  return {
+    fileId: "file-1",
+    fileHash,
+    fileName: "download.bin",
+    fileSize: 1,
+    contentType: "application/octet-stream",
+    manifestSchemaId: "cn.flying.chunk-manifest.v1",
+    manifestHash,
+    canonicalManifestJson: "{}",
+    manifestStatus: "ACTIVE",
+    manifestClassification: "ALREADY_MANIFEST",
+    legacyDownloadAllowed: false,
+    hashAlgorithm: "SHA-256",
+    encryptionAlgorithm: "NONE",
+    storageBackend: "S3",
+    chunkSize: 1,
+    totalChunks: 1,
+    accessIdentity: {
+      accessKind,
+      identityHash: `sha256:${"a".repeat(64)}`,
+      fileVersion: 1,
+      manifestHash,
+      algorithmSuite: "NONE",
+    },
+    parts: [
+      {
+        index: 0,
+        size: 1,
+        downloadUrl: "https://storage.example/part-0",
+        expiresAtEpochSeconds: 2_000_000_000,
+        storagePath: "tenant/1/part-0",
+        plainHash: `sha256:${"c".repeat(64)}`,
+        cipherHash: `sha256:${"c".repeat(64)}`,
+      },
+    ],
+  };
 }
 
 describe("files endpoints", () => {
@@ -72,7 +103,7 @@ describe("files endpoints", () => {
       .mockResolvedValueOnce({ initialKey: "k", chunkCount: 1 })
       .mockResolvedValueOnce({ records: [], total: 0 })
       .mockResolvedValueOnce(["u1", "u2"])
-      .mockResolvedValueOnce({ fileHash: "h1", parts: [] })
+      .mockResolvedValueOnce(createDownloadMetadataTransport())
       .mockResolvedValueOnce({ tx: "t1" })
       .mockResolvedValueOnce({ records: [], total: 0 })
       .mockResolvedValueOnce({ count: 1 })
@@ -160,6 +191,86 @@ describe("files endpoints", () => {
       14,
       "/files/file-id/provenance",
     );
+  });
+
+  it("共享 metadata 端点应使用生成 transport 并保留认证边界", async () => {
+    clientMocks.api.get
+      .mockResolvedValueOnce(
+        createDownloadMetadataTransport("public-hash", "PUBLIC_SHARE"),
+      )
+      .mockResolvedValueOnce(
+        createDownloadMetadataTransport("private-hash", "AUTHENTICATED_SHARE"),
+      );
+
+    await filesApi.getPublicShareDownloadMetadata(
+      "public-code",
+      "public-hash",
+      "public-session",
+    );
+    await filesApi.getAuthenticatedShareDownloadMetadata(
+      "private-code",
+      "private-hash",
+      "private-session",
+    );
+
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      1,
+      "/public/shares/public-code/files/public-hash/download-metadata",
+      {
+        skipAuth: true,
+        skipTenant: true,
+        headers: {
+          "X-Key-Delivery-Protocol": "grant-v1",
+          "X-Download-Session-ID": "public-session",
+        },
+      },
+    );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      2,
+      "/shares/private-code/files/private-hash/download-metadata",
+      {
+        headers: {
+          "X-Key-Delivery-Protocol": "grant-v1",
+          "X-Download-Session-ID": "private-session",
+        },
+      },
+    );
+  });
+
+  it("应在 endpoint 边界拒绝缺失或漂移的访问身份", async () => {
+    const missingIdentity = createDownloadMetadataTransport();
+    Reflect.deleteProperty(missingIdentity, "accessIdentity");
+    clientMocks.api.get.mockResolvedValueOnce(missingIdentity);
+
+    await expect(
+      filesApi.getDownloadMetadata("h1", "download-session-1234"),
+    ).rejects.toThrow("accessIdentity");
+
+    const missingVersion = createDownloadMetadataTransport();
+    Reflect.deleteProperty(missingVersion.accessIdentity, "fileVersion");
+    clientMocks.api.get.mockResolvedValueOnce(missingVersion);
+    await expect(
+      filesApi.getDownloadMetadata("h1", "download-session-1234"),
+    ).rejects.toThrow("fileVersion");
+
+    const driftedIdentity = createDownloadMetadataTransport();
+    driftedIdentity.accessIdentity.manifestHash = `sha256:${"d".repeat(64)}`;
+    clientMocks.api.get.mockResolvedValueOnce(driftedIdentity);
+
+    await expect(
+      filesApi.getDownloadMetadata("h1", "download-session-1234"),
+    ).rejects.toThrow("manifestHash 不一致");
+
+    clientMocks.api.get.mockResolvedValueOnce(
+      createDownloadMetadataTransport("public-hash", "OWNER"),
+    );
+    await expect(
+      filesApi.getPublicShareDownloadMetadata(
+        "public-code",
+        "public-hash",
+        "public-session",
+      ),
+    ).rejects.toThrow("accessKind 与端点不一致");
   });
 
   it("写操作接口应透传路径与负载", async () => {
@@ -366,120 +477,5 @@ describe("files endpoints", () => {
     ).rejects.toThrow("不支持的下载密钥授权协议");
 
     expect(clientMocks.api.post).not.toHaveBeenCalled();
-  });
-
-  it("publicDownloadFile 应走公开接口链路", async () => {
-    const blob = createBlob();
-    cryptoMocks.arrayToBlob.mockReturnValue(blob);
-    clientMocks.api.get.mockResolvedValueOnce(["AQID"]).mockResolvedValueOnce({
-      keyGrant: {
-        reference: "B".repeat(43),
-        protocol: "grant-v1",
-        expiresAt: "2030-01-01T00:00:00Z",
-      },
-      contentType: "application/pdf",
-    });
-    clientMocks.api.post.mockResolvedValueOnce({
-      initialKey: "k2",
-      protocol: "grant-v1",
-    });
-
-    const result = await filesApi.publicDownloadFile("share-public", "hash-2");
-
-    expect(result).toBe(blob);
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
-      1,
-      "/public/shares/share-public/files/hash-2/chunks",
-      { skipAuth: true, skipTenant: true },
-    );
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
-      2,
-      "/public/shares/share-public/files/hash-2/decrypt-info",
-      {
-        skipAuth: true,
-        skipTenant: true,
-        headers: {
-          "X-Key-Delivery-Protocol": "grant-v1",
-          "X-Download-Session-ID": expect.any(String),
-        },
-      },
-    );
-    expect(clientMocks.api.post).toHaveBeenCalledWith(
-      "/public/key-grants/consume",
-      { grantReference: "B".repeat(43), sessionId: expect.any(String) },
-      { skipAuth: true, skipTenant: true, retries: 1 },
-    );
-  });
-
-  it("publicDownloadFile 应保留 NONE 公开分享下载且不消费 grant", async () => {
-    const blob = createBlob();
-    cryptoMocks.arrayToBlob.mockReturnValue(blob);
-    clientMocks.api.get.mockResolvedValueOnce(["AQID"]).mockResolvedValueOnce({
-      contentType: "application/octet-stream",
-      chunkCount: 1,
-    });
-
-    const result = await filesApi.publicDownloadFile("share-none", "hash-none");
-
-    expect(clientMocks.api.post).not.toHaveBeenCalled();
-    expect(cryptoMocks.decryptFile).not.toHaveBeenCalled();
-    expect(cryptoMocks.arrayToBlob).toHaveBeenCalledWith(
-      new Uint8Array([1, 2, 3]),
-      "application/octet-stream",
-    );
-    expect(result).toBe(blob);
-  });
-
-  it("shareDownloadFile 应走私密分享接口链路", async () => {
-    const blob = createBlob();
-    cryptoMocks.arrayToBlob.mockReturnValue(blob);
-    clientMocks.api.get.mockResolvedValueOnce(["AQID"]).mockResolvedValueOnce({
-      initialKey: "k3",
-      contentType: "application/zip",
-    });
-
-    const result = await filesApi.shareDownloadFile("share-private", "hash-3");
-
-    expect(result).toBe(blob);
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
-      1,
-      "/shares/share-private/files/hash-3/chunks",
-    );
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
-      2,
-      "/shares/share-private/files/hash-3/decrypt-info",
-      {
-        headers: {
-          "X-Key-Delivery-Protocol": "grant-v1",
-          "X-Download-Session-ID": expect.any(String),
-        },
-      },
-    );
-  });
-
-  it("downloadSharedFile 应按分享类型分流", async () => {
-    clientMocks.api.get
-      .mockResolvedValueOnce(["AQID"])
-      .mockResolvedValueOnce({ initialKey: "k4", contentType: "text/plain" })
-      .mockResolvedValueOnce(["AQID"])
-      .mockResolvedValueOnce({ initialKey: "k5", contentType: "text/plain" });
-
-    await filesApi.downloadSharedFile(
-      "code-public",
-      "hash-p",
-      ShareType.PUBLIC,
-    );
-    await filesApi.downloadSharedFile(
-      "code-private",
-      "hash-s",
-      ShareType.PRIVATE,
-    );
-
-    const calls = clientMocks.api.get.mock.calls.map((call) => {
-      return [call[0], normalizeParams(call[1])];
-    });
-
-    expect(calls[0][0]).toBe("/public/shares/code-public/files/hash-p/chunks");
-    expect(calls[2][0]).toBe("/shares/code-private/files/hash-s/chunks");
   });
 });

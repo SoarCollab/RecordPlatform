@@ -7,6 +7,7 @@ import cn.flying.common.util.Const;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.DownloadKeyGrantConsumeRequestVO;
 import cn.flying.dao.vo.file.DownloadKeyMaterialVO;
+import cn.flying.dao.vo.file.FileDownloadMetadataVO;
 import cn.flying.dao.vo.file.FileSharingVO;
 import cn.flying.dao.vo.file.SaveSharingFile;
 import cn.flying.dao.vo.file.ShareFileVO;
@@ -188,6 +189,29 @@ public class ShareRestController {
     }
 
     /**
+     * Returns manifest-driven presigned metadata for an authenticated share-code download.
+     */
+    @GetMapping("/api/v1/shares/{shareCode}/files/{fileHash}/download-metadata")
+    @Operation(summary = "获取认证分享的预签名分片下载元数据")
+    @OperationLog(module = "文件操作", operationType = "下载",
+            description = "获取认证分享的预签名分片下载元数据", saveRequestData = false)
+    @RateLimit(limit = 60, period = 60, type = RateLimit.LimitType.USER,
+            key = "download:key-grant:issue")
+    public Result<FileDownloadMetadataVO> getSharedDownloadMetadata(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @PathVariable String shareCode,
+            @PathVariable String fileHash,
+            @RequestHeader(value = "X-Key-Delivery-Protocol", required = false)
+            String keyDeliveryProtocol,
+            @RequestHeader(value = "X-Download-Session-ID", required = false)
+            String downloadSessionId,
+            HttpServletResponse response) {
+        disableSensitiveResponseCaching(response, true);
+        return Result.success(fileService.getSharedFileDownloadMetadata(
+                userId, shareCode, fileHash, keyDeliveryProtocol, downloadSessionId));
+    }
+
+    /**
      * 公开分享下载文件（REST 新路径，无需登录）。
      *
      * @param shareCode 分享码
@@ -252,6 +276,39 @@ public class ShareRestController {
         disableSensitiveResponseCaching(response, false);
         return Result.success(fileService.getPublicFileDecryptInfo(
                 shareCode, fileHash, keyDeliveryProtocol, downloadSessionId, getClientIp(request)));
+    }
+
+    /**
+     * Returns manifest-driven presigned metadata for an anonymous public-share download.
+     */
+    @GetMapping("/api/v1/public/shares/{shareCode}/files/{fileHash}/download-metadata")
+    @SecurityRequirements
+    @OperationLog(module = "文件操作", operationType = "下载",
+            description = "获取公开分享的预签名分片下载元数据", saveRequestData = false)
+    @RateLimit(
+            limit = 30,
+            type = RateLimit.LimitType.IP,
+            key = "public:share-access",
+            tenantScoped = false,
+            clientIpMode = RateLimit.ClientIpMode.TRUSTED_PEER
+    )
+    @Operation(
+            summary = "获取公开分享的预签名分片下载元数据",
+            description = "匿名 GET；不需要 JWT，X-Tenant-ID 不参与授权。服务端从 shareCode 恢复 owner tenant，"
+                    + "并返回与公开下载身份严格绑定的 manifest 和预签名 URL。")
+    public Result<FileDownloadMetadataVO> publicDownloadMetadata(
+            @PathVariable String shareCode,
+            @PathVariable String fileHash,
+            @RequestHeader(value = "X-Key-Delivery-Protocol", required = false)
+            String keyDeliveryProtocol,
+            @RequestHeader(value = "X-Download-Session-ID", required = false)
+            String downloadSessionId,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        disableSensitiveResponseCaching(response, false);
+        return Result.success(fileService.getPublicFileDownloadMetadata(
+                shareCode, fileHash, keyDeliveryProtocol,
+                downloadSessionId, getClientIp(request)));
     }
 
     /**

@@ -226,8 +226,8 @@ crypto:
 | 场景 | Metadata/decrypt-info | Consume |
 |---|---|---|
 | owner / friend-share | `GET /api/v1/files/hash/{fileHash}/download-metadata` 或 `/decrypt-info` | `POST /api/v1/files/key-grants/consume` |
-| 认证分享 | `GET /api/v1/shares/{shareCode}/files/{fileHash}/decrypt-info` | `POST /api/v1/files/key-grants/consume` |
-| 公开分享 | `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` | `POST /api/v1/public/key-grants/consume` |
+| 认证分享 | `GET /api/v1/shares/{shareCode}/files/{fileHash}/download-metadata` 或 `/decrypt-info` | `POST /api/v1/files/key-grants/consume` |
+| 公开分享 | `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/download-metadata` 或 `/decrypt-info` | `POST /api/v1/public/key-grants/consume` |
 
 grant 引用是 256-bit Base64URL 随机值，只允许出现在 POST body 和当前下载执行作用域，不进入 URL、query、referrer、任务持久化、日志、指标或错误。Redis key 只含引用的 SHA-256 摘要；hash 字段绑定 tenant、访问类型、文件 ID/hash/version、recipient、精确信封、provider/contract/key version、suite、会话摘要和签发/到期时间。actor 或规范化可信客户端身份与高熵下载会话共同摘要，避免 Redis 只读者直接对低熵用户 ID/IP 做离线字典反推；Redis 不保存原始身份、引用、分享码、预签名 URL、wrapped key 或 plaintext key。
 

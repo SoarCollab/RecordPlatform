@@ -153,6 +153,9 @@ async function runScenario(
   let fetchAttempts = 0;
   const fetchImpl: typeof fetch = async (_input) => {
     fetchAttempts += 1;
+    if (options.failure === "refresh-stable" && fetchAttempts === 1) {
+      return new Response(null, { status: 401 });
+    }
     if (options.failure === "expired-401") {
       return new Response(null, { status: 401 });
     }
@@ -174,6 +177,17 @@ async function runScenario(
       signal: controller.signal,
       fetchImpl,
       metrics,
+      refreshMetadata:
+        options.failure === "refresh-stable"
+          ? async () => ({
+              ...executionMetadata,
+              parts: executionMetadata.parts.map((part) => ({
+                ...part,
+                downloadUrl: `${part.downloadUrl}?refreshed=1`,
+                expiresAtEpochSeconds: part.expiresAtEpochSeconds + 300,
+              })),
+            })
+          : undefined,
     });
     ok = true;
   } catch (error) {

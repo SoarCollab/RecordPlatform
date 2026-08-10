@@ -219,11 +219,11 @@ test("reorder, duplicate, key substitution and expired URLs fail closed", async 
     },
     {
       options: { format: "FRAMED_V2", sizeMiB: 64, failure: "expired-401" },
-      expectedError: "下载地址已过期，请重新发起下载",
+      expectedError: "分片 1 下载地址已过期",
     },
     {
       options: { format: "FRAMED_V2", sizeMiB: 64, failure: "expired-403" },
-      expectedError: "下载地址已过期，请重新发起下载",
+      expectedError: "分片 1 下载地址已过期",
     },
   ];
 
@@ -236,4 +236,26 @@ test("reorder, duplicate, key substitution and expired URLs fail closed", async 
     expect(run.result.sentinelPreserved).toBe(true);
     expect(run.result.fetchAttempts).toBe(1);
   }
+});
+
+/** 断言浏览器真实 OPFS 路径在 401 后只刷新一次并从当前分片安全恢复。 */
+test("stable metadata refresh resumes the current OPFS part once", async ({
+  page,
+}, testInfo) => {
+  await openGate(page);
+  const run = await runWithHeapSampling(
+    page,
+    { format: "NONE", sizeMiB: 64, failure: "refresh-stable" },
+    testInfo,
+  );
+
+  expect(run.result.ok, run.result.error).toBe(true);
+  expect(run.result.fetchAttempts).toBe(2);
+  expect(run.result.sinkCloseCalls).toBe(1);
+  expect(run.result.sinkAbortCalls).toBe(0);
+  expect(run.result.outputValid).toBe(true);
+  expect(run.result.metrics.partsCompleted).toBe(1);
+  expect(run.result.metrics.peakBufferedBytes).toBeLessThanOrEqual(
+    BUFFER_LIMIT,
+  );
 });

@@ -112,7 +112,9 @@ class SecurityConfigurationTest {
         assertTrue(securityConfiguration.contains(
                 "\"/api/v1/public/shares/*/files/*/chunks\","));
         assertTrue(securityConfiguration.contains(
-                "\"/api/v1/public/shares/*/files/*/decrypt-info\").permitAll()"));
+                "\"/api/v1/public/shares/*/files/*/decrypt-info\","));
+        assertTrue(securityConfiguration.contains(
+                "\"/api/v1/public/shares/*/files/*/download-metadata\").permitAll()"));
         assertTrue(securityConfiguration.contains(
                 ".requestMatchers(HttpMethod.POST, \"/api/v1/public/key-grants/consume\").permitAll()"));
         assertFalse(securityConfiguration.contains(
