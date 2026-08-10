@@ -281,6 +281,7 @@ public class ProofBundleServiceImpl implements ProofBundleService {
                 chunk.plainHash(),
                 chunk.cipherHash(),
                 chunk.size(),
+                chunk.plainSize() == null ? chunk.size() : chunk.plainSize(),
                 chunk.checksumAlgorithm(),
                 head.exists(),
                 head.nodeName(),
@@ -385,7 +386,7 @@ public class ProofBundleServiceImpl implements ProofBundleService {
      */
     private List<String> verificationGuide() {
         return List.of(
-                "Split the original file by storage.objects order and compare every chunk SHA-256 with storage.objects[].plainHash.",
+                "Split the original file by storage.objects order and plainSize, then compare every chunk SHA-256 with storage.objects[].plainHash; size remains the stored object length.",
                 "Treat file.fileHash as the chain record hash and recompute merkle.leafHash from it using verificationPolicy.leafHashRule.",
                 "Apply merkle.proofPath with verificationPolicy.parentHashRule until the computed value equals merkle.merkleRoot.",
                 "Compare merkle.merkleRoot with the batch root recorded by chain.batchTransactionHash or chain.batchChainFileHash.",

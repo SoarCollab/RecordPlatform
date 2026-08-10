@@ -557,6 +557,17 @@ class OpenApiContractExportTest {
                 "verificationPolicy",
                 "verificationGuide");
         assertNullableFields(proofBundleSchema);
+        JsonNode fileEvidenceSchema = rootNode.path("components").path("schemas")
+                .path("FileEvidence");
+        assertThat(fileEvidenceSchema.path("properties").path("fileHash")
+                .path("description").asText()).contains("链记录 ID", "不是原文件内容 SHA-256");
+        JsonNode storageObjectEvidenceSchema = rootNode.path("components").path("schemas")
+                .path("StorageObjectEvidence");
+        assertNullableFields(storageObjectEvidenceSchema, "plainSize");
+        assertThat(storageObjectEvidenceSchema.path("properties").path("size")
+                .path("description").asText()).contains("存储对象", "密文分片长度");
+        assertThat(storageObjectEvidenceSchema.path("properties").path("plainSize")
+                .path("description").asText()).contains("原始明文分片长度", "旧未加密对象");
         JsonNode chainEvidenceSchema = rootNode.path("components").path("schemas").path("ChainEvidence");
         assertRequiredFields(chainEvidenceSchema, "batchChainFileHash", "contractRegistry");
         assertNullableFields(

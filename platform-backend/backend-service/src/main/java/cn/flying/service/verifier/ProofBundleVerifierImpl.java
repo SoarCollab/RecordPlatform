@@ -24,7 +24,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Default offline verifier for proof-bundle.v1 Merkle proof bundles.
+ * Compatibility-only offline verifier for unsigned proof-bundle.v1.1 Merkle proof bundles.
  */
 @Service
 @RequiredArgsConstructor
@@ -90,7 +90,6 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
 
         validateContract(bundle, issues);
         validateFileEvidence(file, issues);
-        validateOriginalFileHash(file, computedFileHash, issues);
         validateOriginalContent(originalFile, bundle.storage(), issues);
         String computedLeafHash = validateMerkleLeaf(file, merkle, issues);
         String computedMerkleRoot = validateMerklePath(merkle, computedLeafHash, issues);
@@ -164,7 +163,7 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
     }
 
     /**
-     * Validates required file evidence fields used by chain and Merkle checks.
+     * Validates the chain record identifier required by chain and Merkle checks.
      */
     private void validateFileEvidence(ProofBundleVO.FileEvidence file, List<ProofVerificationIssue> issues) {
         if (file == null) {
@@ -172,27 +171,8 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
             return;
         }
         if (!StringUtils.hasText(file.fileHash())) {
-            issues.add(missing("file.fileHash", "缺少文件哈希"));
+            issues.add(missing("file.fileHash", "缺少历史链记录 ID"));
             return;
-        }
-    }
-
-    /**
-     * Binds the supplied original bytes to the file hash used by the Merkle and chain evidence.
-     */
-    private void validateOriginalFileHash(ProofBundleVO.FileEvidence file,
-                                          String computedFileHash,
-                                          List<ProofVerificationIssue> issues) {
-        if (file == null || !StringUtils.hasText(file.fileHash()) || !StringUtils.hasText(computedFileHash)) {
-            return;
-        }
-        if (!computedFileHash.equalsIgnoreCase(normalizeSha256(file.fileHash()))) {
-            issues.add(issue(
-                    ProofVerificationCode.FILE_HASH_MISMATCH,
-                    ProofVerificationSeverity.ERROR,
-                    "file.fileHash",
-                    "原始文件 SHA-256 与存证文件哈希不一致"
-            ));
         }
     }
 
@@ -219,23 +199,28 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
                 issues.add(missing(fieldPrefix, "缺少存储分片证明"));
                 return;
             }
-            if (!validateChunkIndex(object, i, fieldPrefix, issues)
-                    || !validateChunkHashFields(object, fieldPrefix, issues)) {
+            if (!validateChunkIndex(object, i, fieldPrefix, issues)) {
                 return;
             }
 
-            long chunkSize = object.size();
-            if (offset + chunkSize > originalFile.length) {
+            Long plainSize = resolvePlainSize(object, fieldPrefix, issues);
+            if (plainSize == null) {
+                return;
+            }
+            if (plainSize > originalFile.length - offset) {
                 issues.add(issue(
                         ProofVerificationCode.FILE_HASH_MISMATCH,
                         ProofVerificationSeverity.ERROR,
-                        fieldPrefix + ".size",
-                        "证明包分片长度超过原始文件长度"
+                        fieldPrefix + ".plainSize",
+                        "证明包明文分片长度超过原始文件长度"
                 ));
                 return;
             }
 
-            String computedChunkHash = sha256Hex(originalFile, Math.toIntExact(offset), Math.toIntExact(chunkSize));
+            String computedChunkHash = sha256Hex(
+                    originalFile,
+                    Math.toIntExact(offset),
+                    Math.toIntExact(plainSize));
             if (!computedChunkHash.equalsIgnoreCase(normalizeSha256(object.plainHash()))) {
                 issues.add(issue(
                         ProofVerificationCode.FILE_HASH_MISMATCH,
@@ -245,7 +230,7 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
                 ));
                 return;
             }
-            offset += chunkSize;
+            offset += plainSize;
         }
 
         if (offset != originalFile.length) {
@@ -282,29 +267,46 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
     }
 
     /**
-     * Validates chunk fields required for local original-file verification.
+     * Resolves the plaintext segmentation length without reusing ciphertext semantics.
      */
-    private boolean validateChunkHashFields(ProofBundleVO.StorageObjectEvidence object,
-                                            String fieldPrefix,
-                                            List<ProofVerificationIssue> issues) {
-        if (object.size() == null || object.size() < 0) {
+    private Long resolvePlainSize(ProofBundleVO.StorageObjectEvidence object,
+                                  String fieldPrefix,
+                                  List<ProofVerificationIssue> issues) {
+        if (object.size() == null || object.size() <= 0) {
             issues.add(missing(fieldPrefix + ".size", "缺少有效分片长度"));
-            return false;
+            return null;
         }
         if (!StringUtils.hasText(object.plainHash())) {
             issues.add(missing(fieldPrefix + ".plainHash", "缺少明文分片哈希"));
-            return false;
+            return null;
         }
-        if (object.size() > Integer.MAX_VALUE) {
+        Long plainSize = object.plainSize();
+        if (plainSize == null) {
+            boolean demonstrablyUnencrypted = StringUtils.hasText(object.cipherHash())
+                    && normalizeSha256(object.plainHash())
+                            .equalsIgnoreCase(normalizeSha256(object.cipherHash()));
+            if (!demonstrablyUnencrypted) {
+                issues.add(missing(
+                        fieldPrefix + ".plainSize",
+                        "加密或语义不明的历史分片缺少明文长度"));
+                return null;
+            }
+            plainSize = object.size();
+        }
+        if (plainSize <= 0) {
+            issues.add(missing(fieldPrefix + ".plainSize", "缺少有效明文分片长度"));
+            return null;
+        }
+        if (plainSize > Integer.MAX_VALUE) {
             issues.add(issue(
                     ProofVerificationCode.FILE_HASH_MISMATCH,
                     ProofVerificationSeverity.ERROR,
-                    fieldPrefix + ".size",
-                    "单个证明分片超过本地验证器支持的字节数组长度"
+                    fieldPrefix + ".plainSize",
+                    "单个明文证明分片超过本地验证器支持的字节数组长度"
             ));
-            return false;
+            return null;
         }
-        return true;
+        return plainSize;
     }
 
     /**

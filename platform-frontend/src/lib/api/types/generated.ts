@@ -4238,7 +4238,7 @@ export interface components {
              * @description 创建时间
              */
             createTime?: string;
-            /** @description 文件哈希 */
+            /** @description 历史单文件链记录 ID；不是原文件内容 SHA-256 */
             fileHash?: string;
             /** @description 外部文件 ID */
             fileId?: string;
@@ -6769,7 +6769,12 @@ export interface components {
             plainHash?: string;
             /**
              * Format: int64
-             * @description 分片长度
+             * @description 原始明文分片长度；新导出必填，旧未加密对象可由 size 兼容推导
+             */
+            plainSize?: number | null;
+            /**
+             * Format: int64
+             * @description 存储对象/密文分片长度
              */
             size?: number;
             /** @description 对象路径租户是否匹配 */

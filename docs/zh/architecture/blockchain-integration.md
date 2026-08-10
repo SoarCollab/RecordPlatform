@@ -293,7 +293,7 @@ sequenceDiagram
 
 自动 flush 同时支持数量阈值和最大等待时间。租户管理员可强制 flush 低于阈值的 backlog，但自动与人工路径都受 seed、batch 大小和单轮批次数上限约束。定时任务使用分布式锁，显式枚举租户，并在逐租户隔离执行后恢复租户上下文。
 
-`proof-bundle.v1.1` JSON 导出器保留用于兼容旧集成，但仍会拒绝 `MANIFEST_HASH` 生产叶子。该 legacy 合同把文件摘要作为 Merkle 证据，无法安全表达 manifest 证据，因此不能通过字段回退伪造兼容结果。
+`proof-bundle.v1.1` JSON 导出器保留用于兼容旧集成，但仍会拒绝 `MANIFEST_HASH` 生产叶子。该 legacy 合同把历史链记录 ID 作为 Merkle 证据，无法安全表达 manifest 证据，因此不能通过字段回退伪造兼容结果。
 
 ### 证明包导出
 
@@ -306,6 +306,8 @@ sequenceDiagram
 
 - `GET /api/v1/files/{id}/proof-bundle`：按文件外部 ID 导出。
 - `GET /api/v1/files/attestation-leaves/{leafId}/proof-bundle`：按存证叶子外部 ID 导出。
+
+v1.1 兼容合同严格拆分各类证据语义。`file.fileHash` 是历史链记录 ID 与 Merkle 叶子 preimage，绝不与原文件摘要比较。原文件按声明的对象顺序和 `storage.objects[].plainSize` 分段，每段只与对应 `plainHash` 比较；`storage.objects[].size` 继续表示存储对象/密文长度，并与 storage HEAD 的 `contentLength` 比较。新导出总是写入 `plainSize = manifest plainSize ?? size`。历史对象缺少 `plainSize` 时，只有规范化 `plainHash` 等于 `cipherHash` 才能使用 `size`；加密、缺少摘要或顺序不明确的证据都在精确字段失败关闭。全部结构校验通过后，该兼容读取器仍固定报告 `AUTHENTICITY_NOT_VERIFIED`，因为整个未签名 JSON 可以被重写。
 
 `SignedProofArchiveService` 在签发和每次重导出前都会重新校验：当前租户与 owner/admin 权限、文件为成功版本、结构化 `contentHash` 与受保护上传来源一致、active chunk manifest 的 canonical hash、每个分片的 storage HEAD、`MANIFEST_HASH` leaf/path/root、已完成 batch 回执，以及批次绑定的不可变 contract registry。历史记录缺少可信 `contentHash` 时直接失败，不允许使用 `chainRecordId` 或 manifest hash 回填。
 
@@ -348,7 +350,7 @@ ZIP 只允许以下八个根条目，并固定顺序、时间戳、STORED method
 
 离线校验可以证明本地一致性，但绝不能返回 `VALID`：key/status/chain 缺失或不可用时必须是 `INDETERMINATE`，不能当作成功。CLI 在线模式需要显式开启，并配置可信 issuer/chain 端点与精确 host allowlist；明文 HTTP 和私网地址只允许在本地测试时显式放行。CLI 退出码分别为 `VALID=0`、`INVALID=2`、`INDETERMINATE=3`。
 
-后端 `ProofBundleVerifierImpl` 只是已废弃未签名 JSON `proof-bundle.v1.1` 的兼容读取器，不是签名 ZIP 验证器，其结构校验结果不能提升为签名证明真实性。新集成必须使用 `platform-verifier` 和归档内嵌的签名 policy。
+后端 `ProofBundleVerifierImpl` 只是已废弃未签名 JSON `proof-bundle.v1.1` 的兼容读取器；它独立校验原文明文分片和链记录/Merkle 路径，不允许跨语义 fallback。它不是签名 ZIP 验证器，其结构校验结果不能提升为签名证明真实性。新集成必须使用 `platform-verifier` 和归档内嵌的签名 policy。
 
 ### 交易验证
 
