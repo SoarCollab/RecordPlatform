@@ -218,6 +218,69 @@ class ProofBundleVerifierImplTest {
     }
 
     /**
+     * Verifies that a missing stored length fails at its own compatibility field.
+     */
+    @Test
+    void verify_shouldRejectMissingStoredSize() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.StorageObjectEvidence object = bundle.storage().objects().getFirst();
+        ProofBundleVO missingStoredSize = withStorageObject(
+                bundle,
+                copyStorageObject(object, object.index(), object.plainHash(), object.cipherHash(),
+                        null, object.plainSize()));
+
+        ProofVerificationResult result = verifier.verify(originalFile, missingStoredSize);
+
+        assertThat(result.issues()).anySatisfy(issue -> {
+            assertThat(issue.code()).isEqualTo(ProofVerificationCode.MISSING_REQUIRED_FIELD);
+            assertThat(issue.field()).isEqualTo("storage.objects[0].size");
+        });
+    }
+
+    /**
+     * Verifies that a plaintext boundary exceeding the supplied file fails before hashing.
+     */
+    @Test
+    void verify_shouldRejectPlainSizeBeyondOriginalFile() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.StorageObjectEvidence object = bundle.storage().objects().getFirst();
+        ProofBundleVO oversizedPlainChunk = withStorageObject(
+                bundle,
+                copyStorageObject(object, object.index(), object.plainHash(), object.cipherHash(),
+                        object.size(), (long) originalFile.length + 1));
+
+        ProofVerificationResult result = verifier.verify(originalFile, oversizedPlainChunk);
+
+        assertThat(result.issues()).anySatisfy(issue -> {
+            assertThat(issue.code()).isEqualTo(ProofVerificationCode.FILE_HASH_MISMATCH);
+            assertThat(issue.field()).isEqualTo("storage.objects[0].plainSize");
+        });
+    }
+
+    /**
+     * Verifies that missing ciphertext evidence cannot unlock the historical length fallback.
+     */
+    @Test
+    void verify_shouldRejectMissingCipherHashForHistoricalLengthFallback() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.StorageObjectEvidence object = bundle.storage().objects().getFirst();
+        ProofBundleVO missingCipherHash = withStorageObject(
+                bundle,
+                copyStorageObject(object, object.index(), object.plainHash(), null,
+                        object.size(), null));
+
+        ProofVerificationResult result = verifier.verify(originalFile, missingCipherHash);
+
+        assertThat(result.issues()).anySatisfy(issue -> {
+            assertThat(issue.code()).isEqualTo(ProofVerificationCode.MISSING_REQUIRED_FIELD);
+            assertThat(issue.field()).isEqualTo("storage.objects[0].plainSize");
+        });
+    }
+
+    /**
      * Verifies the sole legacy length fallback for demonstrably unencrypted objects.
      */
     @Test

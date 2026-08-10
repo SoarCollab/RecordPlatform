@@ -297,15 +297,6 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
             issues.add(missing(fieldPrefix + ".plainSize", "缺少有效明文分片长度"));
             return null;
         }
-        if (plainSize > Integer.MAX_VALUE) {
-            issues.add(issue(
-                    ProofVerificationCode.FILE_HASH_MISMATCH,
-                    ProofVerificationSeverity.ERROR,
-                    fieldPrefix + ".plainSize",
-                    "单个明文证明分片超过本地验证器支持的字节数组长度"
-            ));
-            return null;
-        }
         return plainSize;
     }
 
