@@ -1,6 +1,6 @@
-# P0/P1/P2 交付证据矩阵
+# P0/P1/P2/P3 交付证据矩阵
 
-本页的 P0–P2 实现证据冻结自 2026-07-27 的最后一个文档刷新前 exact-main 基线 `main@0e091261233e7430ce5b904ad84d33569de910a1`。P2-5 只有在后续合并提交通过 exact-main 门禁并完成 Pages 部署后才独立验收。这样既不会把静态检查通过写成生产性能结论，也不会把尚未发布的页面描述为已经在线。
+本页的 P0–P2 实现证据冻结自 2026-07-27 的最后一个文档刷新前 exact-main 基线 `main@0e091261233e7430ce5b904ad84d33569de910a1`。P2-5 只有在后续合并提交通过 exact-main 门禁并完成 Pages 部署后才独立验收。P3 证据按 leaf 记录：每行明确实际执行的 merge commit、Test Suite、文档 run 和 Pages deployment；本页不暗示某个后续文档提交重新执行了全部历史门禁。
 
 ## 证据规则
 
@@ -38,9 +38,20 @@
 | P2-1A 测试依赖修复 | storage test scope 固定安全 Commons Compress/Lang3 并设置最低版本门禁 | storage POM/enforcer 与 test/runtime 依赖树 | 真实容器测试通过；test-only 依赖未进入生产 runtime |
 | P2-2 有界下载 | 自有/公开分享/认证分享共用一个 manifest reader；明确区分 `NONE`、legacy v1、framed AEAD v2；支持的浏览器通过事务型 File System Access sink 写盘；允许一次身份栅栏保护的 401/403 当前分片续传 | `FileDownloadMetadataBuilder`、generated OpenAPI alias、`boundedDownloader.ts`、`downloadSink.ts`、`fileSize.ts`、framed v2 迁移/fixture | Chromium 64/256/512 MiB 门禁证明应用缓冲不随文件增长、稳定身份刷新可恢复，漂移/篡改/截断/取消/sink 失败均在提交前 abort |
 | P2-3 Manifest 治理 | 租户级 `SCAN`/`DRY_RUN`/`APPLY`、insert-only 发布、确定性分类、引用 census 与独立开关 sweep | 管理控制器/服务与 `V1.17.0__manifest_backfill_governance.sql` | 事务/并发/崩溃恢复/安全测试；不根据 map 顺序、ETag、文件名或链记录 ID 猜测 |
-| P2-4 负载与故障证据 | direct-path k6 与强制 MinIO/Redis/Toxiproxy 矩阵覆盖上传、下载、quorum、降级修复、超时、竞态和清理 | `tools/k6/direct-path.js`、`perf-smoke.yml`、storage fault/load IT | exact-main Test Suite `30209115456`；Linux amd64/Java 21.0.11 受限 smoke 完成 8/8 文件且生命周期残留为零 |
+| P2-4 负载与故障证据 | direct-path k6 与强制 MinIO/Redis/Toxiproxy 矩阵覆盖上传、下载、quorum、降级修复、超时、竞态和清理 | `tools/k6/direct-path.js`、`perf-smoke.yml`、storage fault/load IT | exact-main Test Suite `30209115456`；Linux amd64/Java 21.0.11 受限 smoke 完成 8/8 文件且生命周期残留为零；不可变指标见 [retained report](/evidence/direct-upload-load-smoke-30209115456.json) |
 | P2-Q3 docs 依赖公告修复 | docs workspace 固定 DOMPurify 3.4.12 与 PostCSS 8.5.18 | `docs/pnpm-workspace.yaml` 与可复现 lockfile | PR #315、exact-main docs deploy、docs low audit 零公告；#588/#590 fixed 且未 dismissal |
 | P2-5 在线文档 | 本双语证据矩阵与同步后的架构/API/运维页面 | VitePress 路由与导航、规范路线图、OpenAPI、一致性脚本 | 只有 docs build、一致性检查、exact-main 部署与在线 Pages 验收都成功后才算完成 |
+
+## P3 企业密钥治理
+
+| Leaf | 精确合并与实现证据 | 自动化证据 | 精确运行/Pages 证据 | 边界 |
+| --- | --- | --- | --- | --- |
+| P3-1 wrapping provider 与外部 KMS | [PR #317](https://github.com/SoarCollab/RecordPlatform/pull/317)，exact `main@cfe9b9e54eefa01246dbddda7ab5a4c27717a3dc`；`FileKeyEnvelopeService`、`VaultTransitKeyWrappingProvider`、`V1.18.0__key_wrapping_provider_metadata.sql` | `VaultTransitKeyWrappingProviderIT`、`KeyWrappingProviderMigrationIT` 以及 provider/configuration 单测 | [Test Suite `30222751986`](https://github.com/SoarCollab/RecordPlatform/actions/runs/30222751986)、[Deploy Documentation `30222751977`](https://github.com/SoarCollab/RecordPlatform/actions/runs/30222751977)、Pages deployment `5614564147` | 历史 envelope 只按持久化 provider/contract 路由；生产 Vault 可用性和权限由环境负责，异常时失败关闭。 |
+| P3-2 自动 envelope rotation | [PR #318](https://github.com/SoarCollab/RecordPlatform/pull/318)，exact `main@a4ba5acf3864fd341219a7382d13b2cd30d3afde`；rotation policy/run/item 服务、管理控制器和 `V1.19.0__automated_key_rotation.sql` | `KeyRotationMigrationIT` 以及 scheduler、claim、崩溃恢复、审计、指标、控制器测试 | [Test Suite `30235985313`](https://github.com/SoarCollab/RecordPlatform/actions/runs/30235985313)、[Deploy Documentation `30235985338`](https://github.com/SoarCollab/RecordPlatform/actions/runs/30235985338)、Pages deployment `5616938788` | 应用只确认外部退休，不禁用或删除 provider key；run 不得超出冻结的候选快照。 |
+| P3-3 runtime crypto agility | [PR #319](https://github.com/SoarCollab/RecordPlatform/pull/319)，exact `main@c0bd8076994ce0cb3bf98a3ff0f722c60ea84a4c`；`CryptoSuiteRegistry`、租户 policy/管理 API 和 `V1.20.0__runtime_crypto_agility.sql` | `RuntimeCryptoAgilityMigrationIT`、registry/policy/configuration 测试和持久化身份分派回归 | [Test Suite `30245935210`](https://github.com/SoarCollab/RecordPlatform/actions/runs/30245935210)、[Deploy Documentation `30245935295`](https://github.com/SoarCollab/RecordPlatform/actions/runs/30245935295)、Pages deployment `5618660915` | ML-DSA/ML-KEM 条目仍为 experimental/unimplemented，不能用于生产写入；历史制品不得回退到新默认值。 |
+| P3-4 明文密钥暴露收敛 | [PR #320](https://github.com/SoarCollab/RecordPlatform/pull/320)，exact `main@7f9d639f3395269735e9efeb3dbea4e9e025d412`；`FileKeyGrantService`、认证/公开 consume 控制器、generated OpenAPI types 和前端内存态下载流 | `FileKeyGrantRedisIT`、控制器/限流/审计隔离、前端生命周期、non-extractable key、OpenAPI、浏览器 E2E 测试 | [Test Suite `30267453969`](https://github.com/SoarCollab/RecordPlatform/actions/runs/30267453969)、[Deploy Documentation `30267454033`](https://github.com/SoarCollab/RecordPlatform/actions/runs/30267454033)、Pages deployment `5622671802` | 默认使用 `grant-v1` 且响应 `no-store`；`plaintext-v0` 必须显式协商、默认关闭并受硬截止约束。浏览器清理减少常规暴露，不等于物理内存取证保证。 |
+
+以上每行都是对应 exact leaf 的历史证据。后续提交只通过正常 Git 祖先关系继承实现，仍须执行自身适用门禁；skipped 或不适用 job 不能写成重新执行通过。
 
 ## 当前传输限制与默认值
 
@@ -59,7 +70,7 @@
 
 ## 依赖公告边界
 
-P2-Q3 后，docs workspace 自身的 `pnpm audit --audit-level low` 为零公告；但默认分支仍有 **26 个 open Dependabot alerts：8 Medium + 18 Low**，明确保留给 P6 供应链治理。本页不声称全仓零公告，也不把只检查 High/Critical 的扫描成功解释为 Medium/Low 不存在。
+P2-Q3 只代表绑定当时 lockfile 的历史 docs audit，不是仓库永久零公告。带边界快照 `main@85a57ae847423308cf60683c6fd299d51a1650f1`（2026-08-10 14:51 CST）有 3 open，均为 Maven / Medium 的 `org.apache.commons:commons-lang3`，位于 `platform-verifier/sdk`、`platform-verifier/cli-verifier`、`platform-verifier/web-verifier`。当前 Spring Boot BOM 解析为 3.17.0，首个 patched version 是 3.18.0。P6 supply-chain maintenance 必须在 2026-09-30 前或下一次 release 前（取更早者）完成独立 Maven 兼容升级与复验。实时值始终以 [Dependabot live view](https://github.com/SoarCollab/RecordPlatform/security/dependabot) 为准；依赖图或 registry 变化后不得把本快照继续写成 current。
 
 ## 发布验收
 

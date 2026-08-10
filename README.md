@@ -216,7 +216,7 @@ Verify the installation at:
 | [Getting Started](docs/en/getting-started/index.md) | Prerequisites, installation, configuration |
 | [Public Verifier](docs/en/getting-started/public-verifier.md) | Verify signed proof ZIPs through SDK, CLI, or standalone Web service |
 | [Architecture](docs/en/architecture/index.md) | System overview, distributed storage, blockchain, security |
-| [P0/P1/P2 Delivery Evidence](docs/en/architecture/delivery-evidence.md) | Implementation, automated-test, exact-main CI, and residual-risk matrix |
+| [P0/P1/P2/P3 Delivery Evidence](docs/en/architecture/delivery-evidence.md) | Implementation, automated-test, exact-main CI, and residual-risk matrix |
 | [Chunk Manifest](docs/en/architecture/chunk-manifest.md) | Canonical chunk evidence, historical classification, and reference-safe cleanup |
 | [Deployment](docs/en/deployment/index.md) | Docker Compose, production setup, monitoring |
 | [API Reference](docs/en/api/index.md) | REST endpoints, authentication, error codes |

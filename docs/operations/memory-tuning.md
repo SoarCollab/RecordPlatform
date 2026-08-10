@@ -96,7 +96,7 @@ storage 进程预算 = 空闲稳定 RSS
 5. 在稳定点以下保留容量余量，再配置入口并发、线程池、连接池和容器 memory limit。
 6. 变更缓冲区、超时、副本拓扑或 SDK 后重新建立基线；不同 fingerprint 的结果不能直接比较。
 
-P2-4 的 exact-main 负载烟测使用 Linux amd64、Java 21.0.11、4 processors，4 并发完成 8/8 次迭代；256 KiB 负载下 wall time 526 ms、p99 381 ms、吞吐约 3.98 MiB/s，heap delta 16 MiB、direct-buffer delta 3,080,192 bytes、thread delta 23，receipt/tombstone 从 8/8 回落到 0/0，最终无残留。该结果只证明对应 fingerprint 与小负载冒烟门槛，不是生产容量承诺。完整证据见[交付证据矩阵](/zh/architecture/delivery-evidence)。
+P2-4 的 exact-main [Test Suite run 30209115456](https://github.com/SoarCollab/RecordPlatform/actions/runs/30209115456) 使用 Linux amd64、Java 21.0.11、4 processors，环境 fingerprint `5b9cece769dd3a52cd34a0af45d9342573ad855edb98d048547b732d8cdeab6b`，4 并发完成 8/8 次迭代；256 KiB 负载下 wall time 414 ms、p99 291 ms、吞吐 `5,061,808.93 bytes/s`（约 4.83 MiB/s），heap peak delta `37,748,736 bytes`（36 MiB）、direct-buffer peak delta `2,686,976 bytes`、thread delta 23，receipt/tombstone 从 8/8 回落到 0/0，最终无残留。[retained report](/evidence/direct-upload-load-smoke-30209115456.json) 的 source SHA-256 是 `4ecc8b77b7a39f4ccf6c2809dc52642d252bf8d123845823736a8f67476aab39`。该结果只证明相同 fingerprint/负载与小负载冒烟门槛，不是生产容量承诺，也不能与不同 fingerprint 直接比较。完整边界见[交付证据矩阵](/zh/architecture/delivery-evidence)。
 
 ## JVM 与容器配置
 

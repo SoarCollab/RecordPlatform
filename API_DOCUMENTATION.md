@@ -1138,6 +1138,10 @@ GET /api/v1/files/hash/{fileHash}/download-metadata
 
 For encrypted files, the default `grant-v1` response keeps `initialKey` null and returns a short-lived `keyGrant`, which must be consumed through the matching authenticated or public grant-consume POST immediately before decryption. For unencrypted direct multipart uploads, both key fields are null and `encryptionAlgorithm` is `NONE`.
 
+Encrypted clients send `X-Key-Delivery-Protocol: grant-v1` and a cryptographically random, memory-only `X-Download-Session-ID` on metadata/decrypt-info requests. Immediately before decryption, owner, friend-share, and authenticated-share clients call `POST /api/v1/files/key-grants/consume`; anonymous public-share clients call `POST /api/v1/public/key-grants/consume`. Both endpoints accept `{ "grantReference": "...", "sessionId": "..." }` in the JSON body. Grant references and session IDs must never appear in URLs, persistent browser state, access logs, WAF/APM payloads, or cross-tab messages.
+
+Metadata, decrypt-info, and consume responses are `Cache-Control: no-store`. A grant is bound to the authorized actor/client, tenant/share, file version, algorithm suite, key envelope, and download session; rotation, revocation, supersede, version drift, or binding mismatch fails closed. The one allowed same-session retry covers a lost consume response/provider failure and does not authorize replay by a different caller. `plaintext-v0` is a server-disabled-by-default, explicitly negotiated, hard-deadline migration protocol; new clients must not request it or expect plaintext `initialKey`.
+
 Owner, friend-share, authenticated-share, and public-share metadata use this same manifest contract. The share-code endpoints are `GET /api/v1/shares/{shareCode}/files/{fileHash}/download-metadata` (Bearer required) and `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/download-metadata` (anonymous). `accessIdentity` binds the server-authorized access kind, tenant/actor-or-client/share identity, file version, manifest hash, and algorithm suite without exposing those raw authorization fields. A client may refresh metadata once after a part returns 401/403 only when the complete stable identity and part evidence remain unchanged; a second expiry or any identity drift fails closed.
 
 For an active manifest, `manifestStatus=ACTIVE`, `manifestClassification=ALREADY_MANIFEST`, `manifestErrorCode=null`, and `legacyDownloadAllowed=false`. `canonicalManifestJson` excludes secret key material and binds the ordered part contract.
@@ -4022,6 +4026,7 @@ Operational defaults: backfill worker enabled, apply disabled, run lease 300 sec
 - `GET /api/v1/files/hash/{fileHash}/addresses`
 - `GET /api/v1/files/hash/{fileHash}/chunks`
 - `GET /api/v1/files/hash/{fileHash}/decrypt-info`
+- `POST /api/v1/files/key-grants/consume`
 - `GET /api/v1/files/stats`
 - `GET /api/v1/files/shares`
 - `GET /api/v1/files/{id}/provenance`
@@ -4042,6 +4047,7 @@ Operational defaults: backfill worker enabled, apply disabled, run lease 300 sec
 - `GET /api/v1/shares/{shareCode}/info`
 - `GET /api/v1/shares/{shareCode}/files`
 - `POST /api/v1/shares/{shareCode}/files/save`
+- `POST /api/v1/public/key-grants/consume`
 - `DELETE /api/v1/files/share/{shareCode}`
 - `GET /api/v1/shares/{shareCode}/files/{fileHash}/chunks`
 - `GET /api/v1/shares/{shareCode}/files/{fileHash}/decrypt-info`

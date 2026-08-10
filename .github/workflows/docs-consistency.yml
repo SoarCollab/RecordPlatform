@@ -64,7 +64,14 @@ jobs:
           python-version: '3.11'
 
       - name: Run consistency checks
-        run: python3 tools/docs/check_consistency.py --check-routes --check-env --check-roadmap --check-versions
+        run: |
+          python3 -m unittest discover -s tools/docs/tests -p 'test_*.py'
+          python3 tools/docs/check_consistency.py \
+            --check-routes \
+            --check-env \
+            --check-roadmap \
+            --check-versions \
+            --check-evidence
 
   docs-build:
     name: Build Docs Site

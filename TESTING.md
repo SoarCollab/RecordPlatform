@@ -2,9 +2,27 @@
 
 本项目采用"单元测试优先 + 少量高价值集成测试"的策略，目标是在 CI 中尽早发现回归，同时保持本地开发的执行成本足够低。
 
-## 当前测试文件快照（274 files）
+## 当前测试文件快照（313 files）
 
-> 2026-07-27 按 `*Test.java` / `*IT.java` / `*.test.ts` / `*.spec.ts` 统计：`platform-backend=177`、`platform-storage=27`、`platform-frontend=41`、`platform-verifier=15`、`platform-fisco=11`、`platform-api=3`，合计 274。后端拆分为 `backend-common=13`、`backend-api=1`、`backend-service=75`、`backend-web=88`。该数字是文件快照，不等同 test case 数；以下长表只说明代表性覆盖。
+> 2026-08-10 按 canonical source tree 中的 `*Test.java` / `*IT.java` / `*.test.ts` / `*.spec.ts` / `test_*.py` / `*_test.py` 统计。该数字是文件快照，不等同 test case 数；以下长表只说明代表性覆盖。`tools/docs/check_consistency.py --check-evidence` 会从 exact tree 重新计算并核对本表。
+
+| Component | Test files |
+| --- | ---: |
+| `platform-backend/backend-common` | 13 |
+| `platform-backend/backend-api` | 1 |
+| `platform-backend/backend-service` | 96 |
+| `platform-backend/backend-web` | 100 |
+| `platform-backend` | 210 |
+| `platform-storage` | 28 |
+| `platform-frontend` | 41 |
+| `platform-verifier` | 15 |
+| `platform-fisco` | 11 |
+| `platform-api` | 3 |
+| `tools/ci` | 2 |
+| `tools/contracts` | 2 |
+| `tools/docs` | 1 |
+| `tools` | 5 |
+| `total` | 313 |
 
 ### 后端单元测试（backend-common，代表性测试类）
 
@@ -298,7 +316,7 @@ F07、F09-F11 复用既有真实 MinIO/Redis 测试和确定性 service tests，
 - `platform-storage/target/direct-upload-load-smoke/report.json`
 - `platform-storage/target/direct-upload-load-smoke/report.md`
 
-P2-4 在 exact `main` 的 [Test Suite run 30209115456](https://github.com/SoarCollab/RecordPlatform/actions/runs/30209115456) 留下以下可复核快照：Linux amd64、Java 21.0.11、4 processors，4 并发完成 8/8 次迭代；256 KiB 负载 wall time 526 ms、p99 381 ms、吞吐约 3.98 MiB/s，heap delta 16 MiB、direct-buffer delta 3,080,192 bytes、thread delta 23；receipt/tombstone 从 8/8 回落到 0/0，最终对象与 Redis lifecycle 残留为零。该结果是对应 fingerprint 的 smoke 证据，不是生产 SLA。
+P2-4 在 exact `main` 的 [Test Suite run 30209115456](https://github.com/SoarCollab/RecordPlatform/actions/runs/30209115456) 留下以下可复核快照：Linux amd64、Java 21.0.11、4 processors，环境 fingerprint `5b9cece769dd3a52cd34a0af45d9342573ad855edb98d048547b732d8cdeab6b`，4 并发完成 8/8 次迭代；256 KiB 负载 wall time 414 ms、p99 291 ms、吞吐 `5,061,808.93 bytes/s`（约 4.83 MiB/s），heap peak delta `37,748,736 bytes`（36 MiB）、direct-buffer peak delta `2,686,976 bytes`、thread delta 23；receipt/tombstone 从 8/8 回落到 0/0，最终对象与 Redis lifecycle 残留为零。[retained report](docs/public/evidence/direct-upload-load-smoke-30209115456.json) 的 source SHA-256 为 `4ecc8b77b7a39f4ccf6c2809dc52642d252bf8d123845823736a8f67476aab39`。该结果是对应 fingerprint 的 smoke 证据，不是生产 SLA，也不能与不同环境/负载直接比较。
 
 PR 硬门禁是零失败、零对象/Redis 残留、有界 deadline 与资源预算；吞吐和紧时延只记录，不作为共享 runner 的生产 SLA。96 MiB 对象 / 80 MiB heap 的对象级边界仍由以下独立 fork 证明：
 

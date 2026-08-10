@@ -5,7 +5,7 @@ RecordPlatform 技术架构文档。
 ## 目录
 
 - [系统架构总览](system-overview) - 整体架构、组件和数据流
-- [P0/P1/P2 交付证据矩阵](delivery-evidence) - 精确实现、测试、CI 与残余风险证据
+- [P0/P1/P2/P3 交付证据矩阵](delivery-evidence) - 精确实现、测试、CI 与残余风险证据
 - [分布式存储](distributed-storage) - 故障域、一致性哈希、再平衡
 - [分片 Manifest](chunk-manifest) - 规范元数据、迁移分类与引用安全生命周期
 - [区块链集成](blockchain-integration) - 智能合约、多链适配器

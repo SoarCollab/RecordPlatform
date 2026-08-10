@@ -142,6 +142,14 @@ docker compose -f docker-compose.infra.yml up -d
 
 复制 `.env.example` 为 `.env`，配置 `JWT_KEY`、`S3_*` 和 `FISCO_*` 后再启动服务。
 
+```bash
+cp .env.example .env
+# 继续前先编辑 .env。
+set -a
+source .env
+set +a
+```
+
 ### 2. 构建
 
 ```bash
@@ -208,7 +216,7 @@ cd platform-frontend && pnpm install && pnpm dev
 | [快速开始](docs/zh/getting-started/index.md) | 前置依赖、安装部署、配置说明 |
 | [公开验证器](docs/zh/getting-started/public-verifier.md) | 使用 SDK、CLI 或独立 Web 服务验证签名证明 ZIP |
 | [架构设计](docs/zh/architecture/index.md) | 系统架构、分布式存储、区块链、安全机制 |
-| [P0/P1/P2 交付证据矩阵](docs/zh/architecture/delivery-evidence.md) | 实现、自动测试、exact-main CI 与残余风险矩阵 |
+| [P0/P1/P2/P3 交付证据矩阵](docs/zh/architecture/delivery-evidence.md) | 实现、自动测试、exact-main CI 与残余风险矩阵 |
 | [分片 Manifest](docs/zh/architecture/chunk-manifest.md) | 规范分片证据、历史分类与引用安全清理 |
 | [部署运维](docs/zh/deployment/index.md) | Docker Compose、生产环境、监控告警 |
 | [API 参考](docs/zh/api/index.md) | REST 端点、认证规则、错误码 |

@@ -5,7 +5,7 @@ Technical architecture documentation for RecordPlatform.
 ## Contents
 
 - [System Overview](system-overview) - High-level architecture, components, and data flow
-- [P0/P1/P2 Delivery Evidence](delivery-evidence) - Exact implementation, test, CI, and residual-risk evidence
+- [P0/P1/P2/P3 Delivery Evidence](delivery-evidence) - Exact implementation, test, CI, and residual-risk evidence
 - [Distributed Storage](distributed-storage) - Fault domains, consistent hashing, rebalancing
 - [Chunk Manifest](chunk-manifest) - Canonical metadata, migration classifications, and reference-safe lifecycle
 - [Blockchain Integration](blockchain-integration) - Smart contracts, multi-chain adapters
