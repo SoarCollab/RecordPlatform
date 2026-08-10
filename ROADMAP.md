@@ -176,8 +176,8 @@ Signed ZIP 的 `VALID` 要求：本地合同全部通过、显式信任的 Ed255
 
 - PR required 使用真实 MinIO、Redis/Redisson 和两条 Toxiproxy 数据面。
 - `DirectUploadPromotionMinioIT` 8、`DirectUploadRedisLifecycleIT` 7、`DirectUploadFaultMatrixMinioIT` 9、`DirectUploadLoadSmokeIT` 1，Failsafe 的 skipped/failures/errors 必须为零。
-- exact-main Test Suite run `30209115456`：Linux amd64、Java 21.0.11、4 processors；4 并发 8/8 成功；256 KiB 负载 wall 526 ms、p99 381 ms、约 3.98 MiB/s；heap delta 16 MiB、direct-buffer delta 3,080,192 bytes、thread delta 23；receipt/tombstone 8/8 → 0/0，最终零残留。
-- 该 smoke 只证明对应 fingerprint 与测试预算，不是生产吞吐或 SLA。
+- exact-main Test Suite run `30209115456`：Linux amd64、Java 21.0.11、4 processors，环境 fingerprint `5b9cece769dd3a52cd34a0af45d9342573ad855edb98d048547b732d8cdeab6b`；4 并发 8/8 成功；256 KiB 负载 wall 414 ms、p99 291 ms、`5,061,808.93 bytes/s`（约 4.83 MiB/s）；heap peak delta `37,748,736 bytes`（36 MiB）、direct-buffer peak delta `2,686,976 bytes`、thread delta 23；receipt/tombstone 8/8 → 0/0，最终零残留。
+- [retained report](docs/public/evidence/direct-upload-load-smoke-30209115456.json) 的 source SHA-256 是 `4ecc8b77b7a39f4ccf6c2809dc52642d252bf8d123845823736a8f67476aab39`。该 smoke 只证明相同 fingerprint/负载与测试预算，不是生产吞吐或 SLA，也不能与不同 fingerprint 直接比较。
 
 ### P2-Q3 Docs 工作区依赖清零（已完成）
 
@@ -185,7 +185,7 @@ Signed ZIP 的 `VALID` 要求：本地合同全部通过、显式信任的 Ed255
 - docs lockfile hash：`a93c069302dbce3a17d4b9d5a3df011a78cd43123d3e58465cf1fd38d73dba98`。
 - exact-main Test Suite `30210972743`、Deploy Docs `30210972766` 通过，Pages HTTP 200。
 - GitHub advisories #588/#590 以 fixed 收口，不以 dismiss 伪装修复。
-- 该 leaf 仅证明 docs workspace 的对应审计口径为零。默认分支仍有 26 个 open Dependabot advisories（8 Medium、18 Low），保留给 P6；禁止写成 repo-wide zero advisories。
+- 该 leaf 仅证明当时 docs workspace 的对应审计口径为零；禁止写成 repo-wide zero advisories。动态 backlog 以 [Dependabot live view](https://github.com/SoarCollab/RecordPlatform/security/dependabot) 为准，下面 P6 只保留带 SHA/时间边界的快照。
 
 ### P2-5 在线文档与发布证据（本次收口）
 
@@ -280,7 +280,7 @@ P4 不承诺实施时间；只有业务、合规或容量触发条件成立后�
 
 P6 接管 P2 不应扩大的剩余安全工作：
 
-- 默认分支 26 个 open Dependabot advisories（8 Medium、18 Low）的逐项修复、接受或替换；
+- 快照 `main@85a57ae847423308cf60683c6fd299d51a1650f1`（2026-08-10 14:51 CST）有 3 open、均为 Maven / Medium 的 `org.apache.commons:commons-lang3`：`platform-verifier/sdk`、`platform-verifier/cli-verifier`、`platform-verifier/web-verifier`。当前 Spring Boot BOM 将依赖解析为 3.17.0，首个 patched version 为 3.18.0；owner 为 P6 supply-chain maintenance，必须在 2026-09-30 前或下一次 release 前（取更早者）完成独立 Maven 兼容升级/复验，不在文档 PR 中混入依赖变更。实时状态以 [Dependabot live view](https://github.com/SoarCollab/RecordPlatform/security/dependabot) 为准；
 - Semgrep、全量 Trivy、SBOM、Slither 与 GitHub advisory 的统一 severity/exception/expiry 模型；
 - required-check 策略和 release 阻断的分阶段升级；
 - 每个例外的 owner、理由、到期时间和替代控制。

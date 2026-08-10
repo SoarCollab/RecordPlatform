@@ -1,0 +1,51 @@
+{
+  "schema" : "direct-upload-load-smoke-v1",
+  "generatedAt" : "2026-07-26T16:17:35.093624713Z",
+  "environment" : {
+    "fingerprint" : "5b9cece769dd3a52cd34a0af45d9342573ad855edb98d048547b732d8cdeab6b",
+    "osName" : "Linux",
+    "osArchitecture" : "amd64",
+    "javaVersion" : "21.0.11",
+    "availableProcessors" : 4,
+    "maxHeapBytes" : 4192206848
+  },
+  "iterations" : 8,
+  "concurrency" : 4,
+  "partBytes" : 262144,
+  "successes" : 8,
+  "failures" : 0,
+  "wallMillis" : 414,
+  "p50Millis" : 122.0,
+  "p95Millis" : 291.0,
+  "p99Millis" : 291.0,
+  "bytesPerSecond" : 5061808.932889123,
+  "resource" : {
+    "heapStartBytes" : 66379280,
+    "heapPeakBytes" : 104128016,
+    "heapPeakDeltaBytes" : 37748736,
+    "gcCollectionCountStart" : 18,
+    "gcCollectionCountEnd" : 18,
+    "gcCollectionCountDelta" : 0,
+    "gcCollectionTimeMillisStart" : 81,
+    "gcCollectionTimeMillisEnd" : 81,
+    "gcCollectionTimeMillisDelta" : 0,
+    "threadStart" : 43,
+    "threadPeak" : 66,
+    "threadPeakDelta" : 23,
+    "directBufferAvailable" : true,
+    "directBufferStartBytes" : 2342913,
+    "directBufferPeakBytes" : 5029889,
+    "directBufferPeakDeltaBytes" : 2686976
+  },
+  "lifecycle" : {
+    "receiptCountBeforeCleanup" : 8,
+    "stagingTombstoneCountBeforeCleanup" : 8,
+    "receiptCountAfterCleanup" : 0,
+    "stagingTombstoneCountAfterCleanup" : 0,
+    "degradedBacklogStatus" : "unavailable:not-exercised",
+    "degradedBacklogAfterCleanup" : null,
+    "repairBacklogStatus" : "unavailable:not-exercised",
+    "repairBacklogAfterCleanup" : null
+  },
+  "cleanupSuccess" : true
+}

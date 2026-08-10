@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -96,6 +97,104 @@ ENV_ASSIGN_PATTERN = re.compile(r"^\s*([A-Z][A-Z0-9_]*)=", re.MULTILINE)
 ENV_EXPORT_PATTERN = re.compile(r"\bexport\s+([A-Z][A-Z0-9_]*)=")
 MIGRATION_VERSION_PATTERN = re.compile(r"^V([0-9]+\.[0-9]+\.[0-9]+)__")
 
+DIRECT_UPLOAD_EVIDENCE_PATH = Path("docs/public/evidence/direct-upload-load-smoke-30209115456.json")
+DIRECT_UPLOAD_EVIDENCE_SHA256 = "4ecc8b77b7a39f4ccf6c2809dc52642d252bf8d123845823736a8f67476aab39"
+DIRECT_UPLOAD_EVIDENCE_DOCS = (
+    "ROADMAP.md",
+    "TESTING.md",
+    "docs/operations/memory-tuning.md",
+)
+DIRECT_UPLOAD_EVIDENCE_TOKENS = (
+    "30209115456",
+    "5b9cece769dd3a52cd34a0af45d9342573ad855edb98d048547b732d8cdeab6b",
+    "414 ms",
+    "291 ms",
+    "5,061,808.93 bytes/s",
+    "4.83 MiB/s",
+    "37,748,736 bytes",
+    "36 MiB",
+    "2,686,976 bytes",
+    "thread delta 23",
+    "direct-upload-load-smoke-30209115456.json",
+    DIRECT_UPLOAD_EVIDENCE_SHA256,
+)
+P3_EVIDENCE_DOCS = (
+    "docs/en/architecture/delivery-evidence.md",
+    "docs/zh/architecture/delivery-evidence.md",
+)
+P3_EVIDENCE_TOKENS = (
+    "P0/P1/P2/P3",
+    "cfe9b9e54eefa01246dbddda7ab5a4c27717a3dc",
+    "30222751986",
+    "30222751977",
+    "5614564147",
+    "a4ba5acf3864fd341219a7382d13b2cd30d3afde",
+    "30235985313",
+    "30235985338",
+    "5616938788",
+    "c0bd8076994ce0cb3bf98a3ff0f722c60ea84a4c",
+    "30245935210",
+    "30245935295",
+    "5618660915",
+    "7f9d639f3395269735e9efeb3dbea4e9e025d412",
+    "30267453969",
+    "30267454033",
+    "5622671802",
+)
+ADVISORY_SNAPSHOT_DOCS = (
+    "ROADMAP.md",
+    "docs/en/architecture/delivery-evidence.md",
+    "docs/zh/architecture/delivery-evidence.md",
+)
+ADVISORY_SNAPSHOT_TOKENS = (
+    "85a57ae847423308cf60683c6fd299d51a1650f1",
+    "2026-08-10 14:51 CST",
+    "3 open",
+    "Maven",
+    "Medium",
+    "org.apache.commons:commons-lang3",
+    "platform-verifier/sdk",
+    "platform-verifier/cli-verifier",
+    "platform-verifier/web-verifier",
+    "3.17.0",
+    "3.18.0",
+    "https://github.com/SoarCollab/RecordPlatform/security/dependabot",
+    "2026-09-30",
+)
+TEST_SNAPSHOT_COMPONENTS = (
+    "platform-backend/backend-common",
+    "platform-backend/backend-api",
+    "platform-backend/backend-service",
+    "platform-backend/backend-web",
+    "platform-backend",
+    "platform-storage",
+    "platform-frontend",
+    "platform-verifier",
+    "platform-fisco",
+    "platform-api",
+    "tools/ci",
+    "tools/contracts",
+    "tools/docs",
+    "tools",
+    "total",
+)
+TEST_SNAPSHOT_ROW_PATTERN = re.compile(
+    r"^\|\s*`?(platform-(?:backend(?:/(?:backend-common|backend-api|backend-service|backend-web))?"
+    r"|storage|frontend|verifier|fisco|api)|tools(?:/(?:ci|contracts|docs))?|total)`?\s*\|\s*(\d+)\s*\|\s*$",
+    re.MULTILINE,
+)
+TEST_SNAPSHOT_HEADING_PATTERN = re.compile(r"^## 当前测试文件快照（(\d+) files）$", re.MULTILINE)
+EXCLUDED_TEST_PATH_PARTS = {
+    "node_modules",
+    ".svelte-kit",
+    "target",
+    "dist",
+    "build",
+    "coverage",
+    "test-results",
+    "playwright-report",
+}
+
 
 @dataclass
 class CheckResult:
@@ -134,6 +233,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--check-env", action="store_true", help="Validate documented env vars against code/env sources")
     parser.add_argument("--check-roadmap", action="store_true", help="Validate ROADMAP baseline snapshot")
     parser.add_argument("--check-versions", action="store_true", help="Validate documented runtime versions")
+    parser.add_argument(
+        "--check-evidence",
+        action="store_true",
+        help="Validate security, delivery, test-count, and retained-artifact evidence",
+    )
     parser.add_argument(
         "--openapi",
         type=Path,
@@ -320,13 +424,90 @@ def count_backend_service_classes(root: Path) -> int:
 
 def count_backend_test_files(root: Path) -> int:
     """Count backend test files using *Test.java and *IT.java naming rules."""
-    backend_root = root / "platform-backend"
-    total = 0
-    for file_path in backend_root.rglob("*.java"):
-        name = file_path.name
-        if name.endswith("Test.java") or name.endswith("IT.java"):
-            total += 1
-    return total
+    return collect_test_file_counts(root)["platform-backend"]
+
+
+def count_java_test_files(test_root: Path) -> int:
+    """Count Java test sources under a canonical src/test root."""
+    if not test_root.exists():
+        return 0
+    return sum(
+        1
+        for file_path in test_root.rglob("*.java")
+        if not EXCLUDED_TEST_PATH_PARTS.intersection(file_path.parts)
+        and (file_path.name.endswith("Test.java") or file_path.name.endswith("IT.java"))
+    )
+
+
+def count_frontend_test_files(frontend_root: Path) -> int:
+    """Count frontend Vitest and Playwright files while excluding generated outputs."""
+    if not frontend_root.exists():
+        return 0
+    return sum(
+        1
+        for file_path in frontend_root.rglob("*")
+        if file_path.is_file()
+        and not EXCLUDED_TEST_PATH_PARTS.intersection(file_path.parts)
+        and (file_path.name.endswith(".test.ts") or file_path.name.endswith(".spec.ts"))
+    )
+
+
+def count_python_test_files(test_root: Path) -> int:
+    """Count canonical Python unit-test files while excluding generated output trees."""
+    if not test_root.exists():
+        return 0
+    return sum(
+        1
+        for file_path in test_root.rglob("*.py")
+        if file_path.is_file()
+        and not EXCLUDED_TEST_PATH_PARTS.intersection(file_path.parts)
+        and (file_path.name.startswith("test_") or file_path.name.endswith("_test.py"))
+    )
+
+
+def collect_test_file_counts(root: Path) -> dict[str, int]:
+    """Collect the canonical cross-module test-file snapshot from exact source trees."""
+    counts = {
+        "platform-backend/backend-common": count_java_test_files(
+            root / "platform-backend/backend-common/src/test/java"
+        ),
+        "platform-backend/backend-api": count_java_test_files(root / "platform-backend/backend-api/src/test/java"),
+        "platform-backend/backend-service": count_java_test_files(
+            root / "platform-backend/backend-service/src/test/java"
+        ),
+        "platform-backend/backend-web": count_java_test_files(root / "platform-backend/backend-web/src/test/java"),
+        "platform-storage": count_java_test_files(root / "platform-storage/src/test/java"),
+        "platform-frontend": count_frontend_test_files(root / "platform-frontend"),
+        "platform-verifier": count_java_test_files(root / "platform-verifier"),
+        "platform-fisco": count_java_test_files(root / "platform-fisco/src/test/java"),
+        "platform-api": count_java_test_files(root / "platform-api/src/test/java"),
+        "tools/ci": count_python_test_files(root / "tools/ci/tests"),
+        "tools/contracts": count_python_test_files(root / "tools/contracts/tests"),
+        "tools/docs": count_python_test_files(root / "tools/docs/tests"),
+    }
+    counts["platform-backend"] = sum(
+        counts[key]
+        for key in (
+            "platform-backend/backend-common",
+            "platform-backend/backend-api",
+            "platform-backend/backend-service",
+            "platform-backend/backend-web",
+        )
+    )
+    counts["tools"] = sum(counts[key] for key in ("tools/ci", "tools/contracts", "tools/docs"))
+    counts["total"] = sum(
+        counts[key]
+        for key in (
+            "platform-backend",
+            "platform-storage",
+            "platform-frontend",
+            "platform-verifier",
+            "platform-fisco",
+            "platform-api",
+            "tools",
+        )
+    )
+    return counts
 
 
 
@@ -596,6 +777,228 @@ def check_versions(root: Path) -> CheckResult:
     return result
 
 
+def require_tokens(root: Path, rel_path: str, tokens: Iterable[str], result: CheckResult, label: str) -> None:
+    """Require invariant evidence tokens in a documentation file."""
+    file_path = root / rel_path
+    if not file_path.exists():
+        result.issues.append(f"Missing {label} document: {rel_path}")
+        return
+    content = file_path.read_text(encoding="utf-8")
+    for token in tokens:
+        if token not in content:
+            result.issues.append(f"{rel_path} is missing {label} token: {token}")
+
+
+def check_api_security_contract(root: Path, result: CheckResult) -> None:
+    """Validate the root API guide's encrypted grant-v1 delivery contract."""
+    api_path = root / "API_DOCUMENTATION.md"
+    if not api_path.exists():
+        result.issues.append("Missing API security document: API_DOCUMENTATION.md")
+        return
+
+    content = api_path.read_text(encoding="utf-8")
+    section_match = re.search(r"(?ms)^### 4\.5 Get File Download Metadata\s*$.*?(?=^### )", content)
+    if section_match is None:
+        result.issues.append("API_DOCUMENTATION.md is missing section 4.5 download metadata")
+        return
+
+    section = section_match.group(0)
+    required_section_tokens = (
+        '"initialKey": null',
+        '"keyGrant": null',
+        "X-Key-Delivery-Protocol",
+        "X-Download-Session-ID",
+        "grant-v1",
+        "POST /api/v1/files/key-grants/consume",
+        "POST /api/v1/public/key-grants/consume",
+        "no-store",
+        "plaintext-v0",
+    )
+    for token in required_section_tokens:
+        if token not in section:
+            result.issues.append(f"API_DOCUMENTATION.md section 4.5 is missing security token: {token}")
+
+    forbidden_patterns = (
+        r"(?i)encrypted files?.{0,80}initialKey.{0,80}(?:contains|returns).{0,80}(?:plain|unwrap|decrypted)",
+        r"(?i)initialKey.{0,80}(?:contains|returns).{0,80}(?:plain|unwrap|decrypted).{0,80}encrypted",
+    )
+    for pattern in forbidden_patterns:
+        if re.search(pattern, section, re.DOTALL):
+            result.issues.append("API_DOCUMENTATION.md still describes plaintext initialKey for encrypted downloads")
+            break
+
+    checklist_match = re.search(r"(?ms)^## 21\. Controller-Aligned Endpoint Checklist\s*$.*", content)
+    if checklist_match is None:
+        result.issues.append("API_DOCUMENTATION.md is missing controller-aligned endpoint checklist")
+        return
+    checklist = checklist_match.group(0)
+    for route in (
+        "POST /api/v1/files/key-grants/consume",
+        "POST /api/v1/public/key-grants/consume",
+    ):
+        if route not in checklist:
+            result.issues.append(f"API_DOCUMENTATION.md endpoint checklist is missing: {route}")
+
+
+def check_delivery_evidence_contract(root: Path, result: CheckResult) -> None:
+    """Validate bilingual P3 exact-commit, workflow, and Pages evidence."""
+    for rel_path in P3_EVIDENCE_DOCS:
+        require_tokens(root, rel_path, P3_EVIDENCE_TOKENS, result, "P3 delivery evidence")
+
+
+def source_artifact_digest(file_path: Path) -> str:
+    """Hash the exact retained artifact bytes."""
+    return hashlib.sha256(file_path.read_bytes()).hexdigest()
+
+
+def nested_json_value(payload: dict[str, object], path: tuple[str, ...]) -> object:
+    """Read a required nested JSON value and raise KeyError when evidence is incomplete."""
+    current: object = payload
+    for key in path:
+        if not isinstance(current, dict) or key not in current:
+            raise KeyError(".".join(path))
+        current = current[key]
+    return current
+
+
+def check_direct_upload_evidence(root: Path, result: CheckResult) -> None:
+    """Validate the retained load-smoke artifact identity and every derived summary."""
+    evidence_path = root / DIRECT_UPLOAD_EVIDENCE_PATH
+    if not evidence_path.exists():
+        result.issues.append(f"Missing retained load-smoke evidence: {DIRECT_UPLOAD_EVIDENCE_PATH}")
+        return
+
+    digest = source_artifact_digest(evidence_path)
+    if digest != DIRECT_UPLOAD_EVIDENCE_SHA256:
+        result.issues.append(
+            "Retained load-smoke artifact digest mismatch: "
+            f"expected={DIRECT_UPLOAD_EVIDENCE_SHA256}, actual={digest}"
+        )
+
+    try:
+        payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        result.issues.append(f"Retained load-smoke artifact is invalid JSON: {error}")
+        return
+
+    expected_values: dict[tuple[str, ...], object] = {
+        ("schema",): "direct-upload-load-smoke-v1",
+        ("environment", "fingerprint"): "5b9cece769dd3a52cd34a0af45d9342573ad855edb98d048547b732d8cdeab6b",
+        ("environment", "osName"): "Linux",
+        ("environment", "osArchitecture"): "amd64",
+        ("environment", "javaVersion"): "21.0.11",
+        ("environment", "availableProcessors"): 4,
+        ("iterations",): 8,
+        ("concurrency",): 4,
+        ("partBytes",): 262144,
+        ("successes",): 8,
+        ("failures",): 0,
+        ("wallMillis",): 414,
+        ("p99Millis",): 291.0,
+        ("bytesPerSecond",): 5061808.932889123,
+        ("resource", "heapPeakDeltaBytes"): 37748736,
+        ("resource", "threadPeakDelta"): 23,
+        ("resource", "directBufferPeakDeltaBytes"): 2686976,
+        ("lifecycle", "receiptCountBeforeCleanup"): 8,
+        ("lifecycle", "stagingTombstoneCountBeforeCleanup"): 8,
+        ("lifecycle", "receiptCountAfterCleanup"): 0,
+        ("lifecycle", "stagingTombstoneCountAfterCleanup"): 0,
+        ("cleanupSuccess",): True,
+    }
+    for path, expected in expected_values.items():
+        try:
+            actual = nested_json_value(payload, path)
+        except KeyError:
+            result.issues.append(f"Retained load-smoke artifact is missing field: {'.'.join(path)}")
+            continue
+        if actual != expected:
+            result.issues.append(
+                f"Retained load-smoke field mismatch for {'.'.join(path)}: expected={expected}, actual={actual}"
+            )
+
+    for rel_path in DIRECT_UPLOAD_EVIDENCE_DOCS:
+        require_tokens(root, rel_path, DIRECT_UPLOAD_EVIDENCE_TOKENS, result, "load-smoke evidence")
+
+
+def extract_documented_test_snapshot(content: str) -> dict[str, int]:
+    """Extract the machine-checked test snapshot table from TESTING.md."""
+    snapshot: dict[str, int] = {}
+    for component, value in TEST_SNAPSHOT_ROW_PATTERN.findall(content):
+        if component in snapshot:
+            raise ValueError(f"duplicate test snapshot row: {component}")
+        snapshot[component] = int(value)
+    return snapshot
+
+
+def check_test_snapshot(root: Path, result: CheckResult) -> None:
+    """Validate TESTING.md counts against exact canonical source trees."""
+    testing_path = root / "TESTING.md"
+    if not testing_path.exists():
+        result.issues.append("Missing test snapshot document: TESTING.md")
+        return
+    content = testing_path.read_text(encoding="utf-8")
+    try:
+        documented = extract_documented_test_snapshot(content)
+    except ValueError as error:
+        result.issues.append(str(error))
+        return
+
+    expected = collect_test_file_counts(root)
+    heading_match = TEST_SNAPSHOT_HEADING_PATTERN.search(content)
+    if heading_match is None:
+        result.issues.append("TESTING.md is missing the machine-checked test snapshot heading")
+    elif int(heading_match.group(1)) != expected["total"]:
+        result.issues.append(
+            "TESTING.md test snapshot heading mismatch: "
+            f"documented={heading_match.group(1)}, actual={expected['total']}"
+        )
+    for component in TEST_SNAPSHOT_COMPONENTS:
+        if component not in documented:
+            result.issues.append(f"TESTING.md is missing test snapshot row: {component}")
+            continue
+        if documented[component] != expected[component]:
+            result.issues.append(
+                f"TESTING.md test snapshot mismatch for {component}: "
+                f"documented={documented[component]}, actual={expected[component]}"
+            )
+
+
+def check_readme_env_parity(root: Path, result: CheckResult) -> None:
+    """Validate that both root READMEs expose the same executable env-loading sequence."""
+    commands = ("cp .env.example .env", "set -a", "source .env", "set +a")
+    for rel_path in ("README.md", "README_CN.md"):
+        file_path = root / rel_path
+        if not file_path.exists():
+            result.issues.append(f"Missing README env document: {rel_path}")
+            continue
+        content = file_path.read_text(encoding="utf-8")
+        offsets = [content.find(command) for command in commands]
+        if any(offset < 0 for offset in offsets):
+            missing = [command for command, offset in zip(commands, offsets, strict=True) if offset < 0]
+            result.issues.append(f"{rel_path} is missing env command(s): {', '.join(missing)}")
+            continue
+        if offsets != sorted(offsets):
+            result.issues.append(f"{rel_path} env commands are not in executable order")
+
+
+def check_advisory_snapshot(root: Path, result: CheckResult) -> None:
+    """Validate that dynamic advisory evidence is explicitly time- and SHA-bounded."""
+    for rel_path in ADVISORY_SNAPSHOT_DOCS:
+        require_tokens(root, rel_path, ADVISORY_SNAPSHOT_TOKENS, result, "advisory snapshot")
+
+
+def check_evidence(root: Path) -> CheckResult:
+    """Validate cross-document security, delivery, artifact, test, and advisory evidence."""
+    result = CheckResult("evidence")
+    check_api_security_contract(root, result)
+    check_delivery_evidence_contract(root, result)
+    check_direct_upload_evidence(root, result)
+    check_test_snapshot(root, result)
+    check_readme_env_parity(root, result)
+    check_advisory_snapshot(root, result)
+    return result
+
+
 
 def print_result(result: CheckResult) -> None:
     """Print human-readable check result with concise pass/fail details."""
@@ -622,8 +1025,10 @@ def main() -> int:
         requested_checks.append("roadmap")
     if args.check_versions:
         requested_checks.append("versions")
+    if args.check_evidence:
+        requested_checks.append("evidence")
     if not requested_checks:
-        requested_checks = ["routes", "env", "roadmap", "versions"]
+        requested_checks = ["routes", "env", "roadmap", "versions", "evidence"]
 
     openapi_path = args.openapi
     if not openapi_path.is_absolute():
@@ -638,6 +1043,8 @@ def main() -> int:
         results.append(check_roadmap(root))
     if "versions" in requested_checks:
         results.append(check_versions(root))
+    if "evidence" in requested_checks:
+        results.append(check_evidence(root))
 
     for result in results:
         print_result(result)
