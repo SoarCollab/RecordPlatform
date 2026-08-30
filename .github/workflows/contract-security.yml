@@ -47,14 +47,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          commit=6b4cc280eb884f1852e1ddf12aeea56a2103148c
+          provision_tool="$GITHUB_WORKSPACE/tools/contracts/provision_fisco_solc.py"
           for variant in ecc sm; do
-            compiler="$RUNNER_TEMP/fisco-solc/$commit/$variant/solc"
             output="$RUNNER_TEMP/artifacts-$variant"
             mkdir -p "$output"
             (
               cd platform-fisco/contract
-              "$compiler" \
+              python3 "$provision_tool" \
+                --cache-dir "$RUNNER_TEMP/fisco-solc" run --variant "$variant" -- \
                 --base-path . \
                 --include-path . \
                 --evm-version london \

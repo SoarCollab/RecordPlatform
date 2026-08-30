@@ -1184,6 +1184,8 @@ done
                 "manifestSha256": manifest_sha,
                 "sourceCommit": source_commit,
                 "releasePrereleaseMarker": "empty",
+                "sourceRepository": manifest["sourceRepository"],
+                "platform": manifest["supportedPlatforms"][0],
                 "variants": {
                     variant: {
                         "sha256": digest,
