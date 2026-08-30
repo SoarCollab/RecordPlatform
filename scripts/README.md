@@ -132,13 +132,16 @@ SW_AGENT_COLLECTOR_BACKEND_SERVICES=127.0.0.1:11800
 | 选项                  | 说明                                              |
 | --------------------- | ------------------------------------------------- |
 | `--console-dir DIR`   | FISCO BCOS 控制台目录（默认：`~/fisco/console`） |
+| `--console-launcher FILE` | 显式选择交互入口，仅允许 Console 根目录内的 `start.sh` 或 legacy `console.sh` |
 | `--env-file FILE`     | 地址与部署证据的原子激活文件（默认：项目根目录的 `.env`） |
 | `--catalog-file FILE` | 受版本控制的 artifact catalog 路径                        |
 | `--receipt-dir DIR`   | 结构化部署回执目录（默认：`CONTRACT_DEPLOYMENT_RECEIPT_DIR` 或 `log/contract-deployments`） |
 | `--dry-run`           | 校验输入并打印操作步骤，不修改文件或链状态                |
 | `-h`, `--help`        | 显示帮助信息                                      |
 
-部署前脚本通过官方 Console `getGroupInfo` 读取唯一的 `chainID`/`groupID`/`smCryptoType`/`wasm` 元组：chain/group 必须与显式配置完全一致，WASM 或无法确定的 crypto/VM 组合会失败关闭。每笔链写前都会再次核验该上下文；部署后在同一个 Console 会话中执行 `getGroupInfo` 和 `getTransactionReceipt`，只接受唯一结构化回执，并要求显式 `status=0`、回执内 `transactionHash`/`contractAddress` 与部署输出一致、`blockNumber` 为非负整数。最终发布字段全部来自该同一成功回执，不会从多段文本拼接。随后 `getCode` 必须与节点实际 ECC/SM 变体对应的完整签入 runtime bytecode 完全一致，`contractIdentity()` 还必须等于已验证 catalog 中唯一 `ACTIVE` 条目的名称和语义版本。`--skip-verify` 已被明确拒绝。Dry-run 不调用 Console、不生成时间、不创建回执，也不修改链或 `.env`。
+脚本会在任何 Console 命令前解析唯一的安全交互入口：官方 Console 3.7 布局中优先使用 `start.sh`；只有在 `start.sh` 不存在时，才允许把 `console.sh` 作为明确的旧版交互入口。覆盖值可来自 `--console-launcher` 或 `FISCO_CONSOLE_LAUNCHER`，两者必须一致。入口必须为 Console 根目录内的可执行普通文件，禁止符号链接、子目录或外部路径。
+
+部署前脚本通过官方 Console `getGroupInfo` 读取唯一的 `chainID`/`groupID`/`smCryptoType`/VM 元组：VM 字段接受当前布尔字段 `isWasm` 或 legacy 布尔字段 `wasm`，两者同时出现时必须相等；类型错误、冲突、缺失或未知别名都失败关闭。chain/group 必须与显式配置完全一致，WASM 或无法确定的 crypto/VM 组合会失败关闭。每笔链写前都会再次核验该上下文；部署后在同一个 Console 会话中执行 `getGroupInfo` 和 `getTransactionReceipt`，只接受唯一结构化回执，并要求显式 `status=0`、回执内 `transactionHash`/`contractAddress` 与部署输出一致、`blockNumber` 为非负整数。最终发布字段全部来自该同一成功回执，不会从多段文本拼接。随后 `getCode` 必须与节点实际 ECC/SM 变体对应的完整签入 runtime bytecode 完全一致，`contractIdentity()` 还必须等于已验证 catalog 中唯一 `ACTIVE` 条目的名称和语义版本。`--skip-verify` 已被明确拒绝。Dry-run 不调用 Console、不生成时间、不创建回执，也不修改链或 `.env`。
 
 该脚本只负责 `BLOCKCHAIN_ACTIVE=local-fisco`；配置为 `bsn-fisco` 或 `bsn-besu` 时会在 Console 查询前拒绝执行，BSN 部署必须使用对应网络的受审查发布流程。
 

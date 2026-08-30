@@ -16,6 +16,8 @@
 #
 # Options:
 #   --console-dir DIR    FISCO BCOS console directory (default: ~/fisco/console)
+#   --console-launcher FILE
+#                        Interactive launcher: start.sh or legacy console.sh
 #   --env-file FILE      Target .env file for atomic activation (default: <project>/.env)
 #   --catalog-file FILE  Artifact catalog (default: platform-fisco/.../artifacts.json)
 #   --receipt-dir DIR    Deployment receipt directory (default: <project>/log/contract-deployments)
@@ -101,7 +103,7 @@ run_console() {
     # 在清理 shell 注入变量后，以有界时长运行交互式 FISCO Console。
     local timeout_seconds="$1"
     env -u BASH_ENV -u ENV -u SHELLOPTS -u CDPATH \
-        "$TIMEOUT_COMMAND" "$timeout_seconds" ./console.sh
+        "$TIMEOUT_COMMAND" "$timeout_seconds" "$CONSOLE_LAUNCHER"
 }
 
 # TCP connectivity probe (bash /dev/tcp → nc fallback, same as env-check.sh)
@@ -123,6 +125,8 @@ has_cmd() { command -v "$1" &>/dev/null; }
 # Argument parsing
 # ==============================================================================
 CONSOLE_DIR="${FISCO_CONSOLE_DIR:-$HOME/fisco/console}"
+ENV_CONSOLE_LAUNCHER_OVERRIDE="${FISCO_CONSOLE_LAUNCHER:-}"
+CLI_CONSOLE_LAUNCHER_OVERRIDE=""
 ENV_FILE=""
 CATALOG_FILE=""
 RECEIPT_DIR=""
@@ -135,6 +139,16 @@ while [[ $# -gt 0 ]]; do
                 echo "Option --console-dir requires a directory path"; exit 1
             fi
             CONSOLE_DIR="$2"; shift 2 ;;
+        --console-launcher)
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+                echo "Option --console-launcher requires a launcher path"; exit 1
+            fi
+            if [ -n "$CLI_CONSOLE_LAUNCHER_OVERRIDE" ] \
+                && [ "$CLI_CONSOLE_LAUNCHER_OVERRIDE" != "$2" ]; then
+                echo "Option --console-launcher is ambiguous when specified with different paths"
+                exit 1
+            fi
+            CLI_CONSOLE_LAUNCHER_OVERRIDE="$2"; shift 2 ;;
         --env-file)
             if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
                 echo "Option --env-file requires a file path"; exit 1
@@ -172,6 +186,21 @@ fi
 # Load current .env for FISCO config (node address, etc.)
 load_env_file "$ENV_FILE"
 
+if [ -n "${FISCO_CONSOLE_LAUNCHER:-}" ]; then
+    if [ -n "$ENV_CONSOLE_LAUNCHER_OVERRIDE" ] \
+        && [ "$ENV_CONSOLE_LAUNCHER_OVERRIDE" != "$FISCO_CONSOLE_LAUNCHER" ]; then
+        echo "FISCO_CONSOLE_LAUNCHER is ambiguous between the process environment and .env"
+        exit 1
+    fi
+    ENV_CONSOLE_LAUNCHER_OVERRIDE="$FISCO_CONSOLE_LAUNCHER"
+fi
+if [ -n "$CLI_CONSOLE_LAUNCHER_OVERRIDE" ] \
+    && [ -n "$ENV_CONSOLE_LAUNCHER_OVERRIDE" ] \
+    && [ "$CLI_CONSOLE_LAUNCHER_OVERRIDE" != "$ENV_CONSOLE_LAUNCHER_OVERRIDE" ]; then
+    echo "Console launcher override is ambiguous between CLI and environment configuration"
+    exit 1
+fi
+
 # Resolve the receipt directory after loading .env so operators can configure it there.
 if [ -z "$RECEIPT_DIR" ]; then
     RECEIPT_DIR="${CONTRACT_DEPLOYMENT_RECEIPT_DIR:-$PROJECT_ROOT/log/contract-deployments}"
@@ -208,6 +237,7 @@ STAGED_SOURCE_TEMP_DEVICE=""
 STAGED_SOURCE_TEMP_INODE=""
 REPRO_TEMP_ROOT="${TMPDIR:-/tmp}"
 FISCO_CRYPTO_VARIANT=""
+CONSOLE_LAUNCHER=""
 
 if command -v timeout >/dev/null 2>&1; then
     TIMEOUT_COMMAND="$(command -v timeout)"
@@ -222,6 +252,61 @@ FISCO_HOST="${FISCO_PEER_ADDRESS:-127.0.0.1:20200}"
 FISCO_NODE_HOST="${FISCO_HOST%%:*}"
 FISCO_NODE_PORT="${FISCO_HOST##*:}"
 
+# Resolve one safe interactive launcher before any Console command is executed.
+resolve_console_launcher() {
+    local override="${CLI_CONSOLE_LAUNCHER_OVERRIDE:-$ENV_CONSOLE_LAUNCHER_OVERRIDE}"
+    local candidate=""
+    local console_directory_physical=""
+    local candidate_directory_physical=""
+
+    if ! console_directory_physical=$(cd -P "$CONSOLE_DIR" 2>/dev/null && pwd); then
+        fail "Cannot resolve Console directory: $CONSOLE_DIR"
+        return 1
+    fi
+
+    if [ -n "$override" ]; then
+        case "$override" in
+            /*) candidate="$override" ;;
+            *) candidate="$CONSOLE_DIR/$override" ;;
+        esac
+    elif [ -e "$CONSOLE_DIR/start.sh" ] || [ -L "$CONSOLE_DIR/start.sh" ]; then
+        candidate="$CONSOLE_DIR/start.sh"
+    else
+        candidate="$CONSOLE_DIR/console.sh"
+    fi
+
+    case "${candidate##*/}" in
+        start.sh|console.sh) ;;
+        *)
+            fail "Console launcher must be named start.sh or console.sh: $candidate"
+            return 1
+            ;;
+    esac
+    if [ -L "$candidate" ]; then
+        fail "Console launcher must not be a symbolic link: $candidate"
+        return 1
+    fi
+    if [ ! -f "$candidate" ]; then
+        fail "Console launcher is not a regular file: $candidate"
+        return 1
+    fi
+    if [ ! -x "$candidate" ]; then
+        fail "Console launcher is not executable: $candidate"
+        return 1
+    fi
+    if ! candidate_directory_physical=$(cd -P "$(dirname "$candidate")" 2>/dev/null && pwd); then
+        fail "Cannot resolve Console launcher directory: $candidate"
+        return 1
+    fi
+    if [ "$candidate_directory_physical" != "$console_directory_physical" ]; then
+        fail "Console launcher must be located directly inside the Console directory: $candidate"
+        return 1
+    fi
+
+    CONSOLE_LAUNCHER="$candidate_directory_physical/${candidate##*/}"
+    ok "Interactive Console launcher resolved: ${candidate##*/}"
+}
+
 # 从官方 getGroupInfo JSON 输出中提取唯一的 chain/group/crypto/VM 组合。
 extract_fisco_chain_identity() {
     python3 -c '
@@ -232,30 +317,50 @@ import sys
 text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", sys.stdin.read())
 decoder = json.JSONDecoder()
 candidates = set()
+invalid_identity_metadata = False
 
 def collect(value):
+    global invalid_identity_metadata
     if isinstance(value, dict):
-        identity_fields = {"chainID", "groupID", "smCryptoType", "wasm"}
+        identity_fields = {"chainID", "groupID", "smCryptoType", "wasm", "isWasm"}
         if identity_fields.intersection(value):
             chain_id = value.get("chainID")
             group_id = value.get("groupID")
             sm_crypto = value.get("smCryptoType")
-            wasm = value.get("wasm")
+            has_legacy_wasm = "wasm" in value
+            has_current_wasm = "isWasm" in value
+            legacy_wasm = value.get("wasm")
+            current_wasm = value.get("isWasm")
+            wasm_aliases_valid = (
+                (has_legacy_wasm or has_current_wasm)
+                and (not has_legacy_wasm or isinstance(legacy_wasm, bool))
+                and (not has_current_wasm or isinstance(current_wasm, bool))
+                and not (
+                    has_legacy_wasm
+                    and has_current_wasm
+                    and legacy_wasm != current_wasm
+                )
+            )
             if (
                 isinstance(chain_id, str)
                 and isinstance(group_id, str)
                 and isinstance(sm_crypto, bool)
-                and isinstance(wasm, bool)
+                and wasm_aliases_valid
             ):
                 if chain_id and group_id and not any(
                     character.isspace() for character in chain_id + group_id
                 ):
+                    wasm = current_wasm if has_current_wasm else legacy_wasm
                     candidates.add((
                         chain_id,
                         group_id,
                         "sm" if sm_crypto else "ecc",
                         "wasm" if wasm else "evm",
                     ))
+                else:
+                    invalid_identity_metadata = True
+            elif (has_legacy_wasm or has_current_wasm) and not wasm_aliases_valid:
+                invalid_identity_metadata = True
         for nested in value.values():
             collect(nested)
     elif isinstance(value, list):
@@ -278,7 +383,7 @@ for index, character in enumerate(text):
         continue
     collect(value)
 
-if len(candidates) != 1:
+if invalid_identity_metadata or len(candidates) != 1:
     raise SystemExit(1)
 chain_id, group_id, crypto_variant, vm_type = next(iter(candidates))
 print(f"{chain_id}\t{group_id}\t{crypto_variant}\t{vm_type}")
@@ -409,12 +514,9 @@ else
     exit 1
 fi
 
-# 1b. console.sh is executable
-if [ -x "$CONSOLE_DIR/console.sh" ]; then
-    ok "console.sh is executable"
-else
-    fail "console.sh not found or not executable: $CONSOLE_DIR/console.sh"
-    info "Ensure FISCO BCOS console is correctly installed"
+# 1b. One safe interactive launcher is available
+if ! resolve_console_launcher; then
+    info "Install an executable regular start.sh, or use a legacy console.sh only when start.sh is absent"
     echo
     echo "${RED}${BOLD}Pre-flight failed — cannot continue.${RESET}"
     exit 1

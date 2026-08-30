@@ -93,6 +93,9 @@ class ContractDeployScriptTest(unittest.TestCase):
                 self.assertEqual(env_text.count(f"{key}="), 1)
 
             calls = fixture["call_log"].read_text(encoding="utf-8")
+            launcher_calls = fixture["launcher_log"].read_text(encoding="utf-8")
+            self.assertNotIn("console.sh", launcher_calls)
+            self.assertGreaterEqual(launcher_calls.count("start.sh"), 9)
             self.assertIn("getGroupInfo", calls)
             self.assertIn("deploy Storage", calls)
             self.assertIn("deploy Sharing", calls)
@@ -704,21 +707,166 @@ class ContractDeployScriptTest(unittest.TestCase):
 
     def test_wasm_group_is_rejected_before_compile_and_deployment(self) -> None:
         """EVM 制品部署工具不得在 FISCO WASM 群组上继续编译或链写。"""
+        for mode in ("current", "legacy", "both"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                listener, port = self._start_tcp_probe()
+                fixture = self._create_fixture(Path(directory), port=port)
+
+                result = self._run_script(
+                    fixture,
+                    extra_env={"FAKE_VM_FIELD_MODE": mode, "FAKE_WASM": "true"},
+                )
+                listener.join(timeout=5)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("WASM", result.stdout + result.stderr)
+                self.assertFalse(fixture["compiler_log"].exists())
+                calls = fixture["call_log"].read_text(encoding="utf-8")
+                self.assertNotIn("deploy ", calls)
+
+    def test_legacy_wasm_false_is_accepted(self) -> None:
+        """Legacy Console metadata may use the boolean wasm alias."""
         with tempfile.TemporaryDirectory() as temporary_directory:
             listener, port = self._start_tcp_probe()
             fixture = self._create_fixture(Path(temporary_directory), port=port)
 
             result = self._run_script(
                 fixture,
-                extra_env={"FAKE_WASM": "true"},
+                extra_env={"FAKE_VM_FIELD_MODE": "legacy"},
+            )
+            listener.join(timeout=5)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_equal_wasm_aliases_are_accepted(self) -> None:
+        """Current and legacy VM aliases may coexist only with equal booleans."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_VM_FIELD_MODE": "both"},
+            )
+            listener.join(timeout=5)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_conflicting_wasm_aliases_are_rejected_before_compile(self) -> None:
+        """Conflicting current and legacy aliases must fail closed."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_VM_FIELD_MODE": "conflict"},
             )
             listener.join(timeout=5)
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("WASM", result.stdout + result.stderr)
+            self.assertIn("did not return one valid", result.stdout + result.stderr)
             self.assertFalse(fixture["compiler_log"].exists())
-            calls = fixture["call_log"].read_text(encoding="utf-8")
-            self.assertNotIn("deploy ", calls)
+            self.assertNotIn(
+                "deploy ",
+                fixture["call_log"].read_text(encoding="utf-8"),
+            )
+
+    def test_wrong_type_wasm_alias_is_rejected_before_compile(self) -> None:
+        """String VM metadata must not be coerced into a boolean."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_VM_FIELD_MODE": "wrong-type"},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(fixture["compiler_log"].exists())
+
+    def test_missing_or_unknown_vm_alias_is_rejected_before_compile(self) -> None:
+        """Missing and unknown VM fields must not be inferred as EVM."""
+        for mode in ("missing", "unknown"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                listener, port = self._start_tcp_probe()
+                fixture = self._create_fixture(Path(directory), port=port)
+
+                result = self._run_script(
+                    fixture,
+                    extra_env={"FAKE_VM_FIELD_MODE": mode},
+                )
+                listener.join(timeout=5)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(fixture["compiler_log"].exists())
+
+    def test_legacy_console_launcher_is_used_only_when_start_is_absent(self) -> None:
+        """A legacy interactive console.sh remains a deterministic fallback."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            launcher_source = fixture["start_launcher"].read_bytes()
+            fixture["start_launcher"].unlink()
+            fixture["legacy_launcher"].write_bytes(launcher_source)
+            fixture["legacy_launcher"].chmod(0o755)
+
+            result = self._run_script(fixture)
+            listener.join(timeout=5)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            launcher_calls = fixture["launcher_log"].read_text(encoding="utf-8")
+            self.assertNotIn("start.sh", launcher_calls)
+            self.assertIn("console.sh", launcher_calls)
+
+    def test_invalid_console_launchers_fail_before_any_console_command(self) -> None:
+        """Unsafe, missing and non-executable launchers fail during preflight."""
+        cases = ("symlink", "directory", "missing", "non-executable", "outside")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                fixture = self._create_fixture(Path(directory), port=1)
+                start_launcher = fixture["start_launcher"]
+                arguments: tuple[str, ...] = ()
+                if case == "symlink":
+                    start_launcher.unlink()
+                    start_launcher.symlink_to(fixture["legacy_launcher"])
+                elif case == "directory":
+                    start_launcher.unlink()
+                    start_launcher.mkdir()
+                elif case == "missing":
+                    start_launcher.unlink()
+                    fixture["legacy_launcher"].unlink()
+                elif case == "non-executable":
+                    start_launcher.chmod(0o644)
+                else:
+                    outside = fixture["root"] / "start.sh"
+                    outside.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+                    outside.chmod(0o755)
+                    arguments = ("--console-launcher", str(outside))
+
+                result = self._run_script(fixture, *arguments)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(fixture["call_log"].exists())
+                self.assertFalse(fixture["launcher_log"].exists())
+
+    def test_ambiguous_console_launcher_overrides_are_rejected(self) -> None:
+        """Conflicting CLI and environment launcher selections fail closed."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            fixture = self._create_fixture(Path(temporary_directory), port=1)
+
+            result = self._run_script(
+                fixture,
+                "--console-launcher",
+                "start.sh",
+                extra_env={"FISCO_CONSOLE_LAUNCHER": "console.sh"},
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("ambiguous", result.stdout + result.stderr)
+            self.assertFalse(fixture["call_log"].exists())
 
     def test_empty_runtime_code_blocks_activation(self) -> None:
         """部署后任一地址无 runtime code 时必须失败且不得激活半成品配置。"""
@@ -908,6 +1056,7 @@ class ContractDeployScriptTest(unittest.TestCase):
         console_dir.mkdir(parents=True)
         bin_dir.mkdir(parents=True)
         call_log = root / "console-calls.log"
+        launcher_log = root / "console-launchers.log"
         compiler_log = root / "compiler-calls.log"
         artifact_compiler_log = root / "artifact-compiler-calls.log"
         date_log = root / "date-calls.log"
@@ -999,18 +1148,54 @@ done
 """,
             )
         self._write_executable(
-            console_dir / "console.sh",
+            console_dir / "start.sh",
             f"""#!/usr/bin/env bash
 set -euo pipefail
+printf '%s\n' "$(basename "$0")" >> "$FAKE_LAUNCHER_LOG"
 input="$(cat)"
 printf '%s\n---\n' "$input" >> "$FAKE_CALL_LOG"
 print_group_info() {{
     if [[ "${{FAKE_GROUP_INFO_MALFORMED:-}}" == "1" ]]; then
         printf '{{"chainID":"chain0"\n'
     else
-        printf '{{"chainID":"%s","groupID":"%s","wasm":%s,"smCryptoType":%s,"nodeList":[]}}\n' \
-            "${{FAKE_CHAIN_ID:-chain0}}" "${{FAKE_GROUP_ID:-group0}}" \
-            "${{FAKE_WASM:-false}}" "${{FAKE_SM_CRYPTO_TYPE:-false}}"
+        prefix='{{"chainID":"%s","groupID":"%s","smCryptoType":%s'
+        case "${{FAKE_VM_FIELD_MODE:-current}}" in
+            current)
+                suffix=',"isWasm":%s,"nodeList":[]}}\n'
+                ;;
+            legacy)
+                suffix=',"wasm":%s,"nodeList":[]}}\n'
+                ;;
+            both)
+                suffix=',"isWasm":%s,"wasm":%s,"nodeList":[]}}\n'
+                ;;
+            conflict)
+                suffix=',"isWasm":false,"wasm":true,"nodeList":[]}}\n'
+                ;;
+            wrong-type)
+                suffix=',"isWasm":"false","nodeList":[]}}\n'
+                ;;
+            missing)
+                suffix=',"nodeList":[]}}\n'
+                ;;
+            unknown)
+                suffix=',"vmType":"EVM","nodeList":[]}}\n'
+                ;;
+            *)
+                printf 'unsupported fake VM field mode\n' >&2
+                return 2
+                ;;
+        esac
+        printf "$prefix" "${{FAKE_CHAIN_ID:-chain0}}" \
+            "${{FAKE_GROUP_ID:-group0}}" "${{FAKE_SM_CRYPTO_TYPE:-false}}"
+        if [[ "${{FAKE_VM_FIELD_MODE:-current}}" == "both" ]]; then
+            printf "$suffix" "${{FAKE_WASM:-false}}" "${{FAKE_WASM:-false}}"
+        elif [[ "${{FAKE_VM_FIELD_MODE:-current}}" == "current" \
+            || "${{FAKE_VM_FIELD_MODE:-current}}" == "legacy" ]]; then
+            printf "$suffix" "${{FAKE_WASM:-false}}"
+        else
+            printf "$suffix"
+        fi
     fi
 }}
 print_receipt() {{
@@ -1141,6 +1326,19 @@ esac
 """,
         )
         self._write_executable(
+            console_dir / "console.sh",
+            """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$(basename "$0")" >> "$FAKE_LAUNCHER_LOG"
+if [[ $# -eq 0 ]]; then
+    printf 'non-interactive console requires command arguments\n' >&2
+    exit 2
+fi
+printf 'unsupported fake non-interactive command\n' >&2
+exit 2
+""",
+        )
+        self._write_executable(
             bin_dir / "timeout",
             """#!/usr/bin/env bash
 set -euo pipefail
@@ -1219,6 +1417,9 @@ printf '{FIXED_EFFECTIVE_AT}\n'
             "console_dir": console_dir,
             "bin_dir": bin_dir,
             "call_log": call_log,
+            "launcher_log": launcher_log,
+            "start_launcher": console_dir / "start.sh",
+            "legacy_launcher": console_dir / "console.sh",
             "compiler_log": compiler_log,
             "artifact_compiler_log": artifact_compiler_log,
             "date_log": date_log,
@@ -1239,6 +1440,7 @@ printf '{FIXED_EFFECTIVE_AT}\n'
             "NO_COLOR": "1",
             "FAKE_PROJECT_ROOT": str(PROJECT_ROOT),
             "FAKE_CALL_LOG": str(fixture["call_log"]),
+            "FAKE_LAUNCHER_LOG": str(fixture["launcher_log"]),
             "FAKE_COMPILER_LOG": str(fixture["compiler_log"]),
             "FAKE_ARTIFACT_COMPILER_LOG": str(fixture["artifact_compiler_log"]),
             "FAKE_DATE_LOG": str(fixture["date_log"]),
