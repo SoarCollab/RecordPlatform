@@ -19,6 +19,67 @@ permissions:
   security-events: write
 
 jobs:
+  exact-toolchain-reproduction:
+    name: Exact FISCO Solc Reproduction
+    runs-on: ubuntu-latest
+    container:
+      image: buildpack-deps:focal@sha256:2de32588f72f63229c83e3f08529cc15db231b2d95412ab4c30ad49d7cd99591
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install pinned-platform build tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates cmake git python3
+          cmake --version
+          c++ --version
+
+      - name: Provision exact ECC and GM compilers
+        run: |
+          python3 tools/contracts/provision_fisco_solc.py \
+            --cache-dir "$RUNNER_TEMP/fisco-solc" provision
+          python3 tools/contracts/provision_fisco_solc.py \
+            --cache-dir "$RUNNER_TEMP/fisco-solc" verify
+
+      - name: Reproduce every signed contract artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit=6b4cc280eb884f1852e1ddf12aeea56a2103148c
+          for variant in ecc sm; do
+            compiler="$RUNNER_TEMP/fisco-solc/$commit/$variant/solc"
+            output="$RUNNER_TEMP/artifacts-$variant"
+            mkdir -p "$output"
+            (
+              cd platform-fisco/contract
+              "$compiler" \
+                --base-path . \
+                --include-path . \
+                --evm-version london \
+                --metadata-hash ipfs \
+                --abi \
+                --bin \
+                --bin-runtime \
+                --metadata \
+                --overwrite \
+                -o "$output" \
+                Storage.sol Sharing.sol
+            )
+            for contract in Storage Sharing; do
+              python3 tools/contracts/contract_fingerprint.py compare-abi \
+                --expected "platform-fisco/src/main/resources/abi/$contract.abi" \
+                --actual "$output/$contract.abi"
+              python3 tools/contracts/contract_fingerprint.py compare-bytecode \
+                --expected "platform-fisco/src/main/resources/bin/$variant/$contract.bin" \
+                --actual "$output/$contract.bin"
+              python3 tools/contracts/contract_fingerprint.py compare-bytecode \
+                --expected "platform-fisco/src/main/resources/bin/runtime/$variant/$contract.bin" \
+                --actual "$output/$contract.bin-runtime"
+            done
+          done
+
   artifact-integrity:
     name: Contract Artifact Integrity
     runs-on: ubuntu-latest

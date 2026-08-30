@@ -74,6 +74,8 @@ S3 兼容存储通过 Nacos 配置。基本环境变量：
 | `FISCO_{STORAGE,SHARING}_DEPLOYMENT_BLOCK` | 必填部署区块号，必须来自同一成功回执 | 非负十进制整数 |
 | `FISCO_{STORAGE,SHARING}_DEPLOYMENT_EFFECTIVE_AT` | 必填实际激活时间，与交易/区块一起配置 | UTC `YYYY-MM-DDTHH:MM:SSZ` |
 | `CONTRACT_DEPLOYMENT_RECEIPT_DIR` | 保存公开部署审计回执的持久化受限目录 | 本地开发使用 `log/contract-deployments` |
+| `FISCO_SOLC_CACHE_DIR` | 受门禁部署使用的独立 exact compiler verified cache | 合约部署时必填 |
+| `FISCO_ECC_SOLC` / `FISCO_SM_SOLC` | 可选显式编译器路径；必须位于 verified cache release 内 | 留空时从 cache 解析 |
 
 `scripts/contract-deploy.sh` 要求显式配置本地 chain/group，并在编译及每笔部署前与 Console `getGroupInfo` 完全对账。脚本在同一个 Console 会话中查询每笔交易回执和 `getGroupInfo`，要求 FISCO 显式成功状态 `0`，最终 transaction/address/block 全部取自该同一回执。两个合约的三项部署证据均为必填；legacy 整组空值现在会阻止服务启动。经审查的 BSN 部署沿用这些变量名，启动时由所选 BSN FISCO 或 Besu 客户端重新验证（Besu 必须显式为状态 `1`）。门禁脚本用同一个生效时间原子写回两个三元组，并先发布不含凭据的结构化回执；生产环境应把回执目录放在非临时应用存储之外。`env-check.sh` 只校验格式，最终必须重启 `platform-fisco` 执行活动链回执、runtime code 和身份核验。
 

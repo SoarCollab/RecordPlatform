@@ -167,7 +167,7 @@ python3 tools/contracts/contract_fingerprint.py verify \
 
 激活成功会同时写入 `FISCO_STORAGE_CONTRACT`、`FISCO_SHARING_CONTRACT`，以及两个合约各自完整的 `FISCO_*_DEPLOYMENT_TX`、`FISCO_*_DEPLOYMENT_BLOCK`、`FISCO_*_DEPLOYMENT_EFFECTIVE_AT` 三元组；两者共用同一个 UTC 生效时间。激活前会原子发布 `record-platform-contract-deployment-receipt.v2` JSON 回执，记录 catalog SHA-256、`LOCAL_FISCO` chain/group 身份、每个合约的 `receiptStatus=SUCCESS`，以及公开的名称/版本/地址/交易/区块证据。每组 tx/address/block 都来自同一成功回执，绝不记录 RPC URL、证书、私钥或令牌；历史 `v1` 回执只继续作为旧审计记录。
 
-禁止只复制一个地址、整组留空或只配置证据三元组的一部分。chain/group 错误、WASM/crypto 组合不受支持、回执缺失/失败/歧义、交易/地址/区块不一致、catalog 身份不一致、solc 产物漂移、runtime code 缺失或与实际 ECC/SM 变体的签入 runtime 不一致、身份调用非零/revert、响应解析错误或回执写入失败时，原 `.env` 保持不变。Dry-run 不调用 Console、不生成生效时间或回执，也不修改文件或链状态。Console 的 `contract2java.sh` 必须支持 `-v 0.8.11`，并能提供 `$HOME/.fisco/solc/0.8.11/{keccak256,sm3}/solc`；任何 ABI、creation 或 runtime 不一致都会在第一笔部署交易前被阻断。
+禁止只复制一个地址、整组留空或只配置证据三元组的一部分。chain/group 错误、WASM/crypto 组合不受支持、回执缺失/失败/歧义、交易/地址/区块不一致、catalog 身份不一致、solc 产物漂移、runtime code 缺失或与实际 ECC/SM 变体的签入 runtime 不一致、身份调用非零/revert、响应解析错误或回执写入失败时，原 `.env` 保持不变。Dry-run 不调用 Console、不生成生效时间或回执，也不修改文件或链状态。必须先用 `tools/contracts/provision_fisco_solc.py` 显式构建 ECC/GM 编译器、设置 `FISCO_SOLC_CACHE_DIR` 并离线重验 cache；部署命令不会下载编译器代码，也拒绝 Console 共享编译器缓存。任何 provenance、ABI、creation 或 runtime 不一致都会在第一笔部署交易前被阻断。
 
 `./scripts/env-check.sh --service contracts` 只检查必填字段格式。最终必须重启 `platform-fisco`：服务启动时通过所选活动链客户端查询每份回执，要求 FISCO 状态 `0` 或 Besu 状态 `1`，逐项核对 tx/address/block；RPC 或任一字段失败时不会发布任何 `ACTIVE` registry。旧环境若证据为空，必须取得真实回执或重新部署，禁止填写占位值。回滚时应整体恢复上一版已审查的 catalog、两个地址和两组真实三元组后重启；任一回执无法在配置 chain/group 上重新证明时，应保持服务停止并重新部署，不得绕过校验。
 

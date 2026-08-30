@@ -219,15 +219,65 @@ CONTRACT_SRC_DIR="$PROJECT_ROOT/platform-fisco/contract"
 ABI_DEST_DIR="$PROJECT_ROOT/platform-fisco/src/main/resources/abi"
 BIN_DEST_DIR="$PROJECT_ROOT/platform-fisco/src/main/resources/bin"
 FINGERPRINT_TOOL="$PROJECT_ROOT/tools/contracts/contract_fingerprint.py"
+SOLC_PROVISION_TOOL="$PROJECT_ROOT/tools/contracts/provision_fisco_solc.py"
+SOLC_TOOLCHAIN_MANIFEST="${FISCO_SOLC_TOOLCHAIN_MANIFEST:-$PROJECT_ROOT/tools/contracts/fisco-solc-toolchains.json}"
 SOLC_VERSION="0.8.11"
 SOLC_BUILD_ID="0.8.11+commit.6b4cc280"
 CONSOLE_CONTRACT_DIR="$CONSOLE_DIR/contracts/solidity"
 CONSOLE_SDK_DIR="$CONSOLE_DIR/contracts/sdk"
-ECC_SOLC="$HOME/.fisco/solc/$SOLC_VERSION/keccak256/solc"
-SM_SOLC="$HOME/.fisco/solc/$SOLC_VERSION/sm3/solc"
+SOLC_CACHE_DIR="${FISCO_SOLC_CACHE_DIR:-$HOME/.cache/record-platform/fisco-solc}"
+ECC_SOLC="${FISCO_ECC_SOLC:-}"
+SM_SOLC="${FISCO_SM_SOLC:-}"
 REPRO_BUILD_DIR=""
 ECC_REPRO_BUILD_DIR=""
 SM_REPRO_BUILD_DIR=""
+
+# Resolve compilers only through the reviewed manifest and verified cache metadata.
+resolve_exact_solc_toolchain() {
+    local variant
+    local configured_path
+    local resolved_path
+    if [ ! -f "$SOLC_PROVISION_TOOL" ] || [ -L "$SOLC_PROVISION_TOOL" ]; then
+        fail "Exact FISCO solc provisioner is missing or unsafe: $SOLC_PROVISION_TOOL"
+        return 1
+    fi
+    if [ ! -f "$SOLC_TOOLCHAIN_MANIFEST" ] || [ -L "$SOLC_TOOLCHAIN_MANIFEST" ]; then
+        fail "Exact FISCO solc manifest is missing or unsafe: $SOLC_TOOLCHAIN_MANIFEST"
+        return 1
+    fi
+    for variant in ecc sm; do
+        configured_path=""
+        if [ "$variant" = "ecc" ]; then
+            configured_path="$ECC_SOLC"
+        else
+            configured_path="$SM_SOLC"
+        fi
+        local command=(python3 "$SOLC_PROVISION_TOOL" \
+            --manifest "$SOLC_TOOLCHAIN_MANIFEST" \
+            --cache-dir "$SOLC_CACHE_DIR" resolve --variant "$variant")
+        if [ -n "$configured_path" ]; then
+            command=(python3 "$SOLC_PROVISION_TOOL" \
+                --manifest "$SOLC_TOOLCHAIN_MANIFEST" \
+                --cache-dir "$SOLC_CACHE_DIR" verify \
+                --variant "$variant" --compiler "$configured_path")
+            if ! "${command[@]}" >/dev/null; then
+                fail "Explicit FISCO $variant compiler is not part of the verified cache"
+                return 1
+            fi
+            resolved_path="$configured_path"
+        elif ! resolved_path=$("${command[@]}"); then
+            fail "Verified FISCO $variant compiler is unavailable"
+            info "Provision explicitly with tools/contracts/provision_fisco_solc.py; deployment never downloads compilers"
+            return 1
+        fi
+        if [ "$variant" = "ecc" ]; then
+            ECC_SOLC="$resolved_path"
+        else
+            SM_SOLC="$resolved_path"
+        fi
+    done
+    ok "Exact ECC/SM FISCO solc toolchain verified from explicit cache"
+}
 STAGED_SOURCE_TEMP=""
 STAGED_SOURCE_DIRECTORY=""
 STAGED_SOURCE_DIRECTORY_DEVICE=""
@@ -535,11 +585,6 @@ if [ -n "$TIMEOUT_COMMAND" ]; then
 else
     fail "Neither timeout nor gtimeout is available"
 fi
-if [ -f "$CONSOLE_DIR/contract2java.sh" ]; then
-    ok "contract2java.sh found"
-else
-    fail "contract2java.sh not found: $CONSOLE_DIR/contract2java.sh"
-fi
 if [ -f "$FINGERPRINT_TOOL" ] && [ -f "$CATALOG_FILE" ]; then
     if python3 "$FINGERPRINT_TOOL" verify \
         --project-root "$PROJECT_ROOT" \
@@ -550,6 +595,9 @@ if [ -f "$FINGERPRINT_TOOL" ] && [ -f "$CATALOG_FILE" ]; then
     fi
 else
     fail "Fingerprint tool or artifact catalog is missing"
+fi
+if ! resolve_exact_solc_toolchain; then
+    fail "Exact FISCO solc toolchain verification failed"
 fi
 
 if [ $FAILURES -gt 0 ]; then
@@ -610,55 +658,6 @@ fi
 # Phase 2: Compile Contracts
 # ==============================================================================
 section 2 "Compile Contracts"
-
-# 在 FISCO Console 目录中按 ABI/ECC/SM 精确定位编译产物，禁止跨变体回退。
-find_console_artifact() {
-    local kind="$1"
-    local variant="$2"
-    local name="$3"
-    local candidate
-    local candidates=()
-    if [ "$kind" = "abi" ]; then
-        candidates=(
-            "$CONSOLE_SDK_DIR/abi/$name.abi"
-            "$CONSOLE_SDK_DIR/abi/sm/$name.abi"
-            "$CONSOLE_SDK_DIR/$name.abi"
-        )
-    elif [ "$variant" = "ecc" ]; then
-        candidates=(
-            "$CONSOLE_SDK_DIR/bin/$name.bin"
-            "$CONSOLE_SDK_DIR/$name.bin"
-        )
-    elif [ "$variant" = "sm" ]; then
-        candidates=(
-            "$CONSOLE_SDK_DIR/bin/sm/$name.bin"
-            "$CONSOLE_SDK_DIR/sm/$name.bin"
-        )
-    else
-        return 1
-    fi
-    for candidate in "${candidates[@]}"; do
-        if [ -s "$candidate" ] && [ ! -L "$candidate" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
-
-# 校验固定输出目录中的 Console artifact 确实由本次编译刷新。
-artifact_is_fresh() {
-    local artifact_path="$1"
-    local started_at_ns="$2"
-    python3 - "$artifact_path" "$started_at_ns" <<'PY'
-import pathlib
-import sys
-
-artifact = pathlib.Path(sys.argv[1])
-started_at_ns = int(sys.argv[2])
-raise SystemExit(0 if artifact.stat().st_mtime_ns >= started_at_ns else 1)
-PY
-}
 
 # 拒绝 Console 固定源码、输出目录或候选 artifact 通过符号链接重定向写入。
 validate_console_compile_paths() {
@@ -971,71 +970,6 @@ stage_contract_source() {
     fi
 }
 
-# 复制指定源码，调用 Console 生成 wrapper，并返回 ABI/ECC/SM creation 路径。
-compile_contract() {
-    local name="$1"
-    local abi_result_var="$2"
-    local ecc_result_var="$3"
-    local sm_result_var="$4"
-    if [ "$DRY_RUN" = true ]; then
-        dry "copy $name.sol to $CONSOLE_CONTRACT_DIR and run contract2java.sh -v $SOLC_VERSION"
-        ok "Dry-run: $name compile would be executed"
-        return 0
-    fi
-
-    if ! stage_contract_source "$name"; then
-        return 1
-    fi
-
-    local output
-    local compile_started_at
-    compile_started_at=$(python3 -c 'import time; print(time.time_ns())')
-    if ! output=$(
-        cd "$CONSOLE_DIR"
-        bash ./contract2java.sh solidity \
-            -v "$SOLC_VERSION" \
-            -p cn.flying.contract.registry \
-            -s "contracts/solidity/$name.sol" 2>&1
-    ); then
-        fail "$name compilation failed"
-        printf '%s\n' "$output" | tail -20 | sed 's/^/    /'
-        return 1
-    fi
-    if ! validate_console_compile_paths "$name"; then
-        return 1
-    fi
-
-    local abi_path
-    local ecc_path
-    local sm_path
-    if ! abi_path=$(find_console_artifact abi any "$name"); then
-        fail "$name compilation did not produce an ABI artifact"
-        return 1
-    fi
-    if ! ecc_path=$(find_console_artifact creation ecc "$name"); then
-        fail "$name compilation did not produce an ECC creation artifact"
-        return 1
-    fi
-    if ! sm_path=$(find_console_artifact creation sm "$name"); then
-        fail "$name compilation did not produce an independent SM creation artifact"
-        return 1
-    fi
-    for artifact_path in "$abi_path" "$ecc_path" "$sm_path"; do
-        if ! artifact_is_fresh "$artifact_path" "$compile_started_at"; then
-            fail "$name compilation left a stale artifact: $artifact_path"
-            return 1
-        fi
-    done
-    if [ "$ecc_path" = "$sm_path" ]; then
-        fail "$name ECC and SM creation artifacts must use distinct paths"
-        return 1
-    fi
-    printf -v "$abi_result_var" '%s' "$abi_path"
-    printf -v "$ecc_result_var" '%s' "$ecc_path"
-    printf -v "$sm_result_var" '%s' "$sm_path"
-    ok "$name compiled to ABI plus independent ECC/SM creation artifacts"
-}
-
 # 安全删除本次系统临时目录；只允许固定前缀的直属目录，绝不跟随 symlink。
 cleanup_reproducible_build_directory() {
     if [ -z "$REPRO_BUILD_DIR" ]; then
@@ -1186,7 +1120,14 @@ compile_reproducible_variant() {
         return 0
     fi
     if [ ! -x "$compiler" ]; then
-        fail "FISCO $variant solc not found after Console compilation: $compiler"
+        fail "Verified FISCO $variant solc is unavailable: $compiler"
+        return 1
+    fi
+    if ! python3 "$SOLC_PROVISION_TOOL" \
+        --manifest "$SOLC_TOOLCHAIN_MANIFEST" \
+        --cache-dir "$SOLC_CACHE_DIR" verify \
+        --variant "$variant" --compiler "$compiler" >/dev/null; then
+        fail "FISCO $variant solc provenance changed before compilation"
         return 1
     fi
     local version_output
@@ -1218,7 +1159,8 @@ compile_reproducible_variant() {
     fi
     for name in Storage Sharing; do
         for suffix in abi bin bin-runtime; do
-            if [ ! -s "$output_dir/$name.$suffix" ]; then
+            if [ ! -s "$output_dir/$name.$suffix" ] \
+                || [ -L "$output_dir/$name.$suffix" ]; then
                 fail "FISCO $variant compiler did not produce $name.$suffix"
                 return 1
             fi
@@ -1227,21 +1169,6 @@ compile_reproducible_variant() {
     ok "FISCO $variant reproducible creation/runtime artifacts generated"
 }
 
-STORAGE_COMPILED_ABI=""
-STORAGE_COMPILED_ECC=""
-STORAGE_COMPILED_SM=""
-SHARING_COMPILED_ABI=""
-SHARING_COMPILED_ECC=""
-SHARING_COMPILED_SM=""
-
-if ! compile_contract "Storage" STORAGE_COMPILED_ABI \
-    STORAGE_COMPILED_ECC STORAGE_COMPILED_SM; then
-    exit 1
-fi
-if ! compile_contract "Sharing" SHARING_COMPILED_ABI \
-    SHARING_COMPILED_ECC SHARING_COMPILED_SM; then
-    exit 1
-fi
 if ! prepare_reproducible_build_directory; then
     exit 1
 fi
@@ -1251,6 +1178,13 @@ fi
 if ! compile_reproducible_variant sm; then
     exit 1
 fi
+
+STORAGE_COMPILED_ABI="$ECC_REPRO_BUILD_DIR/Storage.abi"
+STORAGE_COMPILED_ECC="$ECC_REPRO_BUILD_DIR/Storage.bin"
+STORAGE_COMPILED_SM="$SM_REPRO_BUILD_DIR/Storage.bin"
+SHARING_COMPILED_ABI="$ECC_REPRO_BUILD_DIR/Sharing.abi"
+SHARING_COMPILED_ECC="$ECC_REPRO_BUILD_DIR/Sharing.bin"
+SHARING_COMPILED_SM="$SM_REPRO_BUILD_DIR/Sharing.bin"
 
 # ==============================================================================
 # Phase 3: Artifact Verification
@@ -1449,6 +1383,91 @@ print(f"{address}\t{transaction_hash}")
 }
 
 # 每笔链写紧前重新核验 catalog、staged source 与 Console ABI/ECC/SM creation。
+stage_verified_console_artifacts() {
+    local name="$1"
+    local compiled_abi="$2"
+    local compiled_ecc="$3"
+    local compiled_sm="$4"
+    if ! stage_contract_source "$name"; then
+        return 1
+    fi
+    mkdir -p "$CONSOLE_SDK_DIR/abi" "$CONSOLE_SDK_DIR/bin/sm"
+    if ! validate_console_compile_paths "$name"; then
+        return 1
+    fi
+    if ! python3 - \
+        "$compiled_abi" "$CONSOLE_SDK_DIR/abi/$name.abi" \
+        "$compiled_ecc" "$CONSOLE_SDK_DIR/bin/$name.bin" \
+        "$compiled_sm" "$CONSOLE_SDK_DIR/bin/sm/$name.bin" <<'PY'
+import os
+import secrets
+import stat
+import sys
+from pathlib import Path
+
+pairs = zip(sys.argv[1::2], sys.argv[2::2])
+for source_text, target_text in pairs:
+    source = Path(source_text)
+    target = Path(target_text)
+    source_fd = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        source_stat = os.fstat(source_fd)
+        if not stat.S_ISREG(source_stat.st_mode):
+            raise SystemExit(1)
+        source_bytes = bytearray()
+        while True:
+            chunk = os.read(source_fd, 64 * 1024)
+            if not chunk:
+                break
+            source_bytes.extend(chunk)
+    finally:
+        os.close(source_fd)
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+    directory_fd = os.open(target.parent, directory_flags)
+    temporary_name = f".{target.name}.{secrets.token_hex(8)}"
+    try:
+        try:
+            target_stat = os.stat(target.name, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            target_stat = None
+        if target_stat is not None and not stat.S_ISREG(target_stat.st_mode):
+            raise SystemExit(1)
+        temporary_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        temporary_flags |= getattr(os, "O_NOFOLLOW", 0)
+        temporary_fd = os.open(temporary_name, temporary_flags, 0o600, dir_fd=directory_fd)
+        try:
+            written = 0
+            while written < len(source_bytes):
+                count = os.write(temporary_fd, source_bytes[written:])
+                if count <= 0:
+                    raise SystemExit(1)
+                written += count
+            os.fsync(temporary_fd)
+        finally:
+            os.close(temporary_fd)
+        os.replace(
+            temporary_name,
+            target.name,
+            src_dir_fd=directory_fd,
+            dst_dir_fd=directory_fd,
+        )
+    finally:
+        try:
+            os.unlink(temporary_name, dir_fd=directory_fd)
+        except FileNotFoundError:
+            pass
+        os.close(directory_fd)
+    if target.is_symlink() or target.read_bytes() != source_bytes:
+        raise SystemExit(1)
+PY
+    then
+        fail "$name verified artifacts could not be atomically staged into Console"
+        return 1
+    fi
+    ok "$name verified ABI and ECC/SM creation artifacts staged into Console"
+}
+
 revalidate_contract_deploy_inputs() {
     local name="$1"
     local compiled_abi="$2"
@@ -1501,6 +1520,12 @@ revalidate_contract_deploy_inputs() {
         --expected "$BIN_DEST_DIR/sm/$name.bin" \
         --actual "$compiled_sm"; then
         fail "$name Console SM creation changed after artifact verification"
+        return 1
+    fi
+    if ! cmp -s "$compiled_abi" "$CONSOLE_SDK_DIR/abi/$name.abi" \
+        || ! cmp -s "$compiled_ecc" "$CONSOLE_SDK_DIR/bin/$name.bin" \
+        || ! cmp -s "$compiled_sm" "$CONSOLE_SDK_DIR/bin/sm/$name.bin"; then
+        fail "$name staged Console artifacts changed before deployment"
         return 1
     fi
     ok "$name deploy inputs revalidated immediately before $crypto_variant chain write"
@@ -1631,13 +1656,17 @@ deploy_contract() {
         return 0
     fi
 
+    if ! verify_fisco_chain_identity; then
+        fail "$name chain/group context changed before deployment"
+        return 1
+    fi
+    if ! stage_verified_console_artifacts \
+        "$name" "$compiled_abi" "$compiled_ecc" "$compiled_sm"; then
+        return 1
+    fi
     if ! revalidate_contract_deploy_inputs \
         "$name" "$compiled_abi" "$compiled_ecc" "$compiled_sm" \
         "$FISCO_CRYPTO_VARIANT"; then
-        return 1
-    fi
-    if ! verify_fisco_chain_identity; then
-        fail "$name chain/group context changed before deployment"
         return 1
     fi
 

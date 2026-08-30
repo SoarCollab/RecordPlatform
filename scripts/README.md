@@ -101,15 +101,25 @@ SW_AGENT_COLLECTOR_BACKEND_SERVICES=127.0.0.1:11800
 
 - FISCO BCOS 控制台已安装（默认路径 `~/fisco/console`）
 - FISCO BCOS 节点已启动且可达；`.env` 必须显式配置 `FISCO_PEER_ADDRESS`、`FISCO_CHAIN_ID` 和 `FISCO_GROUP_ID`
-- 控制台包含支持 `-v 0.8.11` 的 `contract2java.sh`，且 `$HOME/.fisco/solc/0.8.11/keccak256/solc` 与 `$HOME/.fisco/solc/0.8.11/sm3/solc` 两套官方编译器可执行；系统已安装 `python3` 以及 `timeout`（macOS 可使用 `gtimeout`）
+- 已在受支持的 Linux x86_64 builder 中显式运行 `tools/contracts/provision_fisco_solc.py`，并把 ECC/GM 编译器原子发布到独立 verified cache；部署不会下载、构建或信任 Console 的共享 `$HOME/.fisco` 缓存
+- 系统已安装 `python3` 以及 `timeout`
 - `.env` 已存在且不是符号链接；正常部署仅在全部链上检查通过后替换它
 - `CONTRACT_DEPLOYMENT_RECEIPT_DIR` 指向持久化、受限访问的非符号链接目录；默认使用仓库内已忽略的 `log/contract-deployments`
 
 ### 使用示例
 
 ```bash
+# 在 exact FISCO Solidity checkout 上显式构建并发布两套编译器；构建严格串行
+python3 tools/contracts/provision_fisco_solc.py \
+  --cache-dir /var/lib/record-platform/fisco-solc \
+  provision --source-dir /path/to/FISCO-BCOS-solidity
+
+# 离线重验现有 cache，不下载或构建任何代码
+python3 tools/contracts/provision_fisco_solc.py \
+  --cache-dir /var/lib/record-platform/fisco-solc verify
+
 # 完整部署流程（使用默认控制台路径）
-./scripts/contract-deploy.sh
+FISCO_SOLC_CACHE_DIR=/var/lib/record-platform/fisco-solc ./scripts/contract-deploy.sh
 
 # 指定自定义控制台目录
 ./scripts/contract-deploy.sh --console-dir /opt/fisco/console
@@ -145,14 +155,14 @@ SW_AGENT_COLLECTOR_BACKEND_SERVICES=127.0.0.1:11800
 
 该脚本只负责 `BLOCKCHAIN_ACTIVE=local-fisco`；配置为 `bsn-fisco` 或 `bsn-besu` 时会在 Console 查询前拒绝执行，BSN 部署必须使用对应网络的受审查发布流程。
 
-当前签入的 `Storage`/`Sharing` ABI、ECC/SM creation bytecode 与 ECC/SM deployed runtime bytecode 由 FISCO solc `0.8.11+commit.6b4cc280` 生成。构建画像固定为 EVM London、optimizer disabled、metadata IPFS；脚本既校验 Console `-v 0.8.11` 生成的两套 creation 制品，也用 Console 缓存的 keccak256/sm3 官方编译器在不可预测的系统临时目录中独立重建 creation/runtime，退出时安全清理。Console 源码使用同目录私有临时文件原子替换，失败退出时也会受限清理；源码/制品路径不得为符号链接，每笔部署交易前会再次核验 catalog、staged source、ABI 与两套 creation；任何缺失、替换、变体回退或字节漂移都会在对应链写之前失败。
+当前签入的 `Storage`/`Sharing` ABI、ECC/SM creation bytecode 与 ECC/SM deployed runtime bytecode 由 FISCO solc `0.8.11+commit.6b4cc280` 生成。manifest 固定完整源码提交、release marker、Linux x86_64 builder 证据、上游构建依赖归档 URL/SHA、ECC/GM 模式、版本行和已验证 executable SHA-256。provisioner 从 exact Git commit 导出隔离源码，写入上游正式 release source 使用的空 `prerelease.txt` 与 `commit_hash.txt`，先下载并验证固定依赖归档，再串行构建两套编译器；只有来源、依赖、平台、版本、普通文件、非符号链接和 SHA 全部通过后才原子发布完整 cache。部署只离线重验该 cache，然后以 EVM London、optimizer disabled、metadata IPFS 直接生成 ABI/creation/runtime；验证后的 ABI 与两套 creation 在每笔链写前原子 staging 到 Console。任何 provenance、版本、路径、替换、ABI 或完整 bytecode 漂移都会在对应链写之前失败。
 
 ### 执行阶段
 
 | 阶段 | 说明 |
 | ---- | ---- |
 | 1. Pre-flight  | 校验工具、catalog/源码/ABI/creation/runtime、控制台、激活文件、节点连通性，并用 `getGroupInfo` 严格对账 chain/group/crypto/VM |
-| 2. Compile     | 用官方 `contract2java.sh` 生成 ABI 与 ECC/SM creation，并用固定 keccak256/sm3 solc 重建 creation/runtime |
+| 2. Compile     | 用 verified cache 中的固定 ECC/GM solc 直接生成 ABI、creation 与 runtime，不调用 `contract2java -v` |
 | 3. Artifact Verification | canonical 比对 ABI，并按 decoded bytes 比对 ECC/SM creation/runtime bytecode |
 | 4. Deploy      | 顺序部署双合约；每笔链写前重验 chain/group，随后从同一上下文中的唯一成功结构化回执取得并交叉核对 tx/address/block |
 | 5. On-chain Verification | 对两个地址先执行 `getCode` 并匹配节点实际 crypto 变体的完整 runtime，再执行 `contractIdentity()` 核对 catalog 名称/版本，任一失败即停止 |

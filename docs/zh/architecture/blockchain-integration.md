@@ -126,7 +126,7 @@ ABI 使用 `ABI-CANONICAL-JSON-SHA256-V1`：移除 `internalType`，排序 objec
 合约升级固定采用 `REDEPLOY_ADDRESS`，不假设 proxy 行为。
 
 1. 将经审查的源码、ABI、ECC/SM creation/runtime bytecode、语义版本和指纹加入 catalog。保留旧条目并改为 `DEPRECATED`，禁止删除已被 proof 引用的条目。
-2. 先运行 `contract_fingerprint.py verify`，再运行 `scripts/contract-deploy.sh`。Console 必须支持 solc `0.8.11` 并提供 keccak256/sm3 两套官方编译器。脚本部署前验证 chain/group/crypto/VM 和编译制品，把每次部署绑定到一份显式成功回执，部署后验证完整 runtime code 与精确 catalog 身份，发布结构化部署回执，最后原子激活两个地址及其交易/区块/生效时间证据。
+2. 先用 `provision_fisco_solc.py` 显式 provision 并离线重验受审查 compiler cache，再运行 `contract_fingerprint.py verify` 和 `scripts/contract-deploy.sh`。脚本部署前验证 toolchain provenance、chain/group/crypto/VM 和完整编译制品，把每次部署绑定到一份显式成功回执，部署后验证完整 runtime code 与精确 catalog 身份，发布结构化部署回执，最后原子激活两个地址及其交易/区块/生效时间证据。
 3. 重启 `platform-fisco`。新 batch 绑定新的 `ACTIVE` 条目；已被领取的 batch 保持旧 fingerprint，并进入人工处理，禁止静默切换合约。
 4. 只有确认发生安全或完整性事件时才使用 `REVOKED`。状态变更必须经过 catalog 代码审查；不得修改已持久化 batch 快照来伪造不同的历史状态。
 
