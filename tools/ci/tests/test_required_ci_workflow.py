@@ -123,5 +123,27 @@ class RequiredCiWorkflowTest(unittest.TestCase):
         self.assertIn("if_ci_failed: error", self.codecov_config)
 
 
+class MonitoringImageTest(unittest.TestCase):
+    """Prevent the nonexistent Jaeger minor-only tag and documentation image drift."""
+
+    def test_compose_and_docs_use_verified_jaeger_image(self) -> None:
+        """Require exactly one identical, immutable Jaeger image in each deployment asset."""
+        expected_image = (
+            "jaegertracing/all-in-one:1.68.0@sha256:"
+            "6279882637ae03e70f519965d2ba5ca84cb785f4baf4f0d7237e827a37c33a42"
+        )
+        for relative_path in (
+            "docker-compose.infra.yml",
+            "docs/en/deployment/docker-compose.md",
+            "docs/zh/deployment/docker-compose.md",
+        ):
+            with self.subTest(path=relative_path):
+                content = (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+                images = re.findall(
+                    r"(?m)^\s+image:\s*(jaegertracing/all-in-one:\S+)", content
+                )
+                self.assertEqual(images, [expected_image])
+
+
 if __name__ == "__main__":
     unittest.main()
