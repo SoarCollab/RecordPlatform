@@ -133,7 +133,7 @@ services:
   # ── Observability (OpenTelemetry) ──────────────────────────────────────────
 
   jaeger:
-    image: jaegertracing/all-in-one:1.68
+    image: jaegertracing/all-in-one:1.68.0@sha256:6279882637ae03e70f519965d2ba5ca84cb785f4baf4f0d7237e827a37c33a42
     container_name: jaeger
     ports:
       - "${OBSERVABILITY_BIND_ADDRESS:-127.0.0.1}:${JAEGER_UI_PORT:-16686}:16686"   # Jaeger UI
