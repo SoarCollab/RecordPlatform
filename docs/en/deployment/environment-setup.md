@@ -141,6 +141,14 @@ Use the guarded deployment script instead of activating addresses manually. Befo
 
 This script is intentionally limited to `BLOCKCHAIN_ACTIVE=local-fisco`. It rejects BSN FISCO/Besu activation before any Console query; those networks require their own reviewed provider deployment process.
 
+The write boundary is the project-built `platform-fisco-0.0.2-SNAPSHOT-deploy-helper.jar`, packaged by `mvn -f platform-fisco/pom.xml package` with the same pinned Java SDK **3.8.0** as the provider. Build/install `platform-api` first. `FISCO_DEPLOY_HELPER_JAR` may select a previously built copy of that release artifact. Deployment never discovers SDK jars inside Console and never sends ordinary `deploy Name`: Console recompiles Solidity with an optimizer profile that does not reproduce the signed artifacts.
+
+`FISCO_PRIVATE_KEY` is mandatory for both deployment and local provider startup. Configure one private 32-byte hexadecimal key locally, together with explicit `FISCO_CERT_PATH` and `FISCO_PEER_ADDRESS`. The helper installs that exact key before signing; the same key must remain configured when the provider writes to `Sharing`, whose constructor records the deployer as operator. Missing/invalid keys and unsupported signing modes fail closed; random SDK accounts and account-file/password fallbacks are not supported. Never commit these local values.
+
+Python captures the catalog, raw ABI and selected creation artifact through no-follow directory/file descriptors, checks regular-file type and a 5 MiB per-artifact bound, and passes three big-endian length-prefixed frames through a private stdin handle. Java rejects truncated, oversized or trailing input, validates the raw catalog/ABI capture hashes plus the canonical ABI and complete decoded creation digest, and submits those same in-memory creation bytes with no constructor arguments. Raw ABI capture SHA-256 is not the canonical ABI fingerprint. The SDK client rechecks chain/group/crypto/EVM immediately before signing. Console remains an independent read-only receipt/runtime/identity probe; SDK-refilled receipt input/hash fields are never independent chain evidence.
+
+Helper output is one bounded non-secret schema record. A timeout, malformed output or failure after possible submission is **uncertain**, not permission to retry: stop and inspect chain receipts before any new deployment. The wrapper never retries automatically. Runtime output accepts anchored official `[group]: /path> 0x...` framing, ANSI colors and CRLF, but rejects mixed errors, malformed/empty/odd code and multiple candidates. Full runtime equality and audit-before-activation remain mandatory.
+
 Set the target identity and durable audit location in `.env`:
 
 ```dotenv
@@ -150,6 +158,9 @@ CONTRACT_DEPLOYMENT_RECEIPT_DIR=/var/lib/record-platform/contract-deployments
 ```
 
 ```bash
+# Build the pinned helper (after installing platform-api); no chain access occurs here
+mvn -f platform-fisco/pom.xml package
+
 # Preview every phase without changing the console, chain, or .env
 ./scripts/contract-deploy.sh --dry-run --console-dir /opt/fisco/console
 

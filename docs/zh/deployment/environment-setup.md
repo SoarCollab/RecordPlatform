@@ -267,3 +267,10 @@ cd platform-frontend && pnpm dev
 | MinIO 无法访问 | 端口冲突 | 检查 9000/9001 端口是否被占用 |
 | Dubbo 服务发现失败 | DUBBO_HOST 配置错误 | Docker 环境需设置 `DUBBO_HOST` 为宿主机 IP |
 | env-check.sh 深度检查跳过 | CLI 工具未安装 | 安装 `mysql-client`、`redis-cli`、`aws` 等工具 |
+
+
+### Verified creation submission
+
+部署写入使用项目构建的 `platform-fisco-0.0.2-SNAPSHOT-deploy-helper.jar`（固定 SDK 3.8.0），不再调用 Console `deploy Name`，也不从 Console 目录发现 SDK jar。执行 `mvn -f platform-fisco/pom.xml package` 生成 helper；可用 `FISCO_DEPLOY_HELPER_JAR` 指定同一版本的已构建产物。Python 使用 no-follow 目录/文件句柄捕获有界 catalog、原始 ABI 和 creation，通过私有长度前缀 stdin 交给 Java；Java 校验同一份字节的摘要、canonical ABI 和完整 creation，再通过 SDK 原始字节 API 签名提交。原始 ABI capture hash 与 canonical ABI fingerprint 不可互换。
+
+本地部署和 provider 启动都必须显式配置相同的 `FISCO_PRIVATE_KEY`，以保持 Sharing 构造函数 operator 与后续写入 signer 一致；缺失/非法私钥、随机账户 fallback 和未支持的 HSM/account-file 模式不被接受。证书目录和 peer 也由本地配置明确指定，任何真实密钥都不得提交。提交前用同一 SDK client 重查 chain/group/crypto/EVM。helper 超时或输出异常表示提交结果不确定，禁止自动重试；必须先核查真实交易回执。Console 只用于独立只读证据，继续要求显式成功回执、完整 runtime bytes、contractIdentity 和 audit-before-env；官方 prompt/ANSI/CRLF 兼容不会放松字节一致性。详见[英文部署说明](../../en/deployment/environment-setup.md)。

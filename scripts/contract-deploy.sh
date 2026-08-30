@@ -219,6 +219,8 @@ CONTRACT_SRC_DIR="$PROJECT_ROOT/platform-fisco/contract"
 ABI_DEST_DIR="$PROJECT_ROOT/platform-fisco/src/main/resources/abi"
 BIN_DEST_DIR="$PROJECT_ROOT/platform-fisco/src/main/resources/bin"
 FINGERPRINT_TOOL="$PROJECT_ROOT/tools/contracts/contract_fingerprint.py"
+SUBMISSION_TOOL="$PROJECT_ROOT/tools/contracts/verified_submission.py"
+DEPLOY_HELPER_JAR="${FISCO_DEPLOY_HELPER_JAR:-$PROJECT_ROOT/platform-fisco/target/platform-fisco-0.0.2-SNAPSHOT-deploy-helper.jar}"
 SOLC_PROVISION_TOOL="$PROJECT_ROOT/tools/contracts/provision_fisco_solc.py"
 SOLC_TOOLCHAIN_MANIFEST="${FISCO_SOLC_TOOLCHAIN_MANIFEST:-$PROJECT_ROOT/tools/contracts/fisco-solc-toolchains.json}"
 SOLC_VERSION="0.8.11"
@@ -573,13 +575,23 @@ if ! resolve_console_launcher; then
 fi
 
 # 1c. Required local tools and version-controlled registry are valid
-for command_name in bash python3 cmp awk mktemp mv chmod date; do
+for command_name in bash python3 java cmp awk mktemp mv chmod date; do
     if has_cmd "$command_name"; then
         ok "Required command found: $command_name"
     else
         fail "Required command missing: $command_name"
     fi
 done
+if [[ ! "${FISCO_PRIVATE_KEY:-}" =~ ^(0x|0X)?[0-9a-fA-F]{64}$ ]] \
+    || [[ "${FISCO_PRIVATE_KEY#0x}" =~ ^0+$ ]]; then
+    fail "An explicit valid FISCO_PRIVATE_KEY shared with the runtime provider is required"
+fi
+if [ -z "${FISCO_CERT_PATH:-}" ]; then
+    fail "FISCO_CERT_PATH must explicitly identify the runtime SDK certificate directory"
+fi
+if [ ! -f "$DEPLOY_HELPER_JAR" ] || [ -L "$DEPLOY_HELPER_JAR" ]; then
+    fail "Project-pinned deployment helper is missing; build platform-fisco package first"
+fi
 if [ -n "$TIMEOUT_COMMAND" ]; then
     ok "Timeout command found: $TIMEOUT_COMMAND"
 else
@@ -1331,40 +1343,6 @@ ok "Verified catalog bytes fixed at $VERIFIED_CATALOG_SHA256"
 # ==============================================================================
 section 4 "Deploy Contracts"
 
-# 从 FISCO Console 部署输出中提取唯一的规范化地址和交易哈希。
-parse_deployment_metadata() {
-    python3 -c '
-import re
-import sys
-
-text = sys.stdin.read()
-address_patterns = (
-    r"contract\s+address\s*:\s*(0x[0-9a-fA-F]{40})",
-    r"\"contractAddress\"\s*:\s*\"(0x[0-9a-fA-F]{40})\"",
-)
-transaction_patterns = (
-    r"transaction\s+hash\s*:\s*(0x[0-9a-fA-F]{64})",
-    r"\"transactionHash\"\s*:\s*\"(0x[0-9a-fA-F]{64})\"",
-)
-
-addresses = {
-    match.lower()
-    for pattern in address_patterns
-    for match in re.findall(pattern, text, re.IGNORECASE)
-}
-transaction_hashes = {
-    match.lower()
-    for pattern in transaction_patterns
-    for match in re.findall(pattern, text, re.IGNORECASE)
-}
-if len(addresses) != 1 or len(transaction_hashes) != 1:
-    raise SystemExit(1)
-address = next(iter(addresses))
-transaction_hash = next(iter(transaction_hashes))
-print(f"{address}\t{transaction_hash}")
-'
-}
-
 # 每笔链写紧前重新核验 catalog、staged source 与 Console ABI/ECC/SM creation。
 stage_verified_console_artifacts() {
     local name="$1"
@@ -1653,26 +1631,24 @@ deploy_contract() {
         return 1
     fi
 
-    local output
-    if ! output=$(
-        cd "$CONSOLE_DIR"
-        printf 'deploy %s\nexit\n' "$name" | run_console 120 2>&1
-    ); then
-        fail "$name deployment command failed"
-        printf '%s\n' "$output" | tail -20 | sed 's/^/    /'
-        return 1
-    fi
-
+    # The helper captures the catalog-bound signed inputs, not mutable Console compiler output.
     local metadata
-    if ! metadata=$(printf '%s\n' "$output" | parse_deployment_metadata); then
-        fail "$name deployment did not return a valid address and transaction hash"
-        printf '%s\n' "$output" | tail -20 | sed 's/^/    /'
+    if ! metadata=$(python3 "$SUBMISSION_TOOL" "$DEPLOY_HELPER_JAR" \
+        "$PROJECT_ROOT" "$CATALOG_FILE" "$VERIFIED_CATALOG_SHA256" \
+        "$name" "$FISCO_CRYPTO_VARIANT"); then
+        fail "$name verified submission failed or is uncertain; no automatic retry is safe"
         return 1
     fi
 
     local address
     local transaction_hash
-    IFS=$'\t' read -r address transaction_hash <<< "$metadata"
+    local signer_address
+    IFS=$'\t' read -r address transaction_hash signer_address <<< "$metadata"
+    if [ -n "$DEPLOYMENT_SIGNER" ] && [ "$DEPLOYMENT_SIGNER" != "$signer_address" ]; then
+        fail "Deployment signer changed between contracts; no activation is permitted"
+        return 1
+    fi
+    DEPLOYMENT_SIGNER="$signer_address"
 
     local receipt_output
     if ! receipt_output=$(
@@ -1720,6 +1696,7 @@ deploy_contract() {
 }
 
 STORAGE_ADDR=""
+DEPLOYMENT_SIGNER=""
 STORAGE_TX=""
 STORAGE_BLOCK=""
 SHARING_ADDR=""
@@ -1746,27 +1723,7 @@ section 5 "On-chain Verification"
 
 # 从 getCode 输出中提取独立一行或 JSON 字段中的候选 EVM runtime code。
 extract_runtime_code() {
-    python3 -c '
-import re
-import sys
-
-text = sys.stdin.read()
-patterns = (
-    r"(?im)^\s*\"?(0x[0-9a-fA-F]+)\"?\s*$",
-    r"\"(?:code|result)\"\s*:\s*\"(0x[0-9a-fA-F]+)\"",
-)
-candidates = set()
-for pattern in patterns:
-    matches = re.findall(pattern, text)
-    candidates.update(
-        value.lower()
-        for value in matches
-        if value.lower() not in {"0x", "0x0"}
-    )
-if len(candidates) != 1:
-    raise SystemExit(1)
-print(next(iter(candidates)))
-'
+    python3 "$PROJECT_ROOT/tools/contracts/console_runtime.py"
 }
 
 # 强制校验目标地址完整 runtime code 与实际链 crypto 变体的签入制品一致。
