@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "record-platform-fisco-solc-toolchains.v1",
+  "sourceRepository": "https://github.com/FISCO-BCOS/solidity.git",
+  "sourceCommit": "6b4cc280eb884f1852e1ddf12aeea56a2103148c",
+  "solidityVersion": "0.8.11",
+  "releaseBuild": {
+    "prereleaseMarker": "empty",
+    "commitHashMarker": "6b4cc280eb884f1852e1ddf12aeea56a2103148c",
+    "cmakeArguments": [
+      "-DCMAKE_BUILD_TYPE=Release",
+      "-DUSE_Z3=OFF",
+      "-DTESTS=OFF"
+    ],
+    "buildOrder": ["sm", "ecc"]
+  },
+  "supportedPlatforms": [
+    {
+      "system": "linux",
+      "machine": "x86_64",
+      "validatedBuilder": {
+        "baseImage": "buildpack-deps:focal@sha256:2de32588f72f63229c83e3f08529cc15db231b2d95412ab4c30ad49d7cd99591",
+        "imageSha256": "fc76758bf801946093ddbac0c36dd8600bb02aaa4026bcf3488ecb5eee468dd4",
+        "cmakeVersion": "3.16.3",
+        "cxxCompiler": "g++ 9.4.0"
+      }
+    }
+  ],
+  "variants": {
+    "ecc": {
+      "buildGm": false,
+      "versionLine": "Version: 0.8.11+commit.6b4cc280.Linux.g++",
+      "validatedExecutableSha256": "20814767ead78f11075050a8a98e2c40e9c722905f7cf03acd1d513f973a916c"
+    },
+    "sm": {
+      "buildGm": true,
+      "versionLine": "Gm version: 0.8.11+commit.6b4cc280.Linux.g++",
+      "validatedExecutableSha256": "01453d5a6bac2a3fa44ba901972640bbce1108b6c534bc884340e296209a3f67"
+    }
+  }
+}

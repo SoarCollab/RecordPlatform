@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 import shutil
 import socket
 import stat
@@ -50,6 +51,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertFalse((fixture["console_dir"] / "contracts").exists())
             self.assertFalse(fixture["call_log"].exists())
             self.assertFalse(fixture["compiler_log"].exists())
+            self.assertFalse((fixture["console_dir"] / "contract2java.sh").exists())
             self.assertFalse(fixture["receipt_dir"].exists())
             self.assertFalse(fixture["date_log"].exists())
             self.assertIn("Signed contract artifact catalog verified", result.stdout)
@@ -122,8 +124,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertNotIn("getUserFiles", calls)
             self.assertNotIn("getShareInfo", calls)
             self.assertLess(calls.index("getGroupInfo"), calls.index("deploy Storage"))
-            compiler_calls = fixture["compiler_log"].read_text(encoding="utf-8")
-            self.assertEqual(compiler_calls.count("-v 0.8.11"), 2)
+            self.assertFalse(fixture["compiler_log"].exists())
             artifact_compiler_calls = fixture["artifact_compiler_log"].read_text(
                 encoding="utf-8",
             )
@@ -421,7 +422,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             listener.join(timeout=5)
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("SM creation", result.stdout + result.stderr)
+            self.assertIn("sm compiler did not produce Sharing.bin", result.stdout + result.stderr)
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertNotIn("deploy ", calls)
 
@@ -438,7 +439,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             listener.join(timeout=5)
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("must not be a symlink", result.stdout + result.stderr)
+            self.assertIn("ecc compiler did not produce Storage.bin", result.stdout + result.stderr)
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertNotIn("deploy ", calls)
 
@@ -590,7 +591,7 @@ class ContractDeployScriptTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
-                "Console ECC creation changed after artifact verification",
+                "staged Console artifacts changed before deployment",
                 result.stdout + result.stderr,
             )
             calls = fixture["call_log"].read_text(encoding="utf-8")
@@ -1076,39 +1077,6 @@ class ContractDeployScriptTest(unittest.TestCase):
             encoding="utf-8",
         )
 
-        self._write_executable(
-            console_dir / "contract2java.sh",
-            """#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$*" >> "$FAKE_COMPILER_LOG"
-source_path=""
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        -s) source_path="$2"; shift 2 ;;
-        *) shift ;;
-    esac
-done
-name="$(basename "$source_path" .sol)"
-mkdir -p contracts/sdk/abi contracts/sdk/bin contracts/sdk/bin/sm
-cp "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/abi/$name.abi" \
-    "contracts/sdk/abi/$name.abi"
-if [[ "${FAKE_SYMLINK_ECC_BIN:-}" == "$name" ]]; then
-    ln -s "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/bin/ecc/$name.bin" \
-        "contracts/sdk/bin/$name.bin"
-else
-    cp "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/bin/ecc/$name.bin" \
-        "contracts/sdk/bin/$name.bin"
-fi
-if [[ "${FAKE_MISSING_SM_BIN:-}" != "$name" ]]; then
-    cp "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/bin/sm/$name.bin" \
-        "contracts/sdk/bin/sm/$name.bin"
-fi
-if [[ "${FAKE_ABI_DRIFT:-}" == "$name" ]]; then
-    printf '[{"type":"function","name":"drifted","inputs":[]}]\n' \
-        > "contracts/sdk/abi/$name.abi"
-fi
-""",
-        )
         for variant, crypto_directory in (("ecc", "keccak256"), ("sm", "sm3")):
             self._write_executable(
                 root / f".fisco/solc/0.8.11/{crypto_directory}/solc",
@@ -1141,12 +1109,92 @@ for name in Storage Sharing; do
         "$output_dir/$name.bin"
     cp "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/bin/runtime/$variant/$name.bin" \
         "$output_dir/$name.bin-runtime"
+    if [[ "${{FAKE_ABI_DRIFT:-}}" == "$name" ]]; then
+        printf '[{{"type":"function","name":"drifted","inputs":[]}}]\n' \
+            > "$output_dir/$name.abi"
+    fi
+    if [[ "$variant" == "sm" && "${{FAKE_MISSING_SM_BIN:-}}" == "$name" ]]; then
+        rm "$output_dir/$name.bin"
+    fi
+    if [[ "$variant" == "ecc" && "${{FAKE_SYMLINK_ECC_BIN:-}}" == "$name" ]]; then
+        rm "$output_dir/$name.bin"
+        ln -s "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/bin/ecc/$name.bin" \
+            "$output_dir/$name.bin"
+    fi
     if [[ "${{FAKE_RUNTIME_ARTIFACT_DRIFT:-}}" == "$name" ]]; then
         printf '60006000\n' > "$output_dir/$name.bin-runtime"
     fi
 done
 """,
             )
+        source_commit = "6b4cc280eb884f1852e1ddf12aeea56a2103148c"
+        fake_manifest = root / "fisco-solc-toolchains.json"
+        machine = platform.machine().lower()
+        if machine in {"amd64", "x64"}:
+            machine = "x86_64"
+        compiler_sources = {
+            "ecc": root / ".fisco/solc/0.8.11/keccak256/solc",
+            "sm": root / ".fisco/solc/0.8.11/sm3/solc",
+        }
+        compiler_shas = {
+            variant: hashlib.sha256(path.read_bytes()).hexdigest()
+            for variant, path in compiler_sources.items()
+        }
+        manifest = {
+            "schemaVersion": "record-platform-fisco-solc-toolchains.v1",
+            "sourceRepository": "https://example.invalid/solidity.git",
+            "sourceCommit": source_commit,
+            "solidityVersion": "0.8.11",
+            "releaseBuild": {
+                "prereleaseMarker": "empty",
+                "commitHashMarker": source_commit,
+                "cmakeArguments": [],
+                "buildOrder": ["sm", "ecc"],
+            },
+            "supportedPlatforms": [{
+                "system": platform.system().lower(),
+                "machine": machine,
+                "validatedBuilder": {},
+            }],
+            "variants": {
+                "ecc": {
+                    "buildGm": False,
+                    "versionLine": "Version: 0.8.11+commit.6b4cc280.Linux.g++",
+                    "validatedExecutableSha256": compiler_shas["ecc"],
+                },
+                "sm": {
+                    "buildGm": True,
+                    "versionLine": "Gm version: 0.8.11+commit.6b4cc280.Linux.g++",
+                    "validatedExecutableSha256": compiler_shas["sm"],
+                },
+            },
+        }
+        fake_manifest.write_text(json.dumps(manifest), encoding="utf-8")
+        manifest_sha = hashlib.sha256(fake_manifest.read_bytes()).hexdigest()
+        solc_cache = root / "verified-solc-cache"
+        release = solc_cache / source_commit
+        for variant, source in compiler_sources.items():
+            destination = release / variant / "solc"
+            destination.parent.mkdir(parents=True)
+            shutil.copyfile(source, destination)
+            destination.chmod(0o700)
+        (release / "provenance.json").write_text(
+            json.dumps({
+                "schemaVersion": "record-platform-fisco-solc-provenance.v1",
+                "manifestSha256": manifest_sha,
+                "sourceCommit": source_commit,
+                "releasePrereleaseMarker": "empty",
+                "variants": {
+                    variant: {
+                        "sha256": digest,
+                        "buildGm": variant == "sm",
+                        "versionLine": manifest["variants"][variant]["versionLine"],
+                    }
+                    for variant, digest in compiler_shas.items()
+                },
+            }),
+            encoding="utf-8",
+        )
         self._write_executable(
             console_dir / "start.sh",
             f"""#!/usr/bin/env bash
@@ -1383,6 +1431,18 @@ if [[ $# -ge 9 \
     mv "$FAKE_STAGED_SOURCE_ORIGINAL" "$3/$6"
     exit "$status"
 fi
+if [[ "$*" == *"contracts/sdk/abi/"* \
+    && -n "${FAKE_TAMPER_CONSOLE_AFTER_VERIFY:-}" ]]; then
+    set +e
+    "$FAKE_REAL_PYTHON" "$@"
+    status=$?
+    set -e
+    if [[ $status -eq 0 ]]; then
+        name="$FAKE_TAMPER_CONSOLE_AFTER_VERIFY"
+        printf '60006000\n' > "$FAKE_CONSOLE_DIR/contracts/sdk/bin/$name.bin"
+    fi
+    exit "$status"
+fi
 if [[ "$*" == *"contract_fingerprint.py verify"* ]]; then
     count=0
     if [[ -f "$FAKE_PYTHON_STATE" ]]; then
@@ -1394,11 +1454,6 @@ if [[ "$*" == *"contract_fingerprint.py verify"* ]]; then
     "$FAKE_REAL_PYTHON" "$@"
     status=$?
     set -e
-    if [[ $status -eq 0 && $count -eq 2 \
-        && -n "${FAKE_TAMPER_CONSOLE_AFTER_VERIFY:-}" ]]; then
-        name="$FAKE_TAMPER_CONSOLE_AFTER_VERIFY"
-        printf '60006000\n' > "$FAKE_CONSOLE_DIR/contracts/sdk/bin/$name.bin"
-    fi
     exit "$status"
 fi
 exec "$FAKE_REAL_PYTHON" "$@"
@@ -1425,6 +1480,8 @@ printf '{FIXED_EFFECTIVE_AT}\n'
             "date_log": date_log,
             "receipt_dir": receipt_dir,
             "temporary_build_root": temporary_build_root,
+            "solc_manifest": fake_manifest,
+            "solc_cache": solc_cache,
             "env_file": env_file,
         }
 
@@ -1448,6 +1505,8 @@ printf '{FIXED_EFFECTIVE_AT}\n'
             "FAKE_PYTHON_STATE": str(fixture["root"] / "python-state"),
             "FAKE_CONSOLE_DIR": str(fixture["console_dir"]),
             "TMPDIR": str(fixture["temporary_build_root"]),
+            "FISCO_SOLC_TOOLCHAIN_MANIFEST": str(fixture["solc_manifest"]),
+            "FISCO_SOLC_CACHE_DIR": str(fixture["solc_cache"]),
             "HOME": str(fixture["root"]),
             "PATH": f"{fixture['bin_dir']}{os.pathsep}{environment['PATH']}",
         })
