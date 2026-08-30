@@ -145,7 +145,7 @@ class DocumentationEvidenceConsistencyTest(unittest.TestCase):
         """Reject a snapshot heading whose total differs from the checked table and source tree."""
         testing_path = self.copy_file("TESTING.md")
         content = testing_path.read_text(encoding="utf-8")
-        testing_path.write_text(content.replace("（313 files）", "（312 files）", 1), encoding="utf-8")
+        testing_path.write_text(content.replace("（314 files）", "（313 files）", 1), encoding="utf-8")
 
         result = check_consistency.CheckResult("evidence")
         with patch.object(
