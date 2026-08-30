@@ -225,14 +225,23 @@ print('200')
     def test_real_curl_qos_http_semantics(self) -> None:
         """A real loopback HTTP server exercises curl status and body validation."""
         responses = []
+        requests = []
 
         class Handler(BaseHTTPRequestHandler):
             """Serve a controllable QoS-shaped response without a Triple listener."""
 
             def do_GET(self) -> None:
                 """Return the next deterministic test response."""
+                requests.append(self.path)
+                if self.path == "/redirected-ready":
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"true")
+                    return
                 status, body = responses.pop(0)
                 self.send_response(status)
+                if status == 302:
+                    self.send_header("Location", "/redirected-ready")
                 self.end_headers()
                 self.wfile.write(body)
 
@@ -246,15 +255,21 @@ print('200')
         thread.start()
         self.running("storage")
         self.env.update(QOS_STORAGE_PORT=str(server.server_port), DUBBO_HOST="192.0.2.10",
-                        DUBBO_STORAGE_PORT="1", http_proxy="http://127.0.0.1:1")
+                        DUBBO_STORAGE_PORT="1", http_proxy="http://127.0.0.1:1",
+                        CURL_HOME=str(self.root))
+        (self.root / ".curlrc").write_text(
+            "location\nretry = 3\nretry-delay = 1\n", encoding="utf-8"
+        )
         try:
             for status, body, ready in ((200, b"true\n", True), (503, b"true", False),
                                         (302, b"true", False), (200, b"false", False),
                                         (200, b"not JSON", False)):
                 with self.subTest(status=status, body=body):
+                    requests.clear()
                     responses.append((status, body))
                     result = self.command("status", "storage")
                     self.assertEqual(ready, result.returncode == 0, result.stdout)
+                    self.assertEqual(["/ready"], requests)
         finally:
             server.shutdown()
             server.server_close()

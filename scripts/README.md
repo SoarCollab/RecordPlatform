@@ -115,7 +115,8 @@ status; it does not run a background readiness wait.
 - `HEALTH_CHECK_TIMEOUT=60` bounds each startup readiness wait including requests;
   `HEALTH_CHECK_INTERVAL=2` and `HEALTH_CHECK_REQUEST_TIMEOUT=3` control polling
   and each connection/request timeout, in positive integer seconds. Local probes
-  bypass HTTP proxies and do not follow redirects.
+  bypass HTTP proxies, ignore user curlrc files, and do not follow redirects or
+  retry individual HTTP requests automatically.
 
 A stopped, replaced, unhealthy or timed-out process returns nonzero. An existing
 PID alone no longer makes `start` succeed. Multi-service commands continue checking

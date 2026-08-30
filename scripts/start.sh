@@ -361,7 +361,8 @@ get_readiness_url() {
 # Require HTTP success and the expected body; a socket or nested UP is insufficient.
 probe_readiness() {
     local svc=$1 timeout=${2:-$HEALTH_CHECK_REQUEST_TIMEOUT} response status
-    response=$(curl --silent --show-error --fail --noproxy '*' \
+    # Disable curlrc first so user redirect/retry defaults cannot weaken this probe.
+    response=$(curl -q --silent --show-error --fail --noproxy '*' \
         --connect-timeout "$timeout" --max-time "$timeout" \
         --write-out $'\n%{http_code}' \
         "$(get_readiness_url "$svc")" 2>/dev/null) || return 1
