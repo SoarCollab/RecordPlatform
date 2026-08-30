@@ -6,7 +6,8 @@
 # 路径配置
 # ================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+export PROJECT_ROOT
 
 # 加载 .env 文件；脚本自检或 CI 可通过 RECORD_PLATFORM_SKIP_DOTENV=true 跳过。
 if [ "${RECORD_PLATFORM_SKIP_DOTENV:-false}" != "true" ] && [ -f "$PROJECT_ROOT/.env" ]; then
@@ -44,9 +45,16 @@ chmod 700 "$PID_DIR" 2>/dev/null || true
 # ================================
 # 服务端口配置 (用于健康检查)
 # ================================
-export STORAGE_PORT="${STORAGE_PORT:-8092}"
-export FISCO_PORT="${FISCO_PORT:-8091}"
-export BACKEND_PORT="${BACKEND_PORT:-8000}"
+export DUBBO_STORAGE_PORT="${DUBBO_STORAGE_PORT:-${STORAGE_PORT:-8092}}"
+export DUBBO_FISCO_PORT="${DUBBO_FISCO_PORT:-${FISCO_PORT:-8091}}"
+export STORAGE_PORT="$DUBBO_STORAGE_PORT"
+export FISCO_PORT="$DUBBO_FISCO_PORT"
+# Keep legacy overrides aligned with the application's actual configuration.
+if [ -z "${SERVER_PORT:-}" ] && [ -n "${BACKEND_PORT:-}" ]; then
+    export SERVER_PORT="$BACKEND_PORT"
+fi
+export QOS_STORAGE_PORT="${QOS_STORAGE_PORT:-22332}"
+export QOS_FISCO_PORT="${QOS_FISCO_PORT:-22331}"
 
 # ================================
 # SkyWalking 配置
