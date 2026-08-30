@@ -155,7 +155,7 @@ FISCO_SOLC_CACHE_DIR=/var/lib/record-platform/fisco-solc ./scripts/contract-depl
 
 该脚本只负责 `BLOCKCHAIN_ACTIVE=local-fisco`；配置为 `bsn-fisco` 或 `bsn-besu` 时会在 Console 查询前拒绝执行，BSN 部署必须使用对应网络的受审查发布流程。
 
-当前签入的 `Storage`/`Sharing` ABI、ECC/SM creation bytecode 与 ECC/SM deployed runtime bytecode 由 FISCO solc `0.8.11+commit.6b4cc280` 生成。manifest 固定完整源码提交、release marker、Linux x86_64 builder 证据、ECC/GM 模式、版本行和已验证 executable SHA-256。provisioner 从 exact Git commit 导出隔离源码，写入上游正式 release source 使用的空 `prerelease.txt` 与 `commit_hash.txt`，串行构建两套编译器，并在来源、平台、版本、普通文件、非符号链接和 SHA 全部通过后原子发布完整 cache。部署只离线重验该 cache，然后以 EVM London、optimizer disabled、metadata IPFS 直接生成 ABI/creation/runtime；验证后的 ABI 与两套 creation 在每笔链写前原子 staging 到 Console。任何 provenance、版本、路径、替换、ABI 或完整 bytecode 漂移都会在对应链写之前失败。
+当前签入的 `Storage`/`Sharing` ABI、ECC/SM creation bytecode 与 ECC/SM deployed runtime bytecode 由 FISCO solc `0.8.11+commit.6b4cc280` 生成。manifest 固定完整源码提交、release marker、Linux x86_64 builder 证据、上游构建依赖归档 URL/SHA、ECC/GM 模式、版本行和已验证 executable SHA-256。provisioner 从 exact Git commit 导出隔离源码，写入上游正式 release source 使用的空 `prerelease.txt` 与 `commit_hash.txt`，先下载并验证固定依赖归档，再串行构建两套编译器；只有来源、依赖、平台、版本、普通文件、非符号链接和 SHA 全部通过后才原子发布完整 cache。部署只离线重验该 cache，然后以 EVM London、optimizer disabled、metadata IPFS 直接生成 ABI/creation/runtime；验证后的 ABI 与两套 creation 在每笔链写前原子 staging 到 Console。任何 provenance、版本、路径、替换、ABI 或完整 bytecode 漂移都会在对应链写之前失败。
 
 ### 执行阶段
 

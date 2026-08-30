@@ -13,6 +13,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -179,6 +180,37 @@ def checkout_source(source_dir: Path, manifest: dict[str, Any], work_dir: Path) 
     return extracted
 
 
+def download_source_dependencies(source: Path, manifest: dict[str, Any]) -> None:
+    """Download and verify every reviewed upstream build dependency archive."""
+    for dependency in manifest.get("sourceDependencies", []):
+        relative_path = Path(dependency["path"])
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise ProvisionError(
+                f"unsafe source dependency path for {dependency.get('name', 'unknown')}"
+            )
+        destination = source / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
+        if temporary.exists() or temporary.is_symlink():
+            raise ProvisionError(f"source dependency staging path exists: {temporary}")
+        try:
+            request = urllib.request.Request(
+                dependency["url"], headers={"User-Agent": "RecordPlatform-toolchain/1"}
+            )
+            with urllib.request.urlopen(request, timeout=120) as response:
+                with temporary.open("xb") as output:
+                    shutil.copyfileobj(response, output, length=1024 * 1024)
+            actual_sha = sha256_file(temporary)
+            if actual_sha != dependency["sha256"]:
+                raise ProvisionError(
+                    f"source dependency SHA-256 mismatch for {dependency['name']}"
+                )
+            os.replace(temporary, destination)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+
+
 def build_variant(source: Path, work_dir: Path, variant: str, manifest: dict[str, Any]) -> Path:
     """Build one compiler variant serially from the isolated release source."""
     build_dir = work_dir / f"build-{variant}"
@@ -241,6 +273,7 @@ def provision(
                 manifest["sourceCommit"],
             ])
         source = checkout_source(source_dir, manifest, work_dir)
+        download_source_dependencies(source, manifest)
         built: dict[str, Path] = {}
         for variant in manifest["releaseBuild"]["buildOrder"]:
             built[variant] = build_variant(source, work_dir, variant, manifest)

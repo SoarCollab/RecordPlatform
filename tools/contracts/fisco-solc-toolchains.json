@@ -13,6 +13,32 @@
     ],
     "buildOrder": ["sm", "ecc"]
   },
+  "sourceDependencies": [
+    {
+      "name": "fmt-8.0.1",
+      "url": "https://github.com/fmtlib/fmt/archive/8.0.1.tar.gz",
+      "path": "deps/downloads/fmt-8.0.1.tar.gz",
+      "sha256": "b06ca3130158c625848f3fb7418f235155a4d389b2abc3a6245fb01cb0eb1e01"
+    },
+    {
+      "name": "jsoncpp-1.9.3",
+      "url": "https://github.com/open-source-parsers/jsoncpp/archive/1.9.3.tar.gz",
+      "path": "deps/downloads/jsoncpp-1.9.3.tar.gz",
+      "sha256": "8593c1d69e703563d94d8c12244e2e18893eeb9a8a9f8aa3d09a327aa45c8f7d"
+    },
+    {
+      "name": "range-v3-0.11.0",
+      "url": "https://github.com/ericniebler/range-v3/archive/0.11.0.tar.gz",
+      "path": "deps/downloads/range-v3-0.11.0.tar.gz",
+      "sha256": "376376615dbba43d3bef75aa590931431ecb49eb36d07bb726a19f680c75e20c"
+    },
+    {
+      "name": "boost-1.76.0",
+      "url": "https://archives.boost.io/release/1.76.0/source/boost_1_76_0.tar.bz2",
+      "path": "deps/src/boost_1_76_0.tar.bz2",
+      "sha256": "f0397ba6e982c4450f27bf32a2a83292aba035b827a5623a14636ea583318c41"
+    }
+  ],
   "supportedPlatforms": [
     {
       "system": "linux",

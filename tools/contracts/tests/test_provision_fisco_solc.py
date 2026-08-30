@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import platform
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tools.contracts.provision_fisco_solc import (
     ProvisionError,
     checkout_source,
+    download_source_dependencies,
     verify_release,
 )
 
@@ -90,6 +93,50 @@ class ProvisionFiscoSolcTest(unittest.TestCase):
 
             with self.assertRaisesRegex(ProvisionError, "source commit mismatch"):
                 checkout_source(source, manifest, root / "work")
+
+    def test_reviewed_dependency_is_downloaded_and_verified(self) -> None:
+        """Explicit provisioning stages only dependency bytes matching the manifest."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            payload = b"reviewed archive bytes"
+            manifest = {
+                "sourceDependencies": [{
+                    "name": "fixture",
+                    "url": "https://example.invalid/fixture.tar.gz",
+                    "path": "deps/downloads/fixture.tar.gz",
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                }]
+            }
+            with patch(
+                "tools.contracts.provision_fisco_solc.urllib.request.urlopen",
+                return_value=io.BytesIO(payload),
+            ):
+                download_source_dependencies(root, manifest)
+
+            self.assertEqual(
+                (root / "deps/downloads/fixture.tar.gz").read_bytes(), payload
+            )
+
+    def test_dependency_digest_mismatch_leaves_no_staged_archive(self) -> None:
+        """Wrong upstream bytes fail before CMake and leave no trusted file."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = {
+                "sourceDependencies": [{
+                    "name": "fixture",
+                    "url": "https://example.invalid/fixture.tar.gz",
+                    "path": "deps/downloads/fixture.tar.gz",
+                    "sha256": "0" * 64,
+                }]
+            }
+            with patch(
+                "tools.contracts.provision_fisco_solc.urllib.request.urlopen",
+                return_value=io.BytesIO(b"wrong"),
+            ):
+                with self.assertRaisesRegex(ProvisionError, "SHA-256 mismatch"):
+                    download_source_dependencies(root, manifest)
+
+            self.assertFalse((root / "deps/downloads/fixture.tar.gz").exists())
 
     def test_wrong_version_line_is_rejected_even_with_matching_digest(self) -> None:
         """A digest-consistent binary still needs the exact release identity."""
