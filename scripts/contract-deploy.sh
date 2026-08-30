@@ -1097,20 +1097,17 @@ prepare_reproducible_build_directory() {
     SM_REPRO_BUILD_DIR="$REPRO_BUILD_DIR/sm"
 }
 
-# 使用固定 FISCO solc 画像生成可复现 creation 与 deployed runtime 制品。
+# Compile with the exact validated private snapshot, never a mutable cache path.
 compile_reproducible_variant() {
     local variant="$1"
     local compiler
     local output_dir
-    local required_version_line
     if [ "$variant" = "ecc" ]; then
         compiler="$ECC_SOLC"
         output_dir="$ECC_REPRO_BUILD_DIR"
-        required_version_line="Version: $SOLC_BUILD_ID"
     elif [ "$variant" = "sm" ]; then
         compiler="$SM_SOLC"
         output_dir="$SM_REPRO_BUILD_DIR"
-        required_version_line="Gm version: $SOLC_BUILD_ID"
     else
         fail "Unsupported reproducible compiler variant: $variant"
         return 1
@@ -1119,28 +1116,14 @@ compile_reproducible_variant() {
         dry "compile ECC/SM creation and runtime with FISCO solc $SOLC_BUILD_ID"
         return 0
     fi
-    if [ ! -x "$compiler" ]; then
-        fail "Verified FISCO $variant solc is unavailable: $compiler"
-        return 1
-    fi
-    if ! python3 "$SOLC_PROVISION_TOOL" \
-        --manifest "$SOLC_TOOLCHAIN_MANIFEST" \
-        --cache-dir "$SOLC_CACHE_DIR" verify \
-        --variant "$variant" --compiler "$compiler" >/dev/null; then
-        fail "FISCO $variant solc provenance changed before compilation"
-        return 1
-    fi
-    local version_output
-    if ! version_output=$("$compiler" --version 2>&1) \
-        || [[ "$version_output" != *"$required_version_line"* ]]; then
-        fail "FISCO $variant solc must report $required_version_line"
-        return 1
-    fi
     mkdir -p "$output_dir"
     local output
     if ! output=$(
         cd "$CONTRACT_SRC_DIR"
-        "$compiler" \
+        python3 "$SOLC_PROVISION_TOOL" \
+            --manifest "$SOLC_TOOLCHAIN_MANIFEST" \
+            --cache-dir "$SOLC_CACHE_DIR" run \
+            --variant "$variant" --compiler "$compiler" -- \
             --base-path . \
             --include-path . \
             --evm-version london \

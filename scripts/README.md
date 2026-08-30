@@ -118,6 +118,10 @@ python3 tools/contracts/provision_fisco_solc.py \
 python3 tools/contracts/provision_fisco_solc.py \
   --cache-dir /var/lib/record-platform/fisco-solc verify
 
+# 编译器命令必须通过 run：版本校验与编译执行同一份已验证的私有副本
+python3 tools/contracts/provision_fisco_solc.py \
+  --cache-dir /var/lib/record-platform/fisco-solc run --variant ecc -- --version
+
 # 完整部署流程（使用默认控制台路径）
 FISCO_SOLC_CACHE_DIR=/var/lib/record-platform/fisco-solc ./scripts/contract-deploy.sh
 
