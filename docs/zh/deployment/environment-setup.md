@@ -137,7 +137,7 @@ cp nodes/127.0.0.1/sdk/* platform-fisco/src/main/resources/conf/
 
 ### 部署智能合约
 
-必须使用带门禁的部署脚本，禁止手工激活地址。脚本通过 FISCO BCOS 控制台执行：先校验版本控制中的 artifact catalog，将 `getGroupInfo` 的 chain/group/crypto/VM 与显式 EVM 部署目标对账，用固定的 FISCO solc `0.8.11+commit.6b4cc280` keccak256/sm3 编译器重建两个合约的 ECC/SM creation 与 deployed runtime，并在每笔部署前比较 canonical ABI、decoded bytecode 和 chain/group。部署后在同一个 Console 会话中读取 `getGroupInfo` 和结构化交易回执，要求显式成功状态 `0`，交叉核对交易哈希和合约地址后才采用该回执的区块号；随后先校验 `getCode` 的完整 runtime bytes，再校验 `contractIdentity()`。全部通过后先发布结构化审计回执，再原子更新 `.env`。
+必须使用带门禁的部署脚本，禁止手工激活地址。任何 Console 命令前，脚本先解析唯一安全的交互入口：优先选择官方 Console 3.7 `start.sh`，仅当 `start.sh` 不存在时才把 `console.sh` 作为文档化的 legacy fallback。可选的 `--console-launcher` 或 `FISCO_CONSOLE_LAUNCHER` 覆盖必须一致，且只能指向 Console 根目录内的可执行普通非符号链接文件；冲突或外部路径会在访问链前失败。脚本先校验版本控制中的 artifact catalog，将 `getGroupInfo` 的 chain/group/crypto/VM 与显式 EVM 部署目标对账；VM 元数据只接受当前布尔字段 `isWasm` 或 legacy 布尔字段 `wasm`，两者同时存在时必须一致。脚本用固定的 FISCO solc `0.8.11+commit.6b4cc280` keccak256/sm3 编译器重建两个合约的 ECC/SM creation 与 deployed runtime，并在每笔部署前比较 canonical ABI、decoded bytecode 和 chain/group。部署后通过同一 launcher 在同一个 Console 会话中读取 `getGroupInfo` 和结构化交易回执，要求显式成功状态 `0`，交叉核对交易哈希和合约地址后才采用该回执的区块号；随后先校验 `getCode` 的完整 runtime bytes，再校验 `contractIdentity()`。全部通过后先发布结构化审计回执，再原子更新 `.env`。
 
 该脚本有意仅支持 `BLOCKCHAIN_ACTIVE=local-fisco`。BSN FISCO/Besu 激活配置会在任何 Console 查询前被拒绝；这些网络必须使用各自经审查的 provider 部署流程。
 
