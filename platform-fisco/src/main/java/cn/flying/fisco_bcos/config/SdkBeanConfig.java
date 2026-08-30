@@ -65,16 +65,9 @@ public class SdkBeanConfig {
         configProperty.setCryptoMaterial(cryptoMaterials);
     }
 
+    /** Installs the same explicit signer required by verified contract deployment. */
     public void configCryptoKeyPair(Client client) {
-        String hexPrivateKey = systemConfig.getHexPrivateKey();
-        if (hexPrivateKey == null || hexPrivateKey.isEmpty()) {
-            return;
-        }
-        // 使用局部变量处理前缀，不修改原配置对象
-        if (hexPrivateKey.startsWith("0x") || hexPrivateKey.startsWith("0X")) {
-            hexPrivateKey = hexPrivateKey.substring(2);
-        }
-        client.getCryptoSuite().setCryptoKeyPair(client.getCryptoSuite().loadKeyPair(hexPrivateKey));
+        LocalFiscoSigner.explicitSigner(client, systemConfig.getHexPrivateKey());
     }
 
     /**

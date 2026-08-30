@@ -15,6 +15,7 @@
     <description>fisco</description>
     <properties>
         <java.version>21</java.version>
+        <project.build.outputTimestamp>2026-08-31T00:00:00Z</project.build.outputTimestamp>
         <jackson-bom.version>2.21.5</jackson-bom.version>
         <!--
             byte-buddy-agent.version intentionally removed; use ${byte-buddy.version} from Spring Boot BOM
@@ -204,9 +205,37 @@
 
     <build>
         <plugins>
+            <!-- Recreate the helper input before repackage; otherwise an existing classifier jar can stay stale. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>deployment-helper-input</id>
+                        <goals><goal>jar</goal></goals>
+                        <configuration>
+                            <classifier>deploy-helper</classifier>
+                            <forceCreation>true</forceCreation>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>cn.flying.fisco_bcos.FiscoBcosApplication</mainClass>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>verified-deployment-helper</id>
+                        <goals><goal>repackage</goal></goals>
+                        <configuration>
+                            <classifier>deploy-helper</classifier>
+                            <mainClass>cn.flying.fisco_bcos.deploy.VerifiedContractSubmitter</mainClass>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

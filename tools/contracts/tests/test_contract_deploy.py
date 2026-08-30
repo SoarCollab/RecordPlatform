@@ -99,8 +99,8 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertNotIn("console.sh", launcher_calls)
             self.assertGreaterEqual(launcher_calls.count("start.sh"), 9)
             self.assertIn("getGroupInfo", calls)
-            self.assertIn("deploy Storage", calls)
-            self.assertIn("deploy Sharing", calls)
+            self.assertIn("submit Storage", calls)
+            self.assertIn("submit Sharing", calls)
             self.assertIn(f"getTransactionReceipt {STORAGE_TRANSACTION}", calls)
             self.assertIn(f"getTransactionReceipt {SHARING_TRANSACTION}", calls)
             self.assertIn(
@@ -123,7 +123,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             )
             self.assertNotIn("getUserFiles", calls)
             self.assertNotIn("getShareInfo", calls)
-            self.assertLess(calls.index("getGroupInfo"), calls.index("deploy Storage"))
+            self.assertLess(calls.index("getGroupInfo"), calls.index("submit Storage"))
             self.assertFalse(fixture["compiler_log"].exists())
             artifact_compiler_calls = fixture["artifact_compiler_log"].read_text(
                 encoding="utf-8",
@@ -388,6 +388,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertIn("getGroupInfo", calls)
             self.assertNotIn("deploy ", calls)
+            self.assertNotIn("submit ", calls)
 
     def test_compiled_runtime_drift_blocks_first_deployment(self) -> None:
         """新编译 runtime 与签入 catalog 不一致时必须在第一笔链写前失败。"""
@@ -407,6 +408,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertEqual(fixture["env_file"].read_bytes(), original_env)
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertNotIn("deploy ", calls)
+            self.assertNotIn("submit ", calls)
             self._assert_no_reproducible_build_residue(fixture)
 
     def test_missing_sm_creation_artifact_blocks_first_deployment(self) -> None:
@@ -425,6 +427,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertIn("sm compiler did not produce Sharing.bin", result.stdout + result.stderr)
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertNotIn("deploy ", calls)
+            self.assertNotIn("submit ", calls)
 
     def test_symlink_console_artifact_blocks_first_deployment(self) -> None:
         """Console 输出使用符号链接时不得把外部目标当作本次独立编译证据。"""
@@ -442,6 +445,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertIn("ecc compiler did not produce Storage.bin", result.stdout + result.stderr)
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertNotIn("deploy ", calls)
+            self.assertNotIn("submit ", calls)
 
     def test_symlink_console_source_target_is_rejected_without_following(self) -> None:
         """源码 staging 不得跟随 Console 中预置的目标 symlink 覆盖其外部文件。"""
@@ -465,6 +469,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             )
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertNotIn("deploy ", calls)
+            self.assertNotIn("submit ", calls)
 
     def test_directory_source_target_cleans_private_staging_file(self) -> None:
         """源码目标为目录时不得触发 mv 容器语义或遗留嵌套 staging 文件。"""
@@ -484,6 +489,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             )
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertNotIn("deploy ", calls)
+            self.assertNotIn("submit ", calls)
             self._assert_no_staged_source_residue(fixture)
 
     def test_source_directory_swap_does_not_redirect_staging_cleanup(self) -> None:
@@ -521,6 +527,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertTrue(moved_symlink.is_symlink())
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertNotIn("deploy ", calls)
+            self.assertNotIn("submit ", calls)
             self._assert_no_staged_source_residue(fixture)
 
     def test_staged_source_entry_swap_does_not_truncate_decoy(self) -> None:
@@ -553,6 +560,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertFalse(original_staging.exists())
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertNotIn("deploy ", calls)
+            self.assertNotIn("submit ", calls)
             self._assert_no_staged_source_residue(fixture)
 
     def test_symlink_console_sm_fallback_directory_is_rejected(self) -> None:
@@ -576,6 +584,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertIn("must not be a symlink", result.stdout + result.stderr)
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertNotIn("deploy ", calls)
+            self.assertNotIn("submit ", calls)
 
     def test_verified_console_artifact_drift_blocks_chain_write(self) -> None:
         """Phase 3 后替换 Console creation 时必须在第一笔部署交易前重新阻断。"""
@@ -596,6 +605,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             )
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertNotIn("deploy ", calls)
+            self.assertNotIn("submit ", calls)
 
     def test_chain_mismatch_blocks_compile_deployment_and_activation(self) -> None:
         """节点 chainID 与显式配置不一致时必须在编译和链写前失败。"""
@@ -616,6 +626,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertIn("getGroupInfo", calls)
             self.assertNotIn("deploy ", calls)
+            self.assertNotIn("submit ", calls)
             self.assertFalse((fixture["console_dir"] / "contracts").exists())
 
     def test_missing_chain_id_blocks_console_and_deployment(self) -> None:
@@ -682,6 +693,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertIn("getGroupInfo", calls)
             self.assertNotIn("deploy ", calls)
+            self.assertNotIn("submit ", calls)
 
     def test_malformed_group_info_blocks_deployment_and_activation(self) -> None:
         """getGroupInfo 无法严格解析时必须失败并保留旧配置。"""
@@ -705,6 +717,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertIn("getGroupInfo", calls)
             self.assertNotIn("deploy ", calls)
+            self.assertNotIn("submit ", calls)
 
     def test_wasm_group_is_rejected_before_compile_and_deployment(self) -> None:
         """EVM 制品部署工具不得在 FISCO WASM 群组上继续编译或链写。"""
@@ -724,6 +737,7 @@ class ContractDeployScriptTest(unittest.TestCase):
                 self.assertFalse(fixture["compiler_log"].exists())
                 calls = fixture["call_log"].read_text(encoding="utf-8")
                 self.assertNotIn("deploy ", calls)
+            self.assertNotIn("submit ", calls)
 
     def test_legacy_wasm_false_is_accepted(self) -> None:
         """Legacy Console metadata may use the boolean wasm alias."""
@@ -886,8 +900,8 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertIn("has no verifiable runtime code", result.stdout + result.stderr)
             self.assertEqual(fixture["env_file"].read_bytes(), original_env)
             calls = fixture["call_log"].read_text(encoding="utf-8")
-            self.assertIn("deploy Storage", calls)
-            self.assertIn("deploy Sharing", calls)
+            self.assertIn("submit Storage", calls)
+            self.assertIn("submit Sharing", calls)
             self.assertIn(f"getCode {SHARING_ADDRESS}", calls)
 
     def test_arbitrary_nonempty_runtime_blocks_identity_and_activation(self) -> None:
@@ -967,8 +981,8 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertIn("same contract address", result.stdout + result.stderr)
             self.assertEqual(fixture["env_file"].read_bytes(), original_env)
             calls = fixture["call_log"].read_text(encoding="utf-8")
-            self.assertIn("deploy Storage", calls)
-            self.assertIn("deploy Sharing", calls)
+            self.assertIn("submit Storage", calls)
+            self.assertIn("submit Sharing", calls)
             self.assertNotIn("getCode", calls)
 
     def test_contract_identity_mismatch_blocks_receipt_and_activation(self) -> None:
@@ -1039,6 +1053,23 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertEqual(fixture["env_file"].read_bytes(), original_env)
             self.assertEqual(invalid_receipt_target.read_text(encoding="utf-8"), "blocked\n")
 
+    def test_malformed_helper_output_never_activates_or_leaks(self) -> None:
+        """A malformed post-submission response preserves old activation and hides arbitrary output."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            original_env = fixture["env_file"].read_bytes()
+            result = self._run_script(fixture, extra_env={"FAKE_HELPER_MALFORMED": "1"})
+            listener.join(timeout=5)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("uncertain", result.stdout + result.stderr)
+            self.assertNotIn("must-not-escape", result.stdout + result.stderr)
+            self.assertEqual(fixture["env_file"].read_bytes(), original_env)
+            self.assertFalse(list(fixture["receipt_dir"].glob("*.json")))
+            calls = fixture["call_log"].read_text()
+            self.assertEqual(calls.count("submit Storage"), 1)
+            self.assertNotIn("submit Sharing", calls)
+
     def test_skip_verify_option_is_rejected(self) -> None:
         """部署后验证不得再由参数绕过。"""
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1070,6 +1101,8 @@ class ContractDeployScriptTest(unittest.TestCase):
             f"FISCO_PEER_ADDRESS=127.0.0.1:{port}\n"
             "FISCO_CHAIN_ID=chain0\n"
             "FISCO_GROUP_ID=group0\n"
+            f"FISCO_PRIVATE_KEY={'1' * 64}\n"
+            f"FISCO_CERT_PATH={root / 'certs'}\n"
             "FISCO_STORAGE_CONTRACT=0x3333333333333333333333333333333333333333\n"
             "FISCO_SHARING_CONTRACT=0x4444444444444444444444444444444444444444\n"
             f"CONTRACT_DEPLOYMENT_RECEIPT_DIR={receipt_dir}\n"
@@ -1310,16 +1343,12 @@ case "$input" in
         print_group_info
         ;;
     *"deploy Storage"*)
-        printf 'transaction hash: {STORAGE_TRANSACTION}\n'
-        printf 'contract address: {STORAGE_ADDRESS}\n'
+        printf 'FORBIDDEN: decoy Console deploy must never execute\n' >&2
+        exit 99
         ;;
     *"deploy Sharing"*)
-        printf 'transaction hash: {SHARING_TRANSACTION}\n'
-        if [[ "${{FAKE_DUPLICATE_ADDRESS:-}}" == "1" ]]; then
-            printf 'contract address: {STORAGE_ADDRESS}\n'
-        else
-            printf 'contract address: {SHARING_ADDRESS}\n'
-        fi
+        printf 'FORBIDDEN: decoy Console deploy must never execute\n' >&2
+        exit 99
         ;;
     *"getCode "*)
         if [[ -n "${{FAKE_EMPTY_CODE_ADDRESS:-}}" \
@@ -1388,6 +1417,34 @@ printf 'unsupported fake non-interactive command\n' >&2
 exit 2
 """,
         )
+        self._write_executable(
+            bin_dir / "java",
+            f"""#!/usr/bin/env python3
+import hashlib, json, os, struct, sys
+assert sys.argv[1] == '-jar'
+jar, catalog_hash, name, variant, raw_abi_hash = sys.argv[2:]
+def frame():
+    return sys.stdin.buffer.read(struct.unpack('>I', sys.stdin.buffer.read(4))[0])
+catalog_bytes, abi, creation_text = frame(), frame(), frame()
+assert not sys.stdin.buffer.read(1)
+assert 'sha256:' + hashlib.sha256(catalog_bytes).hexdigest() == catalog_hash
+entry = next(item for item in json.loads(catalog_bytes)['contracts'] if item['contractName'] == name)
+creation = bytes.fromhex(creation_text.decode().strip())
+assert 'sha256:' + hashlib.sha256(abi).hexdigest() == raw_abi_hash
+assert 'sha256:' + hashlib.sha256(creation).hexdigest() == entry['creationBytecodeSha256'][variant]
+with open(os.environ['FAKE_CALL_LOG'], 'a') as log:
+    log.write('submit ' + name + '\\n')
+if os.getenv('FAKE_HELPER_MALFORMED') == '1':
+    print('{{"secret":"must-not-escape"}}')
+    sys.exit(0)
+address = '{STORAGE_ADDRESS}' if name == 'Storage' or os.getenv('FAKE_DUPLICATE_ADDRESS') == '1' else '{SHARING_ADDRESS}'
+transaction = '{STORAGE_TRANSACTION}' if name == 'Storage' else '{SHARING_TRANSACTION}'
+print(json.dumps(dict(schemaVersion='record-platform-verified-submission.v1', contractName=name,
+                     variant=variant, contractAddress=address, transactionHash=transaction,
+                     signerAddress='0x' + '5' * 40)))
+""",
+        )
+        (root / "helper.jar").write_bytes(b"isolated transport fixture; SDK byte boundary tested by Java suite")
         self._write_executable(
             bin_dir / "timeout",
             """#!/usr/bin/env bash
@@ -1509,6 +1566,7 @@ printf '{FIXED_EFFECTIVE_AT}\n'
             "TMPDIR": str(fixture["temporary_build_root"]),
             "FISCO_SOLC_TOOLCHAIN_MANIFEST": str(fixture["solc_manifest"]),
             "FISCO_SOLC_CACHE_DIR": str(fixture["solc_cache"]),
+            "FISCO_DEPLOY_HELPER_JAR": str(fixture["root"] / "helper.jar"),
             "HOME": str(fixture["root"]),
             "PATH": f"{fixture['bin_dir']}{os.pathsep}{environment['PATH']}",
         })
