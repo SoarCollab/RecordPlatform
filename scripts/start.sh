@@ -30,8 +30,9 @@ source "$SCRIPT_DIR/env.sh"
 # ================================
 SERVICE_ORDER=("storage" "fisco" "backend")
 
-HEALTH_CHECK_TIMEOUT=60
-HEALTH_CHECK_INTERVAL=2
+HEALTH_CHECK_TIMEOUT=${HEALTH_CHECK_TIMEOUT:-60}
+HEALTH_CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-2}
+HEALTH_CHECK_REQUEST_TIMEOUT=${HEALTH_CHECK_REQUEST_TIMEOUT:-3}
 
 # 获取服务对应的 JAR 路径。
 get_service_jar() {
@@ -73,7 +74,13 @@ get_service_port() {
     case "$1" in
         storage) echo "$STORAGE_PORT" ;;
         fisco) echo "$FISCO_PORT" ;;
-        backend) echo "$BACKEND_PORT" ;;
+        backend)
+            if [[ ",$SPRING_PROFILE," == *,prod,* ]]; then
+                echo "${SERVER_PORT:-443}"
+            else
+                echo "${SERVER_PORT:-8080}"
+            fi
+            ;;
         *) echo "" ;;
     esac
 }
@@ -294,7 +301,8 @@ get_pid_file() {
 
 get_pid() {
     local svc=$1
-    local pid_file=$(get_pid_file "$svc")
+    local pid_file
+    pid_file=$(get_pid_file "$svc")
     
     if [ -f "$pid_file" ]; then
         local pid
@@ -312,34 +320,87 @@ get_pid() {
 save_pid() {
     local svc=$1
     local pid=$2
-    local pid_file=$(get_pid_file "$svc")
+    local pid_file
+    pid_file=$(get_pid_file "$svc")
     echo "$pid" > "$pid_file"
 }
 
 remove_pid() {
     local svc=$1
-    local pid_file=$(get_pid_file "$svc")
+    local pid_file
+    pid_file=$(get_pid_file "$svc")
     rm -f "$pid_file"
 }
 
+# Resolve the probe from runtime configuration, never from a provider RPC port.
+get_readiness_url() {
+    local scheme=http context="" host="${BACKEND_HEALTH_HOST:-${SERVER_ADDRESS:-127.0.0.1}}"
+    case "$1" in
+        storage) echo "http://127.0.0.1:$QOS_STORAGE_PORT/ready" ;;
+        fisco) echo "http://127.0.0.1:$QOS_FISCO_PORT/ready" ;;
+        backend)
+            if [[ ",$SPRING_PROFILE," == *,prod,* ]]; then
+                context=/record-platform
+                if [ "${SERVER_SSL_ENABLED:-${SSL_ENABLED:-true}}" = true ]; then
+                    scheme=https
+                fi
+            elif [ "${SERVER_SSL_ENABLED:-false}" = true ]; then
+                scheme=https
+            fi
+            context="${SERVER_SERVLET_CONTEXT_PATH-$context}"
+            case "$host" in
+                0.0.0.0|::|\[::\]) host=127.0.0.1 ;;
+                *:*) [[ "$host" == \[*\] ]] || host="[$host]" ;;
+            esac
+            echo "$scheme://$host:$(get_service_port backend)${context%/}/actuator/health"
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+# Require HTTP success and the expected body; a socket or nested UP is insufficient.
+probe_readiness() {
+    local svc=$1 timeout=${2:-$HEALTH_CHECK_REQUEST_TIMEOUT} response status
+    # Disable curlrc first so user redirect/retry defaults cannot weaken this probe.
+    response=$(curl -q --silent --show-error --fail --noproxy '*' \
+        --connect-timeout "$timeout" --max-time "$timeout" \
+        --write-out $'\n%{http_code}' \
+        "$(get_readiness_url "$svc")" 2>/dev/null) || return 1
+    status=${response##*$'\n'}
+    [[ "$status" =~ ^2[0-9][0-9]$ ]] || return 1
+    response=${response%$'\n'*}
+    printf '%s' "$response" | python3 -c '
+import json, sys
+try:
+    value = json.load(sys.stdin)
+    ready = (isinstance(value, dict) and value.get("status") == "UP") if sys.argv[1] == "backend" else value is True
+except (ValueError, TypeError):
+    ready = False
+sys.exit(0 if ready else 1)
+' "$svc"
+}
+
+# Bound the complete wait, including curl time, and reject dead/replaced processes.
 wait_for_health() {
     local svc=$1
-    local port
-    port=$(get_service_port "$svc")
-    local elapsed=0
-    
-    if [ -z "$port" ]; then
-        return 0
-    fi
-    
+    local deadline=$((SECONDS + HEALTH_CHECK_TIMEOUT)) remaining request_timeout pause pid
+    pid=$(get_pid "$svc")
+    [ -n "$pid" ] || return 1
     echo "  等待健康检查 (最多 ${HEALTH_CHECK_TIMEOUT}s)..."
-    
-    while [ $elapsed -lt $HEALTH_CHECK_TIMEOUT ]; do
-        if curl -sf "http://localhost:$port/actuator/health" >/dev/null 2>&1; then
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        [ "$(get_pid "$svc")" = "$pid" ] || return 1
+        remaining=$((deadline - SECONDS))
+        request_timeout=$HEALTH_CHECK_REQUEST_TIMEOUT
+        [ "$request_timeout" -le "$remaining" ] || request_timeout=$remaining
+        [ "$request_timeout" -gt 0 ] || return 1
+        if probe_readiness "$svc" "$request_timeout" && [ "$(get_pid "$svc")" = "$pid" ]; then
             return 0
         fi
-        sleep $HEALTH_CHECK_INTERVAL
-        elapsed=$((elapsed + HEALTH_CHECK_INTERVAL))
+        remaining=$((deadline - SECONDS))
+        [ "$remaining" -gt 0 ] || break
+        pause=$HEALTH_CHECK_INTERVAL
+        [ "$pause" -le "$remaining" ] || pause=$remaining
+        sleep "$pause"
     done
     
     return 1
@@ -353,7 +414,8 @@ stop_service() {
     local name
     name=$(get_service_name "$svc")
     
-    local pid=$(get_pid "$svc")
+    local pid
+    pid=$(get_pid "$svc")
     
     if [ -n "$pid" ]; then
         echo "正在停止 $name (PID: $pid)..."
@@ -394,10 +456,12 @@ start_service() {
     local port
     port=$(get_service_port "$svc")
 
-    local existing_pid=$(get_pid "$svc")
+    local existing_pid
+    existing_pid=$(get_pid "$svc")
     if [ -n "$existing_pid" ]; then
         echo "⚠ $name 已在运行 (PID: $existing_pid)"
-        return 0
+        wait_for_health "$svc"
+        return $?
     fi
 
     echo "----------------------------------------"
@@ -411,7 +475,8 @@ start_service() {
     local java_opts="$COMMON_JVM_OPTS"
 
     if [ "$ENABLE_SKYWALKING" = true ]; then
-        local sw_opts=$(get_skywalking_opts "$sw_name" "$(hostname -s)")
+        local sw_opts
+        sw_opts=$(get_skywalking_opts "$sw_name" "$(hostname -s)")
         if [ -n "$sw_opts" ]; then
             java_opts="$java_opts $sw_opts"
             echo "  SkyWalking: 已启用"
@@ -423,7 +488,8 @@ start_service() {
     if [ "$ENABLE_OTEL" = true ]; then
         local otel_name
         otel_name=$(get_otel_name "$svc")
-        local otel_opts=$(get_otel_opts "$otel_name")
+        local otel_opts
+        otel_opts=$(get_otel_opts "$otel_name")
         if [ -n "$otel_opts" ]; then
             java_opts="$java_opts $otel_opts"
             echo "  OpenTelemetry: 已启用 (service=$otel_name)"
@@ -442,11 +508,11 @@ start_service() {
         cd "$PROJECT_ROOT" && exec java $java_opts -jar "$jar_path" --spring.profiles.active="$SPRING_PROFILE"
     else
         echo "  模式: 后台运行"
-        pushd "$PROJECT_ROOT" > /dev/null
+        pushd "$PROJECT_ROOT" > /dev/null || return 1
         nohup java $java_opts -jar "$jar_path" \
             --spring.profiles.active="$SPRING_PROFILE" > /dev/null 2>&1 &
         local new_pid=$!
-        popd > /dev/null
+        popd > /dev/null || return 1
         
         sleep 1
         if ! kill -0 $new_pid 2>/dev/null; then
@@ -460,8 +526,9 @@ start_service() {
         if wait_for_health "$svc"; then
             echo "✓ $name 启动成功，健康检查通过"
         else
-            echo "⚠ $name 已启动 (PID: $new_pid)，但健康检查超时"
+            echo "✗ $name 未就绪: 进程退出或健康检查超时 (PID: $new_pid)"
             echo "  请检查日志: $LOG_DIR"
+            return 1
         fi
     fi
 }
@@ -476,21 +543,19 @@ status_service() {
     local port
     port=$(get_service_port "$svc")
     
-    local pid=$(get_pid "$svc")
+    local pid
+    pid=$(get_pid "$svc")
     
     if [ -n "$pid" ]; then
-        local health_status="未知"
-        if [ -n "$port" ]; then
-            if curl -sf "http://localhost:$port/actuator/health" >/dev/null 2>&1; then
-                health_status="健康"
-            else
-                health_status="不健康"
-            fi
+        if probe_readiness "$svc" && [ "$(get_pid "$svc")" = "$pid" ]; then
+            echo "✓ $name: 运行中 (PID: $pid, 端口: $port, 状态: 就绪)"
+            return 0
         fi
-        echo "✓ $name: 运行中 (PID: $pid, 端口: $port, 状态: $health_status)"
+        echo "✗ $name: 运行中但未就绪 (PID: $pid, 端口: $port)"
     else
         echo "○ $name: 未运行"
     fi
+    return 1
 }
 
 # ================================
@@ -500,12 +565,20 @@ echo "========================================"
 echo "RecordPlatform 服务管理"
 echo "========================================"
 
+# Reject invalid timing before launching any process.
+for timing in "$HEALTH_CHECK_TIMEOUT" "$HEALTH_CHECK_INTERVAL" "$HEALTH_CHECK_REQUEST_TIMEOUT"; do
+    if ! [[ "$timing" =~ ^[1-9][0-9]*$ ]]; then
+        echo "错误: 健康检查时间必须为正整数秒"
+        exit 1
+    fi
+done
+RESULT=0
 case "$COMMAND" in
     start)
         echo "命令: 启动服务"
         echo ""
         for svc in "${SERVICES[@]}"; do
-            start_service "$svc" "$FOREGROUND"
+            start_service "$svc" "$FOREGROUND" || RESULT=1
             # 全部启动时，服务间等待
             if [ "$ALL_SERVICES_SELECTED" = true ] && [ "$svc" != "backend" ]; then
                 echo "等待 10 秒..."
@@ -519,7 +592,7 @@ case "$COMMAND" in
         echo ""
         # 反向顺序停止
         for ((i=${#SERVICES[@]}-1; i>=0; i--)); do
-            stop_service "${SERVICES[$i]}"
+            stop_service "${SERVICES[$i]}" || RESULT=1
         done
         ;;
         
@@ -528,7 +601,7 @@ case "$COMMAND" in
         echo ""
         # 先停止（反向）
         for ((i=${#SERVICES[@]}-1; i>=0; i--)); do
-            stop_service "${SERVICES[$i]}"
+            stop_service "${SERVICES[$i]}" || RESULT=1
         done
         echo ""
         echo "等待 3 秒..."
@@ -536,7 +609,7 @@ case "$COMMAND" in
         echo ""
         # 再启动
         for svc in "${SERVICES[@]}"; do
-            start_service "$svc" false
+            start_service "$svc" false || RESULT=1
             if [ "$ALL_SERVICES_SELECTED" = true ] && [ "$svc" != "backend" ]; then
                 echo "等待 10 秒..."
                 sleep 10
@@ -548,7 +621,7 @@ case "$COMMAND" in
         echo "命令: 查看状态"
         echo ""
         for svc in "${SERVICES[@]}"; do
-            status_service "$svc"
+            status_service "$svc" || RESULT=1
         done
         ;;
         
@@ -561,7 +634,12 @@ esac
 
 echo ""
 echo "========================================"
-echo "操作完成"
+if [ "$RESULT" -eq 0 ]; then
+    echo "操作完成"
+else
+    echo "操作失败: 至少一个服务未就绪或操作失败"
+fi
 echo "PID 目录: $PID_DIR"
 echo "日志目录: $LOG_DIR"
 echo "========================================"
+exit "$RESULT"

@@ -85,6 +85,53 @@ SW_AGENT_COLLECTOR_BACKEND_SERVICES=127.0.0.1:11800
 
 ## 5. 日志文件
 
+### Readiness and exit status
+
+`start` (background), `restart`, and `status` require **both** an identity-validated
+Java PID and a successful readiness response. Install `curl` and `python3` on the
+application host. Foreground start still uses `exec java` and returns Java's exit
+status; it does not run a background readiness wait.
+
+- Storage probes `http://127.0.0.1:${QOS_STORAGE_PORT:-22332}/ready`.
+- FISCO probes `http://127.0.0.1:${QOS_FISCO_PORT:-22331}/ready`.
+- Both provider responses must be HTTP success with the JSON boolean `true`.
+  Triple ports (`DUBBO_STORAGE_PORT`, `DUBBO_FISCO_PORT`) and `DUBBO_HOST` are RPC
+  configuration, not HTTP Actuator endpoints. Keep QoS foreign access disabled.
+- Backend probes `/actuator/health` under `SERVER_SERVLET_CONTEXT_PATH` and
+  requires a top-level JSON `status` equal to `UP`. With the `prod` profile,
+  defaults match the checked-in YAML: HTTPS, port 443, `/record-platform`.
+  Other profiles default to HTTP, port 8080, empty context; supply matching
+  environment overrides for custom/Nacos profiles.
+- `SERVER_PORT`, `SERVER_ADDRESS`, `SERVER_SSL_ENABLED` (or prod `SSL_ENABLED`),
+  and `SERVER_SERVLET_CONTEXT_PATH` override those defaults. Wildcard bind
+  addresses probe loopback. `BACKEND_HEALTH_HOST` overrides only the probe host
+  (for example, a local DNS name matching the TLS certificate). TLS verification
+  is never disabled: configure a trusted CA with curl's `CURL_CA_BUNDLE` as needed.
+  Arbitrary remote configuration and separate management ports are not inferred;
+  keep the health endpoint on the configured application listener.
+- Legacy `BACKEND_PORT`, `STORAGE_PORT`, and `FISCO_PORT` remain fallback aliases
+  for `SERVER_PORT`, `DUBBO_STORAGE_PORT`, and `DUBBO_FISCO_PORT`; canonical
+  variables win and the aliases are exported into actual application settings.
+- `HEALTH_CHECK_TIMEOUT=60` bounds each startup readiness wait including requests;
+  `HEALTH_CHECK_INTERVAL=2` and `HEALTH_CHECK_REQUEST_TIMEOUT=3` control polling
+  and each connection/request timeout, in positive integer seconds. Local probes
+  bypass HTTP proxies, ignore user curlrc files, and do not follow redirects or
+  retry individual HTTP requests automatically.
+
+A stopped, replaced, unhealthy or timed-out process returns nonzero. An existing
+PID alone no longer makes `start` succeed. Multi-service commands continue checking
+the requested services but retain any earlier failure in their final exit status.
+A timeout does not kill an identity-valid running process; inspect logs or stop it
+explicitly before retrying. QoS readiness proves Dubbo bootstrap/provider readiness,
+not an end-to-end file upload, object-store write, or blockchain transaction.
+
+Regression checks (also run by the required CI policy-test job):
+
+```bash
+bash -n scripts/start.sh scripts/env.sh
+python3 -m unittest discover -s tools/ci/tests -p 'test_service_readiness.py' -v
+```
+
 日志保存在 `log/` 目录：
 
 | 文件               | 服务       |
