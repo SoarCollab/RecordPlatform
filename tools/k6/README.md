@@ -37,13 +37,21 @@ tools/k6/
 ## 前置条件
 
 - 后端服务可访问（默认：`http://localhost:8000/record-platform/api/v1`）
-- 本地 `k6`（macOS）：
+- 本地使用已校验的 k6 **0.57.0** 发布二进制（不是最新版/长期维护承诺）；或显式使用 Docker 固定镜像：
 
 ```bash
-brew install k6
+source tools/k6/runtime.env
+export K6_DOCKER_IMAGE="$K6_TESTED_IMAGE"
+bash tools/k6/check-runtime.sh docker
 ```
 
 - 如需 Docker 执行，必须显式使用 `--engine docker`，并通过 `K6_DOCKER_IMAGE` 提供 digest 固定镜像，例如 `grafana/k6@sha256:<digest>`。
+
+固定基线是 `grafana/k6@sha256:70af91f86cd8e142e0544a4edaf79835a80033f71974b92edd5ac36fd4442a7b`（0.57.0）。原 0.49.0 默认/base 模式都无法初始化现有导入图；不是只改一个对象展开表达式就能修复。完整无网络门禁初始化七个入口及受支持场景，并执行真实 ArrayBuffer/hash fixture 断言；本地等效命令为 `K6_BINARY=/path/to/k6-v0.57.0/k6 bash tools/k6/check-runtime.sh local`，版本不符会失败。
+
+两条上传路径现在使用真正 ASCII 文本 `.txt` / `text/plain`，保留精确分片大小、每个 run/VU/iteration/part 的内容隔离、SHA-256 检查和原始预签名请求边界。不修改生产上传白名单；每次使用新 `RUN_ID`。
+
+私有 HTTPS：原生 k6 使用系统信任；Docker 使用 `K6_CA_CERT_FILE=/private/path/public-trust-bundle.pem`，包装脚本将公共证书只读挂载并设置 `SSL_CERT_FILE`。禁止提交证书/私钥或关闭 TLS 验证。完整用户自行验收步骤见 [中文性能指南](../../docs/zh/perf/k6-loadtest.md#私有-https-与用户自行验收)。初始化不访问服务，不能当作真实业务验收。
 
 > 注意：`X-Tenant-ID` 对 `/api/v1/auth/login` 也必填。
 
@@ -198,7 +206,7 @@ GitHub Actions Secrets（与统一变量同名）：
 - `USERNAME`
 - `PASSWORD`
 
-手工工作流默认执行 `direct-path/smoke`，也可选择 load 和其他场景。镜像固定为 `grafana/k6:0.49.0` 对应的 multi-arch digest；报告 artifact 使用 `if: always()` 上传。外部环境 secret 只服务手工工作流，不属于 PR 强制门禁；PR 内真实 MinIO/Redis/Toxiproxy 门禁由 `platform-storage -Pit` 提供。
+手工工作流默认执行 `direct-path/smoke`，也可选择 load 和其他场景（`core-mixed` 仅支持 smoke）。镜像固定为 `grafana/k6:0.57.0` 对应的 multi-arch digest；报告 artifact 使用 `if: always()` 上传。外部环境 secret 只服务手工工作流，不属于 PR 强制门禁；PR 内真实 MinIO/Redis/Toxiproxy 门禁由 `platform-storage -Pit` 提供，`Required CI` 另执行不联网的运行器/fixture 门禁。
 
 ## 常见问题
 

@@ -1,5 +1,56 @@
 # Flyway v0.0.2 Release Compatibility Runbook
 
+## MySQL bootstrap permissions
+
+**A connection-initialization permission failure is not evidence of damaged migration history.** For this failure, use the permission checks below, not the historical rewrite recovery in section 5. Keep normal Flyway migration and validation enabled; do not edit history or run automatic repair.
+
+### Diagnose the version-scoped failure
+
+The observed deployment path uses **Flyway 11.7.2, Druid 1.2.28 and MySQL 8.4**. During connection initialization, Flyway probes user-variable reset capability with:
+
+```sql
+SELECT variable_name FROM performance_schema.user_variables_by_thread WHERE variable_value IS NOT NULL;
+```
+
+MySQL denies this query when the migration account has only application-schema privileges. On the observed Druid path the denied SELECT causes the connection to be discarded; the later `SELECT @@foreign_key_checks` then fails with `connection disabled`. Inspect the **first** SQL exception, not only the final foreign-key-check message. This is not a universal grant requirement for every Flyway version, connection pool or MySQL-compatible service. Recheck the resolved versions and probe after dependency changes.
+
+The older [Flyway #3202 report](https://github.com/flyway/flyway/issues/3202) records the same probe denial, and [Druid #3626](https://github.com/alibaba/druid/issues/3626) records the denied-query/disabled-connection chain. They corroborate the symptom, not the current deployment versions or a universal workaround.
+
+### Grant and verify only the required capability
+
+Have an authorized database operator provision a dedicated migration account with the schema-local privileges required by the reviewed migrations, including their table and routine DDL. For the path above, add only this system-table privilege. Replace the literal placeholders with the approved account and its restricted source host; do not broaden its host to `%` or use a database administrator as the application identity.
+
+```sql
+GRANT SELECT ON performance_schema.user_variables_by_thread TO '<migration-user>'@'<migration-host>';
+SHOW GRANTS FOR '<migration-user>'@'<migration-host>';
+```
+
+Inspect the complete effective grant set, including any active roles: only the intended application-schema privileges and this single-table SELECT are allowed for this bootstrap procedure. Do not substitute global SELECT, a `performance_schema` wildcard grant, or `GRANT OPTION`.
+
+Reconnect **as the exact migration account from the same source host used by the backend**, with credentials supplied privately, then run:
+
+```sql
+SELECT CURRENT_USER(), CURRENT_ROLE();
+SHOW GRANTS;
+SELECT variable_name FROM performance_schema.user_variables_by_thread WHERE variable_value IS NOT NULL;
+SELECT @@foreign_key_checks;
+```
+
+The probe must succeed even if it returns zero rows. The MySQL grant target must match `CURRENT_USER()`; have the operator review inherited role privileges if `CURRENT_ROLE()` is not `NONE`. Do not export query results or account details into public logs. Perform one normal migration/startup attempt with the intended artifact, and verify `flyway_schema_history` has no failed rows and matches that artifact's migration set. A fresh validation of the observed artifact completed all 38 migrations from `1.0.0` through `1.20.0`; this is bounded historical evidence, not a hard-coded expected count for future releases. Application readiness is a separate check and may still fail for unrelated dependencies.
+
+### Protect and retire migration credentials
+
+This table exposes **session user-variable names and values**, potentially from other sessions; table-level SELECT is not restricted to the application schema or only the names in Flyway's query. Treat it as a migration capability, not ordinary business-data access. See the [MySQL 8.4 table definition](https://dev.mysql.com/doc/refman/8.4/en/performance-schema-user-variable-tables.html). Use separate migration/runtime credentials where the deployment supports them; do not silently change the current startup migration model or disable Flyway to hide a missing grant. Keep passwords in local secret storage, never in SQL examples or command history.
+
+When rotating credentials, provision and verify the replacement account and its source-host restriction first, switch the migration configuration, and confirm normal migration/startup before retiring the old credential. Revoke this grant only after proving that the account no longer performs migrations or startup probes:
+
+```sql
+REVOKE SELECT ON performance_schema.user_variables_by_thread FROM '<migration-user>'@'<migration-host>';
+SHOW GRANTS FOR '<migration-user>'@'<migration-host>';
+```
+
+Revoking it from an account still used by startup Flyway can break the next restart even when no migrations are pending. Reconnect with the retired account and confirm the focused probe is denied and no inherited role still supplies access; verify the replacement migration path separately. Retain sanitized grant/validation evidence, not session-variable values or credentials.
+
 ## 1. Scope and invariants
 
 This runbook applies when upgrading a RecordPlatform database that may have run migrations from release `v0.0.2` or from the known development rewrite that was formerly on `main`.
@@ -214,6 +265,8 @@ Re-run the history and schema queries from sections 2 and 4. Start one canary in
 ## 6. Normal fresh and v0.0.2 upgrade path
 
 For a fresh database or an exact canonical v0.0.2 database:
+
+Before migration, verify the dedicated account using [MySQL bootstrap permissions](#mysql-bootstrap-permissions). A system-table SELECT denial is handled there and does not justify the historical recovery commands.
 
 1. Back up the database if it already exists.
 2. Run `flyway:validate` for an existing database.

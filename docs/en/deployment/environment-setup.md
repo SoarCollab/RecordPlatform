@@ -94,6 +94,12 @@ Verify status:
 docker compose -f docker-compose.infra.yml ps
 ```
 
+### Provision the migration account before first startup
+
+Creating the database does not complete Flyway permission setup. On the observed Flyway 11.7.2 / Druid 1.2.28 / MySQL 8.4 path, the migration account also needs SELECT on exactly `performance_schema.user_variables_by_thread`; a denial may surface later as `connection disabled` while reading `foreign_key_checks`.
+
+Follow the canonical [MySQL bootstrap permissions](../../operations/flyway-release-compatibility.md#mysql-bootstrap-permissions) procedure for the precise grant, effective-grant/probe verification, session-variable exposure warning, and migration/runtime credential separation and retirement. Restrict the account's source host and keep credentials private. Neither infrastructure health nor `env-check.sh --fix` establishes this grant; do not use broad grants or disable Flyway to make startup pass. Existing databases still follow the [normal migration path](../../operations/flyway-release-compatibility.md#_6-normal-fresh-and-v0-0-2-upgrade-path) with validation enabled.
+
 ## Step 3: Configure Nacos
 
 Nacos serves as the configuration center. Application configs must be imported.

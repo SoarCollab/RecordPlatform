@@ -1224,6 +1224,11 @@ jobs:
       - name: Run Required CI policy tests
         run: python3 -m unittest discover -s tools/ci/tests -v
 
+      - name: Initialize pinned k6 runtime without network access
+        run: |
+          node --experimental-vm-modules --test tools/k6/tests/*.test.mjs
+          bash tools/k6/check-runtime.sh docker
+
       - name: Enforce required and inapplicable job results
         run: |
           python3 tools/ci/required_ci_gate.py \

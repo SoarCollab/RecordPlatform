@@ -7,6 +7,7 @@ import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.ErrorPayloadFactory;
 import cn.flying.common.util.SensitiveDataMasker;
+import cn.flying.config.PrometheusScrapeSecurity;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,6 +39,13 @@ public class TenantFilter extends OncePerRequestFilter {
     private static final String TENANT_HEADER = "X-Tenant-ID";
     private static final String SSE_CONNECT_PATH = "/api/v1/sse/connect";
     private static final String PUBLIC_KEY_GRANT_CONSUME_PATH = "/api/v1/public/key-grants/consume";
+
+    private final PrometheusScrapeSecurity prometheusScrapeSecurity;
+
+    /** Require the shared scrape policy so tenant and authentication predicates cannot drift. */
+    public TenantFilter(PrometheusScrapeSecurity prometheusScrapeSecurity) {
+        this.prometheusScrapeSecurity = prometheusScrapeSecurity;
+    }
 
     /**
      * 全局公开 proof 路径不依赖租户查询，必须忽略匿名调用者提供的租户头。
@@ -86,6 +94,14 @@ public class TenantFilter extends OncePerRequestFilter {
         try {
             // 防止线程复用导致的 TenantContext 泄漏（例如：前一次请求在错误分支提前返回未进入 JWT 过滤器清理）
             TenantContext.clear();
+
+            // Machine scrapes carry no business tenant; authentication still runs downstream.
+            if (prometheusScrapeSecurity.isScrapeAttempt(request)) {
+                request.removeAttribute(Const.ATTR_TENANT_ID);
+                MDC.remove(Const.ATTR_TENANT_ID);
+                filterChain.doFilter(request, response);
+                return;
+            }
 
             String requestUri = request.getRequestURI();
             String maskedRequestUri = SensitiveDataMasker.maskSensitivePathSegments(requestUri);

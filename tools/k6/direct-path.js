@@ -1,6 +1,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { randomBytes, sha256 } from 'k6/crypto';
+import { sha256 } from 'k6/crypto';
+import { buildTextFixture, FIXTURE_CONTENT_TYPE } from './lib/fixture.js';
 import {
   buildRequestTags,
   createConstantVusOptions,
@@ -65,10 +66,10 @@ function buildClientId(runId) {
  *
  * @returns {{index:number, bytes:ArrayBuffer, size:number, hash:string}[]} 分片计划
  */
-function buildPartPlan() {
+function buildPartPlan(fileName) {
   const parts = [];
   for (let index = 0; index < directConfig.totalChunks; index += 1) {
-    const bytes = randomBytes(directConfig.chunkSize);
+    const bytes = buildTextFixture(directConfig.chunkSize, `${fileName}:${index}`);
     parts.push({
       index,
       bytes,
@@ -217,8 +218,8 @@ export function runDirectPathFlow(context, scenarioName = 'direct-path') {
     'Content-Type': 'application/json',
   });
   const clientId = buildClientId(context.config.runId);
-  const fileName = `k6-${context.config.runId}-${__VU}-${__ITER}-direct.bin`;
-  const partPlan = buildPartPlan();
+  const fileName = `k6-${context.config.runId}-${__VU}-${__ITER}-direct.txt`;
+  const partPlan = buildPartPlan(fileName);
   const fileSize = partPlan.reduce((total, part) => total + part.size, 0);
   let uploadedBytes = 0;
   let downloadedBytes = 0;
@@ -230,7 +231,7 @@ export function runDirectPathFlow(context, scenarioName = 'direct-path') {
       clientId,
       fileName,
       fileSize,
-      contentType: 'application/octet-stream',
+      contentType: FIXTURE_CONTENT_TYPE,
       chunkSize: directConfig.chunkSize,
       totalChunks: partPlan.length,
       parts: partPlan.map((part) => ({

@@ -38,6 +38,12 @@
    kill -9 <PID>
    ```
 
+### Flyway 读取 `foreign_key_checks` 时提示 `connection disabled`
+
+在已验证的 Flyway 11.7.2 / Druid 1.2.28 / MySQL 8.4 部署路径中，先检查更早的日志是否包含对 `performance_schema.user_variables_by_thread` 的 SELECT 拒绝。Druid 可能先丢弃该连接，之后 Flyway 才读取 `foreign_key_checks`；不能仅凭最终异常判断迁移历史损坏。
+
+按 [MySQL 初始化权限说明](../../operations/flyway-release-compatibility.md#mysql-bootstrap-permissions) 为受限迁移账户精确授予单表 SELECT，以该账户核验有效权限并执行探测查询，同时确认会话变量暴露风险及撤销权限对后续启动的影响。禁止使用管理员作为应用账户、扩大系统库权限、关闭迁移或自动修复历史作为绕过方式。若最初异常或依赖版本不同，应根据对应证据单独诊断。
+
 ### Dubbo 服务注册失败
 
 **症状**：Provider 服务在 Nacos 控制台不可见。

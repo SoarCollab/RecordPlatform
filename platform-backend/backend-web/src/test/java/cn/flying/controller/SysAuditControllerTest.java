@@ -44,7 +44,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 
 @WebMvcTest(SysAuditController.class)
-// @Import(cn.flying.config.WebConfiguration.class) // Import config to pick up any web settings if needed
+@Import(cn.flying.config.PrometheusScrapeSecurity.class)
 @ActiveProfiles("test")
 public class SysAuditControllerTest {
 

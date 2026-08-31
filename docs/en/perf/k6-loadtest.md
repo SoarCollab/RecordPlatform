@@ -16,17 +16,45 @@ The repository provides repeatable, gated, and archivable k6 scenarios for query
 
 The external-environment workflow is manually triggered and is not a required pull-request check. Pull requests use the real MinIO/Redis/Toxiproxy integration gate from `platform-storage -Pit`; do not describe a manual k6 run as a PR gate.
 
+`Required CI` additionally initializes all seven k6 entrypoints and their supported scenario selections under the pinned image with networking disabled, then executes local fixture assertions. This is a runtime/fixture gate, not a deployed-service smoke test.
+
 ## Prerequisites
 
 - Backend reachable at `BASE_URL` (default `http://localhost:8000/record-platform/api/v1`).
 - `TENANT_ID`, `USERNAME`, and `PASSWORD` provided explicitly; login also requires `X-Tenant-ID`.
-- Local k6 installed with `brew install k6`, or the explicit Docker engine.
+- A verified k6 **0.57.0** release binary, or the explicit Docker engine. This is the tested compatibility baseline, not a claim that it is the latest or long-term-supported release. Newer binaries require independent compatibility validation.
 
 `--engine auto` only selects a local k6 binary. Docker execution requires `--engine docker` and a digest-pinned `K6_DOCKER_IMAGE`. The workflow pins:
 
 ```text
-grafana/k6@sha256:8cd78f9d0de5f50bc8821cceecf356d5d9e839e6611c226a3fcf13c591080fbd
+grafana/k6@sha256:70af91f86cd8e142e0544a4edaf79835a80033f71974b92edd5ac36fd4442a7b
 ```
+
+The old 0.49.0 default parser rejects object spread; its `base` mode also fails on the imported module graph. [k6 0.57.0](https://github.com/grafana/k6/releases/tag/v0.57.0) supplies modern syntax without an experimental compatibility flag. `tools/k6/runtime.env` is the canonical pin. For a local binary, verify the archive against the release checksum file before adding its directory to `PATH`.
+
+```bash
+# No target access, login, uploads, or cleanup:
+bash tools/k6/check-runtime.sh docker
+# Equivalent runtime check with the matching verified release binary:
+K6_BINARY=/path/to/k6-v0.57.0/k6 bash tools/k6/check-runtime.sh local
+```
+
+### Private HTTPS and User-Run Acceptance
+
+Trust the issuing CA or explicitly approved self-signed **public** certificate in the local OS trust store for native k6. Docker does not inherit macOS Keychain trust: set `K6_CA_CERT_FILE` to a readable local PEM trust bundle; both wrappers mount it read-only and set the container's `SSL_CERT_FILE`. The certificate must cover both API and presigned object-storage hosts. Never supply a private key or disable TLS verification. Keep credentials, certificates and result artifacts outside Git.
+
+After deploying the intended `main` revision, privately export `BASE_URL`, `TENANT_ID`, `USERNAME`, and `PASSWORD` for a disposable account, then run:
+
+```bash
+source tools/k6/runtime.env
+export K6_DOCKER_IMAGE="$K6_TESTED_IMAGE"
+export K6_CA_CERT_FILE=/private/path/public-trust-bundle.pem
+export VUS=1 DURATION=15s DIRECT_TOTAL_CHUNKS=2 DIRECT_CHUNK_SIZE=65536 CLEANUP=true
+bash tools/k6/run-local.sh --profile smoke --scenario direct-path --engine docker \
+  --run-id "acceptance-$(date +%Y%m%d%H%M%S)"
+```
+
+Require exit zero, non-zero completed-file/flow/cleanup samples, unchanged size/SHA-256 checks, and zero flow/cleanup failures. Verify the chain receipt separately if chain-level acceptance is required: this suite verifies file/manifest/object lifecycle, not an independent chain RPC receipt. Cleanup means the application's logical deletion; physical retention/sweep remains governed by server policy. Initialization alone does not establish deployed-service acceptance.
 
 ## Run Profiles
 
@@ -47,6 +75,8 @@ Supported values are:
 - `K6_SCENARIO=all|file-query|chunk-upload|core-mixed|direct-path`
 - `K6_ENGINE=auto|local|docker`
 
+`core-mixed` is a smoke-only selection; load supports `all|file-query|chunk-upload|direct-path`.
+
 The manual `.github/workflows/perf-smoke.yml` workflow defaults to `direct-path/smoke` and exposes profile, scenario, concurrency, duration, environment fingerprint, baseline path, resource snapshot path, and lifecycle snapshot path.
 
 ## Direct-Path Contract
@@ -61,6 +91,8 @@ Each direct iteration performs the complete lifecycle:
 6. Delete the created file and verify cleanup evidence.
 
 Raw presigned PUT/GET requests must not receive platform `Authorization`, `X-Tenant-ID`, or JSON headers. ETag is only an object-version condition; SHA-256 is the content identity. The direct suite disables k6 `url`/`name` system tags and forces `--log-output none`, preventing signed query parameters from entering metrics, logs, failure samples, or artifacts.
+
+Both upload paths use `.txt` / `text/plain` and genuine printable ASCII/newline `ArrayBuffer` payloads, not renamed random binary data. The shared fixture preserves exact configured part sizes and derives deterministic content from run, VU, iteration, and part identity to avoid accidental cross-run deduplication. Production extension/MIME validation is unchanged. Give every run a new `RUN_ID`; repeating the same ID intentionally repeats fixture content.
 
 ## Thresholds
 

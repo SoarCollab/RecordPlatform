@@ -78,6 +78,9 @@ public class SecurityConfiguration {
     @Resource
     ObjectMapper objectMapper;
 
+    @Resource
+    PrometheusScrapeSecurity prometheusScrapeSecurity;
+
     /**
      * 针对于 SpringSecurity 6 的新版配置方法
      * @param http 配置器
@@ -87,6 +90,13 @@ public class SecurityConfiguration {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         JsonUsernamePasswordAuthenticationFilter jsonLoginFilter = buildJsonLoginFilter();
+        // Register custom filter orders before positioning the optional machine authentication filter.
+        http
+                .addFilterBefore(requestLogFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(jwtAuthenticationFilter, RequestLogFilter.class);
+        if (prometheusScrapeSecurity.isEnabled()) {
+            http.addFilterBefore(prometheusScrapeSecurity.createFilter(), JwtAuthenticationFilter.class);
+        }
         return http
                 .authorizeHttpRequests(conf -> conf
                         // 公开端点
@@ -122,6 +132,10 @@ public class SecurityConfiguration {
                                 UserRole.ROLE_MONITOR.getRole())
                         // 健康检查端点公开
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        .requestMatchers(prometheusScrapeSecurity::matches).hasAnyAuthority(
+                                PrometheusScrapeSecurity.AUTHORITY,
+                                "ROLE_" + UserRole.ROLE_ADMINISTER.getRole(),
+                                "ROLE_" + UserRole.ROLE_MONITOR.getRole())
                         // 监控端点需要管理员或监控员角色
                         .requestMatchers("/actuator/**").hasAnyRole(
                                 UserRole.ROLE_ADMINISTER.getRole(),
@@ -149,8 +163,6 @@ public class SecurityConfiguration {
                 .csrf(AbstractHttpConfigurer::disable) // lgtm[java/spring-disabled-csrf-protection]
                 .sessionManagement(conf -> conf
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .addFilterBefore(requestLogFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(jwtAuthenticationFilter, RequestLogFilter.class)
                 .addFilterAt(jsonLoginFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }

@@ -113,14 +113,64 @@ saga:
 
 ## Prometheus Configuration
 
+### Dedicated Scrape Identity
+
+Backend metrics are **not anonymous**. The optional machine identity is disabled by
+default; existing admin/monitor Bearer access still requires the matching business
+tenant. Enable the machine path explicitly with these backend settings:
+
+| Environment variable | Application property | Default |
+|---|---|---|
+| `PROMETHEUS_SCRAPE_ENABLED` | `security.prometheus-scrape.enabled` | `false` |
+| `PROMETHEUS_SCRAPE_USERNAME` | `security.prometheus-scrape.username` | empty |
+| `PROMETHEUS_SCRAPE_PASSWORD_HASH` | `security.prometheus-scrape.password-hash` | empty |
+
+Use a dedicated username (1–64 ASCII letters/digits, dot, underscore or hyphen;
+first character must be alphanumeric) and a BCrypt hash (`$2a$`, `$2b$`, or `$2y$`).
+Enabled configuration with missing or invalid values fails startup; plaintext and
+`{noop}` passwords are rejected. Only exact `GET`/`HEAD /actuator/prometheus`, below
+the configured servlet context path, accept this Basic identity. It has only
+`PROMETHEUS_SCRAPE`, **not** an admin/monitor business role. It cannot authenticate
+files, audit/log APIs, other actuator endpoints, descendants, or write methods.
+Caller tenant headers are ignored on this machine route and create no business
+tenant context. Do not add an invented `X-Tenant-ID` header to the scraper.
+
+Provision a strong random password in a local secret manager, then store it in a
+private Prometheus `password_file` (owner-only `0600`, containing only the password,
+with no trailing newline). Generate a BCrypt hash interactively using a trusted
+tool such as `htpasswd -cB -C 12 /private/path/scrape.htpasswd collector`; enter the
+same password at its prompt, never pass it with `-b`. Store **only the hash** in the
+backend's private configuration, never the `username:` prefix. Protect any hash
+file too. Username/hash/password files and certificates must not be committed.
+
+Single-quote the complete hash in shell or dotenv assignments so literal `$`
+characters survive; unquoted/double-quoted shell assignments expand them. Export
+these variables to the backend process (a Compose `.env` file alone does not inject
+container environment). A YAML application property containing the hash also needs
+safe quoting. Never enable credential-bearing debug dumps or put passwords in URLs.
+This feature does not configure TLS: expose it only through verified HTTPS, directly
+or through an explicitly managed private reverse proxy. Preserve existing backend
+TLS/forwarded-header policy; arbitrary forwarded headers do not establish trust.
+
 ### Scrape Config
+
+The following is an operator template, **not** a ready-to-run endpoint or credential.
+Replace the DNS name/port and mount private files read-only. The certificate SAN must
+match the target name; `ca_file` contains the trusted CA or explicitly trusted public
+self-signed certificate. TLS certificate verification must remain enabled.
 
 ```yaml
 scrape_configs:
   - job_name: 'recordplatform-backend'
+    scheme: https
     metrics_path: '/record-platform/actuator/prometheus'
+    basic_auth:
+      username: 'collector'
+      password_file: '/run/secrets/prometheus-scrape-password'
+    tls_config:
+      ca_file: '/run/secrets/backend-ca.crt'
     static_configs:
-      - targets: ['backend:8000']
+      - targets: ['backend.example.internal:443']
 
   # Storage and FISCO are Dubbo providers without embedded HTTP servers,
   # so they do not expose /actuator/prometheus directly.
@@ -130,6 +180,39 @@ scrape_configs:
     static_configs:
       - targets: ['otel-collector:8889']
 ```
+
+### Rotation and Operator Acceptance
+
+Changing the backend username/hash requires a **backend restart**. Publish the new
+hash and matching private password file together, restart the backend, then validate
+the Prometheus configuration with `promtool check config` and reload Prometheus
+(SIGHUP or its explicitly enabled lifecycle reload endpoint). Single-credential
+rotation can cause a brief scrape gap; no zero-downtime overlap is promised. Verify
+the new password succeeds and the old password is rejected before retiring it.
+
+Run these checks yourself after deployment; the source tests are not live-server
+acceptance. `curl --user collector` prompts for the password, keeping it out of
+arguments/history. Use the trusted public certificate/CA, never disable verification:
+
+```bash
+curl -q --cacert /private/path/backend-ca.crt --user collector --fail \
+  https://backend.example.internal/record-platform/actuator/prometheus
+curl -q --cacert /private/path/backend-ca.crt --user collector --head \
+  https://backend.example.internal/record-platform/actuator/prometheus
+curl -q --cacert /private/path/backend-ca.crt --user collector --write-out '%{http_code}\n' \
+  https://backend.example.internal/record-platform/actuator/info
+```
+
+The first two must return 200 (GET contains actual metrics). Other protected paths
+must not return metric/business data with scrape credentials. Repeat the first
+request with a wrong/old password: expect 401 and no metrics. With no credentials
+and no tenant, the existing outer tenant filter returns 400; with a tenant but no
+authentication it returns 401. Confirm the backend target is UP in Prometheus and
+fresh business samples arrive; OTel/JVM samples alone do not prove this target.
+Existing Bearer admin/monitor and ordinary application login should still work.
+
+References: [Spring Basic authentication](https://docs.spring.io/spring-security/reference/servlet/authentication/passwords/basic.html),
+[Prometheus HTTP authentication and TLS configuration](https://prometheus.io/docs/prometheus/latest/configuration/configuration/).
 
 ### Alert Rules
 

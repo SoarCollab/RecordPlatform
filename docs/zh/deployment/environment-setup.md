@@ -94,6 +94,12 @@ docker compose -f docker-compose.infra.yml up -d --wait
 docker compose -f docker-compose.infra.yml ps
 ```
 
+### 首次启动前配置迁移账户
+
+创建数据库并不等于完成 Flyway 权限配置。在已验证的 Flyway 11.7.2 / Druid 1.2.28 / MySQL 8.4 路径中，迁移账户还需要且仅增加对 `performance_schema.user_variables_by_thread` 的 SELECT 权限；最初的拒绝可能最终表现为读取 `foreign_key_checks` 时提示 `connection disabled`。
+
+按统一的 [MySQL 初始化权限说明](../../operations/flyway-release-compatibility.md#mysql-bootstrap-permissions) 执行精确授权、有效权限与探测查询验证，并阅读会话变量暴露风险、迁移/运行账户分离和凭据撤销条件。限制账户来源主机，凭据仅保存在私密配置中。基础设施健康或 `env-check.sh --fix` 并不代表已完成该授权；禁止扩大到全局权限或关闭 Flyway 来绕过启动失败。已有数据库仍应保持校验开启，按[正常迁移流程](../../operations/flyway-release-compatibility.md#_6-normal-fresh-and-v0-0-2-upgrade-path)执行。
+
 ## 步骤 3：配置 Nacos
 
 Nacos 作为配置中心，需要导入应用配置。

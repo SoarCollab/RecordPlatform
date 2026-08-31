@@ -173,7 +173,7 @@ class JwtAuthenticationFilterTest {
                 return null;
             }).when(filterChain).doFilter(request, response);
 
-            new TenantFilter().doFilterInternal(
+            new TenantFilter(new cn.flying.config.PrometheusScrapeSecurity(false, "", "")).doFilterInternal(
                     request,
                     response,
                     (filteredRequest, filteredResponse) ->

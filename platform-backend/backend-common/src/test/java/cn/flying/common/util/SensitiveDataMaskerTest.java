@@ -14,6 +14,17 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class SensitiveDataMaskerTest {
 
+    /** Treat stored password verifiers as secrets across configuration naming variants. */
+    @Test
+    void shouldMaskPasswordHashAliases() {
+        String sentinel = "synthetic-password-verifier";
+        for (String field : List.of("passwordHash", "password_hash", "password-hash", "PASSWORD_HASH")) {
+            assertTrue(SensitiveDataMasker.isSensitiveField(field));
+            assertFalse(SensitiveDataMasker.maskSensitiveFields(Map.of(field, sentinel)).toString().contains(sentinel));
+            assertFalse(SensitiveDataMasker.maskSensitiveFields("{\"" + field + "\":\"" + sentinel + "\"}").contains(sentinel));
+        }
+    }
+
     /** Exercise collection, serialization and Throwable limits through public log-copy entrypoints. */
     @Test
     void shouldOmitOverBudgetLogCopiesWithoutPublishingPrefixes() {
