@@ -11,6 +11,59 @@ group_eval_order:
   - slo:attestation_latency
 
 tests:
+  - name: observed-histogram-with-only-infinity-alerts-without-cross-instance-masking
+    interval: 1m
+    input_series:
+      - series: 'up{job="otel-collector",instance="collector-a"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_count{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-a",chain="local-fisco",operation="storeFile"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-a",chain="local-fisco",operation="storeFile",le="+Inf"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-b",chain="local-fisco",operation="storeFile",le="5"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",instance="collector-b",exported_job="record-platform-fisco",exported_instance="producer-a",chain="local-fisco",operation="storeFile",le="5"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-a",chain="other-chain",operation="storeFile",le="5"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",instance="collector-a",exported_job="record-platform-storage",exported_instance="producer-a",chain="local-fisco",operation="storeFile",le="5"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-a",chain="local-fisco",operation="queryFile",le="5"}'
+        values: '1+0x5'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: RecordPlatformFiscoHistogramBucketsMissing
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: RecordPlatformFiscoHistogramBucketsMissing
+        exp_alerts:
+          - exp_labels: {job: otel-collector, instance: collector-a, exported_job: record-platform-fisco, exported_instance: producer-a, chain: local-fisco, operation: storeFile, severity: warning, slo: monitoring}
+            exp_annotations:
+              summary: 'FISCO operation histogram has no finite buckets'
+              description: 'An observed storeFile timer has no finite buckets for the same producer and chain; percentile estimates are unavailable.'
+
+  - name: finite-buckets-idle-and-down-collectors-do-not-fire-bucket-absence
+    interval: 1m
+    input_series:
+      - series: 'up{job="otel-collector",instance="collector-a"}'
+        values: '1+0x5'
+      - series: 'up{job="otel-collector",instance="collector-down"}'
+        values: '0+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_count{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-a",chain="local-fisco",operation="storeFile"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-a",chain="local-fisco",operation="storeFile",le="5"}'
+        values: '0+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_count{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-idle",chain="local-fisco",operation="storeFile"}'
+        values: '0+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_count{job="otel-collector",instance="collector-down",exported_job="record-platform-fisco",exported_instance="producer-down",chain="local-fisco",operation="storeFile"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_count{job="otel-collector",instance="not-configured",exported_job="record-platform-fisco",exported_instance="producer-optional",chain="local-fisco",operation="storeFile"}'
+        values: '1+0x5'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: RecordPlatformFiscoHistogramBucketsMissing
+        exp_alerts: []
+
   - name: actual-saga-export-after-success-does-not-fire-missing-metrics
     interval: 1m
     input_series:

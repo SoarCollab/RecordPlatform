@@ -569,6 +569,10 @@ including the 5-second SLO. In the pinned bridge, client percentiles or
 After a genuine operation, verify finite `le` buckets as well as `_count`/`_sum`;
 a lone `+Inf` bucket cannot produce a percentile even with nonzero observations.
 Use a later cumulative increment after the first export baseline for `rate` checks.
+`RecordPlatformFiscoHistogramBucketsMissing` warns after2 minutes only when a
+configured Collector is up and an observed storeFile counter is positive but the
+same producer/chain/operation has no finite buckets. Another service, producer or
+Collector target cannot mask the gap. Never-called or zero-count timers do not fire it.
 
 ### Collection health and no-data behavior
 

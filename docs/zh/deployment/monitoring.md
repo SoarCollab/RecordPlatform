@@ -541,6 +541,9 @@ FISCO Timer 必须提供显式 `serviceLevelObjectives(Duration...)` 桶边界�
 `publishPercentileHistogram(true)` 不会提供可用的有限桶建议。真实操作后，除
 `_count`/`_sum` 外还必须确认有限 `le` 桶；只有 `+Inf` 时即使计数非零也无法计算分位数。
 验收 `rate` 需在首次导出基线之后再观察一次累计计数增长。
+`RecordPlatformFiscoHistogramBucketsMissing` 仅在已配置 Collector 为 up、storeFile
+计数非零但同一生产者/链/操作缺少有限桶时持续2分钟告警。其他服务、生产者或
+Collector target 的桶不能掩盖缺失；从未调用或计数为零的 Timer 不触发此告警。
 
 ### 采集健康与无数据语义
 

@@ -35,6 +35,23 @@ groups:
   # jobs must not page, and absent data must never be replaced with healthy zeroes.
   - name: monitoring:collection
     rules:
+      - alert: RecordPlatformFiscoHistogramBucketsMissing
+        expr: |
+          (
+            (otel_blockchain_operation_duration_seconds_count{job="otel-collector",exported_job="record-platform-fisco",operation="storeFile"} > 0)
+            and on(job, instance)
+            (up{job="otel-collector"} == 1)
+          )
+          unless on(job, instance, exported_job, exported_instance, chain, operation)
+          otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",exported_job="record-platform-fisco",operation="storeFile",le=~"[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?"}
+        for: 2m
+        labels:
+          severity: warning
+          slo: monitoring
+        annotations:
+          summary: "FISCO operation histogram has no finite buckets"
+          description: "An observed storeFile timer has no finite buckets for the same producer and chain; percentile estimates are unavailable."
+
       - alert: RecordPlatformScrapeTargetDown
         expr: up{job=~"recordplatform-backend|otel-collector"} == 0
         for: 2m
