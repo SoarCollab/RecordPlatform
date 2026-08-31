@@ -75,6 +75,11 @@ HTTP 兼容性保持不变：`DOWN` 与 `OUT_OF_SERVICE` 返回 503，`DEGRADED`
 | `saga_running` | Gauge | 正在运行的 Saga |
 | `saga_pending_compensation` | Gauge | 待补偿的 Saga |
 
+生产 `SagaMetrics` 中名为 `saga.total` 的 counter，经固定版本 Prometheus registry
+实际导出为 `saga_total`，标签为 `status=started|completed|failed|compensated`，四种
+状态在请求流量到来前即注册。Exporter 已规范化 counter 后缀，不应再追加第二个
+`_total`。可执行 exporter 契约测试会对照生产注册结果检查两份规则和数值 fixture。
+
 ### Outbox 指标
 
 | 指标 | 类型 | 说明 |
@@ -475,7 +480,7 @@ output {
 
 | SLI | 指标来源 | 计算方式 |
 |-----|---------|---------|
-| **上传成功率** | `saga_total_total{status}` | completed / (completed + failed + compensated) |
+| **上传成功率** | `saga_total{status}` | completed / (completed + failed + compensated) |
 | **存证 P99 延迟** | `otel_blockchain_operation_duration_seconds_bucket` | 对 FISCO 观察值计算 `histogram_quantile(0.99, sum by (le) (rate(...[window])))` |
 | **存储可用性** | `s3_node_online_status` | 对按 `(node, fault_domain)` 去重后的瞬时在线节点占比做 30 天滚动平均 |
 | **API 错误率** | `http_server_requests_seconds_count{status}` | 5xx 数量 / 总请求数 |
@@ -530,6 +535,21 @@ rule_files:
 | Resilience4j | 断路器状态 + 重试次数 |
 
 > **注意**：Agent 2.26.1 默认 Micrometer bridge 将 Timer 导出为秒单位的直方图，而非客户端 quantile 序列，即使 Timer 调用了 `.publishPercentiles()`。规则和面板限定 `job="otel-collector",exported_job="record-platform-fisco",operation="storeFile"`，先对每条 counter 计算 `rate`，再按 `le` 求和并跨实例估算分位数。现有 5m/30m/1h recording 名称代表对应区间的观察值，不再是客户端分位数上包络。桶内插值是估算而非精确分位数；保留秒单位和 5 秒阈值。参见 [Prometheus 直方图函数](https://prometheus.io/docs/prometheus/latest/querying/functions/#histogram_quantile)。
+
+FISCO Timer 必须提供显式 `serviceLevelObjectives(Duration...)` 桶边界，包含5秒 SLO
+阈值。固定版本 bridge 中，仅配置客户端 percentiles 或
+`publishPercentileHistogram(true)` 不会提供可用的有限桶建议。真实操作后，除
+`_count`/`_sum` 外还必须确认有限 `le` 桶；只有 `+Inf` 时即使计数非零也无法计算分位数。
+显式秒单位桶边界为0.05、0.1、0.25、0.5、1、2.5、5、7.5、10、30、60。
+验收 `rate` 需在首次导出基线之后再观察一次累计计数增长。
+`RecordPlatformFiscoHistogramBucketsMissing` 仅在已配置 Collector 为 up、storeFile
+计数非零但同一生产者/链/操作缺少有限桶时持续2分钟告警。其他服务、生产者或
+Collector target 的桶不能掩盖缺失；从未调用或计数为零的 Timer 不触发此告警。
+
+FISCO 链状态数量默认按十进制解析，只有 SDK 文本明确以 `0x`/`0X` 开头才按十六进制
+解析；裸 `54` 应为十进制54，不能把它当成 `0x54` 得到84。非法、负值或溢出继续保持既有的零值回退，不能
+仅因数据来自区块链 SDK 就推断进制。契约测试使用真实 SDK 响应 DTO，经生产 service、
+adapter 直达 gauge 验证。
 
 ### 采集健康与无数据语义
 

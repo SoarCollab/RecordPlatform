@@ -18,7 +18,7 @@
 #   or POST /-/reload if --web.enable-lifecycle is set.
 #
 # Metric sources:
-#   saga_total_total{status}         — Micrometer counter (SagaMetrics.java)
+#   saga_total{status}         — Micrometer counter (SagaMetrics.java)
 #                                      status: started | completed | compensated | failed
 #   otel_blockchain_operation_duration_seconds_bucket{operation,le,exported_job}
 #                                    — FISCO metrics exported via OTel Collector Prometheus exporter
@@ -42,67 +42,67 @@ groups:
       # 5-minute window
       - record: sli:upload_success:ratio_rate5m
         expr: |
-          sum(rate(saga_total_total{status="completed"}[5m]))
+          sum(rate(saga_total{status="completed"}[5m]))
           /
           (
-            sum(rate(saga_total_total{status="completed"}[5m]))
-            + sum(rate(saga_total_total{status="failed"}[5m]))
-            + sum(rate(saga_total_total{status="compensated"}[5m]))
+            sum(rate(saga_total{status="completed"}[5m]))
+            + sum(rate(saga_total{status="failed"}[5m]))
+            + sum(rate(saga_total{status="compensated"}[5m]))
           )
 
       # 30-minute window
       - record: sli:upload_success:ratio_rate30m
         expr: |
-          sum(rate(saga_total_total{status="completed"}[30m]))
+          sum(rate(saga_total{status="completed"}[30m]))
           /
           (
-            sum(rate(saga_total_total{status="completed"}[30m]))
-            + sum(rate(saga_total_total{status="failed"}[30m]))
-            + sum(rate(saga_total_total{status="compensated"}[30m]))
+            sum(rate(saga_total{status="completed"}[30m]))
+            + sum(rate(saga_total{status="failed"}[30m]))
+            + sum(rate(saga_total{status="compensated"}[30m]))
           )
 
       # 1-hour window
       - record: sli:upload_success:ratio_rate1h
         expr: |
-          sum(rate(saga_total_total{status="completed"}[1h]))
+          sum(rate(saga_total{status="completed"}[1h]))
           /
           (
-            sum(rate(saga_total_total{status="completed"}[1h]))
-            + sum(rate(saga_total_total{status="failed"}[1h]))
-            + sum(rate(saga_total_total{status="compensated"}[1h]))
+            sum(rate(saga_total{status="completed"}[1h]))
+            + sum(rate(saga_total{status="failed"}[1h]))
+            + sum(rate(saga_total{status="compensated"}[1h]))
           )
 
       # 6-hour window
       - record: sli:upload_success:ratio_rate6h
         expr: |
-          sum(rate(saga_total_total{status="completed"}[6h]))
+          sum(rate(saga_total{status="completed"}[6h]))
           /
           (
-            sum(rate(saga_total_total{status="completed"}[6h]))
-            + sum(rate(saga_total_total{status="failed"}[6h]))
-            + sum(rate(saga_total_total{status="compensated"}[6h]))
+            sum(rate(saga_total{status="completed"}[6h]))
+            + sum(rate(saga_total{status="failed"}[6h]))
+            + sum(rate(saga_total{status="compensated"}[6h]))
           )
 
       # 1-day window
       - record: sli:upload_success:ratio_rate1d
         expr: |
-          sum(rate(saga_total_total{status="completed"}[1d]))
+          sum(rate(saga_total{status="completed"}[1d]))
           /
           (
-            sum(rate(saga_total_total{status="completed"}[1d]))
-            + sum(rate(saga_total_total{status="failed"}[1d]))
-            + sum(rate(saga_total_total{status="compensated"}[1d]))
+            sum(rate(saga_total{status="completed"}[1d]))
+            + sum(rate(saga_total{status="failed"}[1d]))
+            + sum(rate(saga_total{status="compensated"}[1d]))
           )
 
       # 30-day window (rolling SLO compliance)
       - record: sli:upload_success:ratio_rate30d
         expr: |
-          sum(rate(saga_total_total{status="completed"}[30d]))
+          sum(rate(saga_total{status="completed"}[30d]))
           /
           (
-            sum(rate(saga_total_total{status="completed"}[30d]))
-            + sum(rate(saga_total_total{status="failed"}[30d]))
-            + sum(rate(saga_total_total{status="compensated"}[30d]))
+            sum(rate(saga_total{status="completed"}[30d]))
+            + sum(rate(saga_total{status="failed"}[30d]))
+            + sum(rate(saga_total{status="compensated"}[30d]))
           )
 
   # ============================================================================

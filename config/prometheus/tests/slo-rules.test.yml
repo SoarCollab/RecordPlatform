@@ -11,6 +11,81 @@ group_eval_order:
   - slo:attestation_latency
 
 tests:
+  - name: observed-histogram-with-only-infinity-alerts-without-cross-instance-masking
+    interval: 1m
+    input_series:
+      - series: 'up{job="otel-collector",instance="collector-a"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_count{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-a",chain="local-fisco",operation="storeFile"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-a",chain="local-fisco",operation="storeFile",le="+Inf"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-b",chain="local-fisco",operation="storeFile",le="5"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",instance="collector-b",exported_job="record-platform-fisco",exported_instance="producer-a",chain="local-fisco",operation="storeFile",le="5"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-a",chain="other-chain",operation="storeFile",le="5"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",instance="collector-a",exported_job="record-platform-storage",exported_instance="producer-a",chain="local-fisco",operation="storeFile",le="5"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-a",chain="local-fisco",operation="queryFile",le="5"}'
+        values: '1+0x5'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: RecordPlatformFiscoHistogramBucketsMissing
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: RecordPlatformFiscoHistogramBucketsMissing
+        exp_alerts:
+          - exp_labels: {job: otel-collector, instance: collector-a, exported_job: record-platform-fisco, exported_instance: producer-a, chain: local-fisco, operation: storeFile, severity: warning, slo: monitoring}
+            exp_annotations:
+              summary: 'FISCO operation histogram has no finite buckets'
+              description: 'An observed storeFile timer has no finite buckets for the same producer and chain; percentile estimates are unavailable.'
+
+  - name: finite-buckets-idle-and-down-collectors-do-not-fire-bucket-absence
+    interval: 1m
+    input_series:
+      - series: 'up{job="otel-collector",instance="collector-a"}'
+        values: '1+0x5'
+      - series: 'up{job="otel-collector",instance="collector-down"}'
+        values: '0+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_count{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-a",chain="local-fisco",operation="storeFile"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_bucket{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-a",chain="local-fisco",operation="storeFile",le="5"}'
+        values: '0+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_count{job="otel-collector",instance="collector-a",exported_job="record-platform-fisco",exported_instance="producer-idle",chain="local-fisco",operation="storeFile"}'
+        values: '0+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_count{job="otel-collector",instance="collector-down",exported_job="record-platform-fisco",exported_instance="producer-down",chain="local-fisco",operation="storeFile"}'
+        values: '1+0x5'
+      - series: 'otel_blockchain_operation_duration_seconds_count{job="otel-collector",instance="not-configured",exported_job="record-platform-fisco",exported_instance="producer-optional",chain="local-fisco",operation="storeFile"}'
+        values: '1+0x5'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: RecordPlatformFiscoHistogramBucketsMissing
+        exp_alerts: []
+
+  - name: actual-saga-export-after-success-does-not-fire-missing-metrics
+    interval: 1m
+    input_series:
+      - series: 'up{job="recordplatform-backend",instance="backend"}'
+        values: '1+0x10'
+      - series: 'saga_total{job="recordplatform-backend",instance="backend",status="started"}'
+        values: '0 1+0x9'
+      - series: 'saga_total{job="recordplatform-backend",instance="backend",status="completed"}'
+        values: '0 1+0x9'
+      - series: 'saga_total{job="recordplatform-backend",instance="backend",status="failed"}'
+        values: '0+0x10'
+      - series: 'saga_total{job="recordplatform-backend",instance="backend",status="compensated"}'
+        values: '0+0x10'
+    promql_expr_test:
+      - expr: sli:upload_success:ratio_rate5m
+        eval_time: 2m
+        exp_samples: [{labels: 'sli:upload_success:ratio_rate5m', value: 1}]
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RecordPlatformBackendMetricsMissing
+        exp_alerts: []
+
   - name: successful-api-without-ever-registering-5xx-is-zero-not-absent
     interval: 1m
     input_series:
@@ -36,11 +111,11 @@ tests:
         values: '0+90x65'
       - series: 'http_server_requests_seconds_count{job="recordplatform-backend",status="500"}'
         values: '0+10x65'
-      - series: 'saga_total_total{status="completed"}'
+      - series: 'saga_total{status="completed"}'
         values: '0+90x65'
-      - series: 'saga_total_total{status="failed"}'
+      - series: 'saga_total{status="failed"}'
         values: '0+5x65'
-      - series: 'saga_total_total{status="compensated"}'
+      - series: 'saga_total{status="compensated"}'
         values: '0+5x65'
     promql_expr_test:
       - expr: sli:api_error:ratio_rate5m
@@ -55,11 +130,11 @@ tests:
     input_series:
       - series: 'http_server_requests_seconds_count{job="recordplatform-backend",status="200"}'
         values: '0+0x10'
-      - series: 'saga_total_total{status="completed"}'
+      - series: 'saga_total{status="completed"}'
         values: '0+0x10'
-      - series: 'saga_total_total{status="failed"}'
+      - series: 'saga_total{status="failed"}'
         values: '0+0x10'
-      - series: 'saga_total_total{status="compensated"}'
+      - series: 'saga_total{status="compensated"}'
         values: '0+0x10'
     promql_expr_test:
       - expr: 'sli:api_error:ratio_rate5m == sli:api_error:ratio_rate5m'
@@ -218,7 +293,7 @@ tests:
         values: '1+0x10'
       - series: 'up{job="recordplatform-backend",instance="present"}'
         values: '1+0x10'
-      - series: 'saga_total_total{job="recordplatform-backend",instance="present",status="started"}'
+      - series: 'saga_total{job="recordplatform-backend",instance="present",status="started"}'
         values: '0+0x10'
     alert_rule_test:
       - eval_time: 4m
