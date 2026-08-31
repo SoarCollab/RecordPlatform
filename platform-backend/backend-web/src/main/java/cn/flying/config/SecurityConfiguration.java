@@ -90,7 +90,14 @@ public class SecurityConfiguration {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         JsonUsernamePasswordAuthenticationFilter jsonLoginFilter = buildJsonLoginFilter();
+        // Register custom filter orders before positioning the optional machine authentication filter.
         http
+                .addFilterBefore(requestLogFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(jwtAuthenticationFilter, RequestLogFilter.class);
+        if (prometheusScrapeSecurity.isEnabled()) {
+            http.addFilterBefore(prometheusScrapeSecurity.createFilter(), JwtAuthenticationFilter.class);
+        }
+        return http
                 .authorizeHttpRequests(conf -> conf
                         // 公开端点
                         .requestMatchers(
@@ -156,13 +163,8 @@ public class SecurityConfiguration {
                 .csrf(AbstractHttpConfigurer::disable) // lgtm[java/spring-disabled-csrf-protection]
                 .sessionManagement(conf -> conf
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .addFilterBefore(requestLogFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(jwtAuthenticationFilter, RequestLogFilter.class)
-                .addFilterAt(jsonLoginFilter, UsernamePasswordAuthenticationFilter.class);
-        if (prometheusScrapeSecurity.isEnabled()) {
-            http.addFilterBefore(prometheusScrapeSecurity.createFilter(), JwtAuthenticationFilter.class);
-        }
-        return http.build();
+                .addFilterAt(jsonLoginFilter, UsernamePasswordAuthenticationFilter.class)
+                .build();
     }
 
     /**

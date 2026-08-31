@@ -150,6 +150,7 @@ class PrometheusScrapeSecurityTest {
         assertEquals(1, filters.stream().filter(BasicAuthenticationFilter.class::isInstance).count());
         assertTrue(filters.indexOf(filters.stream().filter(BasicAuthenticationFilter.class::isInstance).findFirst().orElseThrow())
                 < filters.indexOf(context.getBean(JwtAuthenticationFilter.class)));
+        assertExistingFilterOrder();
     }
 
     /** Treat every caller tenant hint as irrelevant only on the authenticated machine route. */
@@ -247,6 +248,9 @@ class PrometheusScrapeSecurityTest {
     @Test
     void disabledFeatureKeepsExistingAuthorization() throws Exception {
         start(false, "not-a-hash");
+        assertExistingFilterOrder();
+        assertEquals(0, context.getBean(FilterChainProxy.class).getFilterChains().getFirst().getFilters().stream()
+                .filter(BasicAuthenticationFilter.class::isInstance).count());
         assertEquals(400, perform(request("GET", "/actuator/prometheus", basic(USER, PASSWORD))).getStatus());
         MockHttpServletRequest request = request("GET", "/actuator/prometheus", basic(USER, PASSWORD));
         request.addHeader("X-Tenant-ID", "42");
@@ -256,6 +260,20 @@ class PrometheusScrapeSecurityTest {
         request.addHeader("X-Tenant-ID", "42");
         assertEquals(200, perform(request).getStatus());
         assertThrows(IllegalStateException.class, () -> context.getBean(PrometheusScrapeSecurity.class).createFilter());
+    }
+
+    /** Preserve the original custom JWT, request-log and login order without duplicate registration. */
+    private void assertExistingFilterOrder() {
+        var filters = context.getBean(FilterChainProxy.class).getFilterChains().getFirst().getFilters();
+        assertEquals(1, filters.stream().filter(JwtAuthenticationFilter.class::isInstance).count());
+        assertEquals(1, filters.stream().filter(RequestLogFilter.class::isInstance).count());
+        assertEquals(1, filters.stream().filter(cn.flying.filter.JsonUsernamePasswordAuthenticationFilter.class::isInstance).count());
+        int jwt = filters.indexOf(context.getBean(JwtAuthenticationFilter.class));
+        int requestLog = filters.indexOf(context.getBean(RequestLogFilter.class));
+        int login = filters.indexOf(filters.stream()
+                .filter(cn.flying.filter.JsonUsernamePasswordAuthenticationFilter.class::isInstance).findFirst().orElseThrow());
+        assertTrue(jwt < requestLog);
+        assertTrue(requestLog < login);
     }
 
     /** Prove the global manager continues to call AccountService for JSON and form logins. */
