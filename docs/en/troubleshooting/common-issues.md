@@ -38,6 +38,12 @@ Solutions for frequently encountered problems.
    kill -9 <PID>
    ```
 
+### Flyway reports `connection disabled` for `foreign_key_checks`
+
+On the observed Flyway 11.7.2 / Druid 1.2.28 / MySQL 8.4 deployment path, first check for an earlier SELECT denial on `performance_schema.user_variables_by_thread`. Druid may discard that connection before Flyway reads `foreign_key_checks`; the final exception alone does not imply corrupt migrations.
+
+Use [MySQL bootstrap permissions](../../operations/flyway-release-compatibility.md#mysql-bootstrap-permissions) to grant only the required single-table SELECT to the restricted migration account, verify its effective grants and probe as that account, and review the session-variable exposure and revocation/startup implications. Do not use an administrator application account, broad system-schema grants, migration disabling or automatic history repair as a workaround. For a different first exception or dependency version, diagnose that evidence separately.
+
 ### Dubbo Service Registration Failed
 
 **Symptom**: Provider services not visible in Nacos console.

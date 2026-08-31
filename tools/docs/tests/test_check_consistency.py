@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
 import unittest
@@ -38,6 +39,54 @@ class DocumentationEvidenceConsistencyTest(unittest.TestCase):
         """Require the checked-in documentation and evidence to remain self-consistent."""
         result = check_consistency.check_evidence(REPO_ROOT)
         self.assertEqual([], result.issues)
+
+    def test_flyway_bootstrap_permissions_remain_narrow_and_version_scoped(self) -> None:
+        """Keep bootstrap permission guidance separate from historical repair commands."""
+        content = (REPO_ROOT / "docs/operations/flyway-release-compatibility.md").read_text(encoding="utf-8")
+        section = content.split("## MySQL bootstrap permissions\n", 1)[1].split("\n## 1. Scope", 1)[0]
+        required = (
+            "Flyway 11.7.2", "Druid 1.2.28", "MySQL 8.4",
+            "SELECT variable_name FROM performance_schema.user_variables_by_thread WHERE variable_value IS NOT NULL;",
+            "SELECT @@foreign_key_checks;", "connection disabled",
+            "not a universal grant requirement", "session user-variable names and values",
+            "separate migration/runtime credentials", "CURRENT_USER()", "CURRENT_ROLE()",
+            "SHOW GRANTS;", "no failed rows", "next restart even when no migrations are pending",
+            "do not edit history or run automatic repair",
+            "https://github.com/flyway/flyway/issues/3202",
+            "https://github.com/alibaba/druid/issues/3626",
+            "https://dev.mysql.com/doc/refman/8.4/en/performance-schema-user-variable-tables.html",
+        )
+        for token in required:
+            with self.subTest(token=token):
+                self.assertIn(token, section)
+
+        sql_blocks = "\n".join(re.findall(r"```sql\n(.*?)\n```", section, re.DOTALL))
+        grants = re.findall(r"\bGRANT\s+[^;]+;", sql_blocks, re.IGNORECASE)
+        revokes = re.findall(r"\bREVOKE\s+[^;]+;", sql_blocks, re.IGNORECASE)
+        self.assertEqual(
+            ["GRANT SELECT ON performance_schema.user_variables_by_thread TO '<migration-user>'@'<migration-host>';"],
+            grants,
+        )
+        self.assertEqual(
+            ["REVOKE SELECT ON performance_schema.user_variables_by_thread FROM '<migration-user>'@'<migration-host>';"],
+            revokes,
+        )
+        self.assertIn("SHOW GRANTS FOR '<migration-user>'@'<migration-host>';", sql_blocks)
+        self.assertNotRegex(sql_blocks, r"(?i)\b(?:UPDATE|DELETE|INSERT|REPAIR|DROP|ALTER)\b")
+        self.assertNotIn("flyway:repair", section)
+
+    def test_bilingual_bootstrap_and_troubleshooting_link_canonical_permissions(self) -> None:
+        """Keep all deployment entrypoints connected to the same permission procedure."""
+        canonical_link = "../../operations/flyway-release-compatibility.md#mysql-bootstrap-permissions"
+        for language in ("en", "zh"):
+            for relative_path in ("deployment/environment-setup.md", "troubleshooting/common-issues.md"):
+                path = REPO_ROOT / "docs" / language / relative_path
+                with self.subTest(path=path):
+                    content = path.read_text(encoding="utf-8")
+                    self.assertIn(canonical_link, content)
+                    for token in ("11.7.2", "1.2.28", "MySQL 8.4", "performance_schema.user_variables_by_thread"):
+                        self.assertIn(token, content)
+                    self.assertTrue((path.parent / canonical_link.split("#", 1)[0]).resolve().is_file())
 
     def test_tampered_load_smoke_summary_is_rejected(self) -> None:
         """Reject a derived metric that no longer matches the retained artifact."""
