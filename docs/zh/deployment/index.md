@@ -8,6 +8,7 @@ RecordPlatform 部署和运维指南。
 - [Docker Compose](docker-compose) - 容器化部署
 - [生产环境](production) - 生产环境配置
 - [监控告警](monitoring) - 指标、告警和健康检查
+- [容器镜像发布](container-release) - 公有 GHCR 镜像与匿名拉取验证
 
 ## 部署选项
 

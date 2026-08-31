@@ -1,0 +1,24 @@
+name: Verify Public Images
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Anonymous Docker pull acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout verification code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verify the reviewed v0.0.3 public snapshot
+        run: |
+          python3 tools/ci/verify_public_images.py \
+            --snapshot tools/ci/fixtures/v0.0.3-public-images.json \
+            --owner soarcollab

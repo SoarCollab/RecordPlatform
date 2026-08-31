@@ -1,0 +1,10 @@
+{
+  "tags": ["0.0.3", "0.0", "sha-0c2cad2", "latest"],
+  "images": {
+    "backend": "sha256:418216c8c71ed63ef4a5366786977ed7988888be33ef1b98ae34af93ada119cf",
+    "fisco": "sha256:eee46ebc5a9214f73f1cc9301748157ba97c6ff711e04cc83463880c580796cc",
+    "storage": "sha256:684e564aca855a747397801957df81b4520564e5229cffca0edd02dea329c8c9",
+    "frontend": "sha256:6bb2bd96369822813eb7f5ffe52c28fa7c517e136eb24a3a1fe7aeaf5335b23d",
+    "verifier": "sha256:a42d010338a61f6738cc88152a2b8944256b9cc97b7dfb48c8f8f94ac49d38a0"
+  }
+}

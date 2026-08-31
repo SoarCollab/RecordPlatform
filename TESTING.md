@@ -2,7 +2,7 @@
 
 本项目采用"单元测试优先 + 少量高价值集成测试"的策略，目标是在 CI 中尽早发现回归，同时保持本地开发的执行成本足够低。
 
-## 当前测试文件快照（320 files）
+## 当前测试文件快照（321 files）
 
 > 2026-08-31 按 canonical source tree 中的 `*Test.java` / `*IT.java` / `*.test.ts` / `*.spec.ts` / `test_*.py` / `*_test.py` 统计。该数字是文件快照，不等同 test case 数；以下长表只说明代表性覆盖。`tools/docs/check_consistency.py --check-evidence` 会从 exact tree 重新计算并核对本表。
 
@@ -18,11 +18,11 @@
 | `platform-verifier` | 15 |
 | `platform-fisco` | 12 |
 | `platform-api` | 3 |
-| `tools/ci` | 4 |
+| `tools/ci` | 5 |
 | `tools/contracts` | 4 |
 | `tools/docs` | 1 |
-| `tools` | 9 |
-| `total` | 320 |
+| `tools` | 10 |
+| `total` | 321 |
 
 ### 后端单元测试（backend-common，代表性测试类）
 
