@@ -380,6 +380,8 @@ management:
   endpoint:
     health:
       show-details: never
+      status:
+        order: DOWN,OUT_OF_SERVICE,DEGRADED,UP,UNKNOWN
       probes:
         enabled: true
   health:

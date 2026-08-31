@@ -21,11 +21,25 @@ The `/actuator/health` endpoint includes:
 | `db` | MySQL connectivity |
 | `redis` | Redis connectivity |
 | `rabbit` | RabbitMQ connectivity |
+| `rabbitmq` | Passive probe of the configured application queue |
 | `s3Storage` | S3 node availability |
 | `saga` | Saga transaction health |
 | `outbox` | Outbox event health |
 | `encryption` | Encryption strategy status |
 
+The application queue probe defaults to `spring.rabbitmq.health.queue=file.stored.queue`.
+`file.stored` is the routing key, not a queue name; the passive probe must not create a queue
+or consume messages. An unavailable configured queue reports `DEGRADED`.
+
+Outbox and Saga health aggregate counts across all tenants at the Actuator `getHealth`
+entry point. They do not assume tenant `0`, change ordinary tenant-scoped queries, or retain
+a cross-tenant context after the check. The default `show-details: never` still hides these
+counts from anonymous health responses.
+
+Aggregate status precedence is `DOWN,OUT_OF_SERVICE,DEGRADED,UP,UNKNOWN`; a degraded
+component must not become an overall `UP`. HTTP compatibility remains unchanged:
+`DOWN` and `OUT_OF_SERVICE` return 503, while `DEGRADED` returns 200. Consumers must inspect
+the JSON status, not HTTP status alone; `scripts/start.sh` accepts only top-level `UP`.
 ### Sample Response
 
 ```json

@@ -20,6 +20,7 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
+/** Proxy/context contract only; CrossTenantHealthIndicatorIT verifies actual cross-tenant SQL. */
 class CrossTenantHealthIndicatorTest {
 
     /** Removes test-owned context after every proxy scenario. */

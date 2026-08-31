@@ -21,11 +21,23 @@ RecordPlatform 的监控、指标和健康检查。
 | `db` | MySQL 连通性 |
 | `redis` | Redis 连通性 |
 | `rabbit` | RabbitMQ 连通性 |
+| `rabbitmq` | 已配置应用队列的被动探测 |
 | `s3Storage` | S3 节点可用性 |
 | `saga` | Saga 事务健康 |
 | `outbox` | Outbox 事件健康 |
 | `encryption` | 加密策略状态 |
 
+应用队列探针默认配置为 `spring.rabbitmq.health.queue=file.stored.queue`。
+`file.stored` 是路由键，不是队列名；被动探测不能创建队列或消费消息。
+已配置队列不可用时返回 `DEGRADED`。
+
+Outbox 与 Saga 健康检查在 Actuator 的 `getHealth` 入口聚合所有租户的计数，
+不会假定租户为 `0`、改变普通查询的租户隔离，或在检查后遗留跨租户上下文。
+默认 `show-details: never` 继续隐藏匿名健康响应中的这些计数。
+
+整体状态优先级为 `DOWN,OUT_OF_SERVICE,DEGRADED,UP,UNKNOWN`，不能把降级组件汇总成 `UP`。
+HTTP 兼容性保持不变：`DOWN` 与 `OUT_OF_SERVICE` 返回 503，`DEGRADED` 返回 200。
+调用方必须检查 JSON 状态，不能只看 HTTP 状态码；`scripts/start.sh` 只接受顶层 `UP`。
 ### 响应示例
 
 ```json
