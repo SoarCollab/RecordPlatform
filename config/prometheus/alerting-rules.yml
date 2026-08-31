@@ -31,6 +31,88 @@
 # ==============================================================================
 
 groups:
+  # Source health is independent of idle business SLOs. Optional/unconfigured
+  # jobs must not page, and absent data must never be replaced with healthy zeroes.
+  - name: monitoring:collection
+    rules:
+      - alert: RecordPlatformScrapeTargetDown
+        expr: up{job=~"recordplatform-backend|otel-collector"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          slo: monitoring
+        annotations:
+          summary: "RecordPlatform scrape target is down"
+          description: "Configured target {{ $labels.job }}/{{ $labels.instance }} has failed scraping for 2 minutes."
+
+      - alert: RecordPlatformBackendMetricsMissing
+        expr: |
+          (up{job="recordplatform-backend"} == 1)
+          unless on(job, instance)
+          saga_total_total{job="recordplatform-backend",status="started"}
+        for: 5m
+        labels:
+          severity: warning
+          slo: monitoring
+        annotations:
+          summary: "Backend business metrics are missing"
+          description: "The configured backend scrape succeeds but its eagerly registered Saga meter is absent."
+
+      - alert: RecordPlatformFiscoBusinessMetricsMissing
+        expr: |
+          (up{job="otel-collector"} == 1)
+          unless on(job, instance)
+          otel_blockchain_health{job="otel-collector",exported_job="record-platform-fisco"}
+        for: 5m
+        labels:
+          severity: warning
+          slo: monitoring
+        annotations:
+          summary: "FISCO business metrics are missing"
+          description: "Collector scrape succeeds but the FISCO Micrometer heartbeat is absent; inspect the provider bridge."
+
+      - alert: RecordPlatformJvmMetricsMissing
+        expr: |
+          (up{job="otel-collector"} == 1)
+          unless on(job, instance)
+          otel_jvm_thread_count{job="otel-collector",exported_job="record-platform-web"}
+        for: 5m
+        labels:
+          severity: warning
+          slo: monitoring
+          service: record-platform-web
+        annotations:
+          summary: "Required service JVM metrics are missing"
+          description: "Collector scrape succeeds but JVM metrics for record-platform-web are absent."
+
+      - alert: RecordPlatformJvmMetricsMissing
+        expr: |
+          (up{job="otel-collector"} == 1)
+          unless on(job, instance)
+          otel_jvm_thread_count{job="otel-collector",exported_job="record-platform-fisco"}
+        for: 5m
+        labels:
+          severity: warning
+          slo: monitoring
+          service: record-platform-fisco
+        annotations:
+          summary: "Required service JVM metrics are missing"
+          description: "Collector scrape succeeds but JVM metrics for record-platform-fisco are absent."
+
+      - alert: RecordPlatformJvmMetricsMissing
+        expr: |
+          (up{job="otel-collector"} == 1)
+          unless on(job, instance)
+          otel_jvm_thread_count{job="otel-collector",exported_job="record-platform-storage"}
+        for: 5m
+        labels:
+          severity: warning
+          slo: monitoring
+          service: record-platform-storage
+        annotations:
+          summary: "Required service JVM metrics are missing"
+          description: "Collector scrape succeeds but JVM metrics for record-platform-storage are absent."
+
   # ============================================================================
   # Upload Success Rate — burn-rate alerts
   # ============================================================================
