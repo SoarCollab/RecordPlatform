@@ -104,7 +104,8 @@ public class GlobalExceptionHandler {
     public Result<?> handleMethodArgumentTypeMismatchException(MethodArgumentTypeMismatchException ex) {
         String traceId = currentTraceId();
         String detail = formatTypeMismatchDetail(ex.getName(), ex.getRequiredType(), ex.getValue());
-        log.warn("参数类型不匹配(MethodArgumentTypeMismatchException): detail={}, traceId={}", detail, traceId);
+        log.warn("参数类型不匹配(MethodArgumentTypeMismatchException): detail={}, traceId={}",
+                SensitiveDataMasker.maskSensitiveFields(detail), traceId);
         return Result.error(ResultEnum.PARAM_IS_INVALID, withTrace(detail));
     }
 
@@ -120,7 +121,8 @@ public class GlobalExceptionHandler {
             MethodArgumentConversionNotSupportedException ex) {
         String traceId = currentTraceId();
         String detail = formatTypeMismatchDetail(ex.getName(), ex.getRequiredType(), ex.getValue());
-        log.warn("参数转换失败(MethodArgumentConversionNotSupportedException): detail={}, traceId={}", detail, traceId);
+        log.warn("参数转换失败(MethodArgumentConversionNotSupportedException): detail={}, traceId={}",
+                SensitiveDataMasker.maskSensitiveFields(detail), traceId);
         return Result.error(ResultEnum.PARAM_IS_INVALID, withTrace(detail));
     }
 
@@ -202,7 +204,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(GeneralException.class)
     public ResponseEntity<Result<?>> handleBusinessException(GeneralException ex) {
         String traceId = currentTraceId();
-        log.warn("业务异常: message={}, traceId={}", ex.getMessage(), traceId);
+        log.warn("业务异常: message={}, traceId={}", SensitiveDataMasker.maskSensitiveFields(ex.getMessage()), traceId);
 
         String message = ex.getMessage();
         if ((message == null || message.isEmpty()) && ex.getData() != null) {
@@ -240,7 +242,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<?>> handleRetryableException(RetryableException ex) {
         String traceId = currentTraceId();
         log.warn("可重试异常: message={}, suggestedRetryAfter={}s, traceId={}",
-                ex.getMessage(), ex.getSuggestedRetryAfterSeconds(), traceId);
+                SensitiveDataMasker.maskSensitiveFields(ex.getMessage()), ex.getSuggestedRetryAfterSeconds(), traceId);
 
         ErrorPayload payload = retryableWithTrace(ex.getData(), ex.getSuggestedRetryAfterSeconds());
 
@@ -298,12 +300,12 @@ public class GlobalExceptionHandler {
 
         // SSE 连接断开是正常行为，只记录 debug 日志
         if (uri.contains("/sse/") || (contentType != null && contentType.contains("text/event-stream"))) {
-            log.debug("SSE 连接断开: uri={}, error={}", maskedUri, ex.getMessage());
+            log.debug("SSE 连接断开: uri={}, error={}", maskedUri, SensitiveDataMasker.maskSensitiveFields(ex.getMessage()));
             return ResponseEntity.ok().build();
         }
 
         // 其他 IO 异常记录 warn 日志
-        log.warn("IO 异常: uri={}, error={}", maskedUri, ex.getMessage());
+        log.warn("IO 异常: uri={}, error={}", maskedUri, SensitiveDataMasker.maskSensitiveFields(ex.getMessage()));
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
     }
 
@@ -314,7 +316,7 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public Result<?> handleSystemException(Exception ex) {
         String traceId = currentTraceId();
-        log.error("系统异常: traceId={}", traceId, ex);
+        log.error("系统异常: traceId={}", traceId, SensitiveDataMasker.maskThrowable(ex));
 
         ErrorPayload payload = withTrace("服务器内部错误，请联系管理员");
         return Result.error(ResultEnum.FAIL, payload);

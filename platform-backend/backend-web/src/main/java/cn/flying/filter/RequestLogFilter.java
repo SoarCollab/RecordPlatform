@@ -77,6 +77,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
             "/api/v1/admin/manifest-backfill-runs",
             "/api/file",
             "/api/v1/files",
+            "/upload-sessions",
             "/api/v1/shares",
             "/api/v1/public/shares"
     );
@@ -88,6 +89,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
      * </p>
      */
     private static final int MAX_RESPONSE_LOG_BYTES = 4096;
+    private static final int MAX_RESPONSE_INSPECTION_BYTES = 65536;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, @NonNull HttpServletResponse response, @NonNull FilterChain filterChain) throws ServletException, IOException {
@@ -239,8 +241,12 @@ public class RequestLogFilter extends OncePerRequestFilter {
             return "<binary omitted: contentType=" + contentType + ", bytes=" + bodySize + ">";
         }
 
-        int limit = Math.min(bodySize, MAX_RESPONSE_LOG_BYTES);
-        String preview = SensitiveDataMasker.maskSensitiveFields(new String(body, 0, limit, StandardCharsets.UTF_8));
+        if (bodySize > MAX_RESPONSE_INSPECTION_BYTES) {
+            return "<omitted: response exceeds log inspection limit, bytes=" + bodySize + ">";
+        }
+        String safeBody = SensitiveDataMasker.maskSensitiveFields(new String(body, StandardCharsets.UTF_8));
+        byte[] safeBytes = safeBody.getBytes(StandardCharsets.UTF_8);
+        String preview = new String(safeBytes, 0, Math.min(safeBytes.length, MAX_RESPONSE_LOG_BYTES), StandardCharsets.UTF_8);
         if (bodySize > MAX_RESPONSE_LOG_BYTES) {
             return preview + "...(truncated, bytes=" + bodySize + ")";
         }
@@ -292,6 +298,8 @@ public class RequestLogFilter extends OncePerRequestFilter {
                 object.set(k, sanitizeParameterForLog(k, value));
             }
         });
+        // Sanitize the final copy as well: a capability can occur in a parameter name, not only its value.
+        String safeParameters = SensitiveDataMasker.maskSensitiveFields(object.toString());
 
         // 获取用户信息
         Object id = request.getAttribute(Const.ATTR_USER_ID);
@@ -299,10 +307,10 @@ public class RequestLogFilter extends OncePerRequestFilter {
             User user = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
             log.info("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: {} (UID: {}) | 角色: {} | 请求参数列表: {}",
                     sanitizePathForLog(request.getServletPath()), request.getMethod(), request.getRemoteAddr(),
-                    user.getUsername(), id, user.getAuthorities(), object);
+                    user.getUsername(), id, user.getAuthorities(), safeParameters);
         } else {
             log.info("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: 未验证 | 请求参数列表: {}",
-                    sanitizePathForLog(request.getServletPath()), request.getMethod(), request.getRemoteAddr(), object);
+                    sanitizePathForLog(request.getServletPath()), request.getMethod(), request.getRemoteAddr(), safeParameters);
         }
     }
 
@@ -314,7 +322,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
     private boolean isSensitiveParam(String paramName) {
         if (paramName == null) return false;
         String lowerName = paramName.toLowerCase();
-        return SENSITIVE_PARAMS.stream()
+        return SensitiveDataMasker.isSensitiveField(paramName) || SENSITIVE_PARAMS.stream()
                 .anyMatch(sensitive -> lowerName.contains(sensitive.toLowerCase()));
     }
 
@@ -329,6 +337,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
         if (value == null) {
             return null;
         }
+        value = SensitiveDataMasker.maskSensitiveFields(value);
         String name = paramName == null ? "" : paramName.toLowerCase();
         // 明显的“文件内容/大文本”参数：直接省略（保留参数存在性）
         if (name.contains("base64")

@@ -186,6 +186,28 @@ groups:
    - Circuit breaker status
    - Retry counts
 
+## Sensitive Upload Logging
+
+Direct-upload session responses contain bearer object-storage URLs. The request
+logger skips response caching/body previews for the upload-session route family;
+the original response still reaches clients unchanged. Success audits retain
+operation metadata but omit sensitive file-operation payloads.
+
+Other log copies use shared field/value redaction for URL aliases, signed query
+credentials, nested containers and encoded or incomplete text. Redaction runs
+before preview truncation. Inspection is bounded (64 KiB per value, depth 32,
+4096 nodes, a shared character budget and four decoding passes); unsafe or
+oversized copies are omitted, never emitted as unverified prefixes. Decoded
+inspection strings are not logged. Failure audit messages and the corresponding
+business/retryable/IO/system and parameter-conversion exception logs are sanitized without changing the
+client error or thrown business exception. System errors retain detached sanitized
+stack/cause/suppressed diagnostics rather than references to the original Throwable.
+
+Existing logs may already contain capabilities. Restrict access to that historical
+evidence and follow incident retention rules; a code update does not erase old
+records. Validate a fresh direct upload after deployment: verify unchanged client
+responses and no new credential/signature value in text, JSON or audit log copies.
+
 ## Distributed Tracing (OpenTelemetry)
 
 The project integrates OpenTelemetry Java Agent v2.26.1 for automatic trace and metrics collection across all three Java services.

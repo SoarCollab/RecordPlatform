@@ -22,6 +22,8 @@ import cn.flying.platformapi.response.DirectMultipartCompletedPartVO;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.service.FileService;
 import cn.flying.service.QuotaService;
+import cn.flying.service.key.FileKeyEnvelopeService;
+import cn.flying.service.key.FileParamEnvelopeResult;
 import cn.flying.service.attestation.AttestationBatchPersistenceService;
 import cn.flying.service.attestation.AttestationLeafEvidence;
 import cn.flying.service.attestation.MerkleLeafInput;
@@ -53,6 +55,7 @@ import cn.flying.verifier.resolver.HttpResolverConfiguration;
 import cn.flying.verifier.resolver.Resolution;
 import cn.flying.verifier.resolver.ResolutionState;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
@@ -63,6 +66,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
+import org.mockito.stubbing.Answer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -78,6 +82,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -112,6 +117,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
@@ -120,7 +126,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -162,7 +170,7 @@ class SignedProofLifecycleConcurrencyIT extends BaseIntegrationTest {
     @Autowired
     private MerkleTreeService merkleTreeService;
 
-    @Autowired
+    @MockitoSpyBean
     private FileMapper fileMapper;
 
     @Autowired
@@ -179,6 +187,9 @@ class SignedProofLifecycleConcurrencyIT extends BaseIntegrationTest {
 
     @MockitoSpyBean
     private LocalEd25519ProofSigningProvider signingProvider;
+
+    @MockitoSpyBean
+    private FileKeyEnvelopeService fileKeyEnvelopeService;
 
     @MockitoBean
     private QuotaService quotaService;
@@ -304,38 +315,82 @@ class SignedProofLifecycleConcurrencyIT extends BaseIntegrationTest {
         File versionTwo = fileService.createNewVersion(
                 USER_ID, fixture.fileId(), "upload-first-v2.bin", 3L, "application/octet-stream");
 
-        CountDownLatch versionRowHeld = new CountDownLatch(1);
-        CountDownLatch releaseVersionRow = newReleaseLatch();
-        Future<Void> versionRowBlocker = holdFileRow(
-                versionTwo.getId(), versionRowHeld, releaseVersionRow);
+        CountDownLatch successWritten = new CountDownLatch(1);
+        CountDownLatch releaseSuccessCommit = newReleaseLatch();
+        AtomicReference<Long> uploadTransactionId = new AtomicReference<>();
+        AtomicBoolean anchorObservedBeforeUpdate = new AtomicBoolean();
+        // Spring delegates mapper-interface spies to the original MyBatis JDK proxy, not abstract real methods.
+        Answer<?> mapperDelegate = mockingDetails(fileMapper).getMockCreationSettings().getDefaultAnswer();
+        doAnswer(invocation -> {
+            File update = invocation.getArgument(0);
+            if (Integer.valueOf(FileUploadStatus.SUCCESS.getCode()).equals(update.getStatus())
+                    && "chain-record-f02".equals(update.getFileHash())) {
+                LambdaUpdateWrapper<?> wrapper = invocation.getArgument(1);
+                wrapper.getSqlSegment();
+                assertThat(wrapper.getParamNameValuePairs()).containsValue(versionTwo.getId());
+                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+                assertThat(hasGrantedFileRecordLock(fixture.fileId(), currentFileLockTransactionId()))
+                        .as("The same transaction must hold the anchor before the target SUCCESS update")
+                        .isTrue();
+                anchorObservedBeforeUpdate.set(true);
+            }
+            return mapperDelegate.answer(invocation);
+        }).when(fileMapper).update(any(File.class), any());
+        // Earlier claim checkpoints release the anchor; only the final SUCCESS transaction orders issuance.
+        doAnswer(invocation -> {
+            Object result = invocation.callRealMethod();
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+            assertThat(loadFileStatus(versionTwo.getId()))
+                    .as("The upload transaction must have written SUCCESS before the barrier")
+                    .isEqualTo(FileUploadStatus.SUCCESS.getCode());
+            uploadTransactionId.set(currentFileLockTransactionId());
+            assertThat(uploadTransactionId.get()).isPositive();
+            successWritten.countDown();
+            awaitLatch(releaseSuccessCommit, "上传 SUCCESS 事务未被释放");
+            return result;
+        }).when(fileKeyEnvelopeService).saveOwnerEnvelope(
+                any(File.class), eq("chain-record-f02"), eq(USER_ID), any(FileParamEnvelopeResult.class));
         Future<File> uploadFuture = null;
         Future<ProofArchive> proofFuture = null;
         try {
-            awaitLatch(versionRowHeld, "v2 文件行未被 blocker 锁定");
             uploadFuture = executor.submit(() -> inTenant(
                     () -> completeDirectUpload(versionTwo, "f02")));
+            Future<File> startedUpload = uploadFuture;
             awaitDatabaseCondition(
-                    () -> hasRecordLockWait(FILE_TABLE, FILE_PRIMARY_INDEX, versionTwo.getId()),
-                    "上传事务未在 v2 更新处形成真实 MySQL 锁等待");
-            assertThat(hasExclusiveRecordLock(FILE_TABLE, FILE_PRIMARY_INDEX, fixture.fileId()))
-                    .as("上传在修改 v2 前必须先持有版本组 anchor")
+                    () -> successWritten.getCount() == 0 || startedUpload.isDone(),
+                    "上传未到达尚未提交的 SUCCESS 事务");
+            if (successWritten.getCount() != 0) {
+                startedUpload.get(WAIT_SECONDS, TimeUnit.SECONDS);
+                throw new AssertionError("Upload completed without entering the SUCCESS transaction barrier");
+            }
+            assertThat(anchorObservedBeforeUpdate).isTrue();
+            assertThat(hasGrantedFileRecordLock(fixture.fileId(), uploadTransactionId.get()))
+                    .as("最终 SUCCESS 事务必须持有版本组 anchor")
                     .isTrue();
+            assertThat(loadFileStatus(versionTwo.getId()))
+                    .as("An independent connection must still observe PREPARE before commit")
+                    .isEqualTo(FileUploadStatus.PREPARE.getCode());
 
             proofFuture = executor.submit(() -> inTenant(
                     () -> signedProofArchiveService.exportByFileId(USER_ID, fixture.fileId())));
             awaitDatabaseCondition(
-                    () -> hasRecordLockWait(FILE_TABLE, FILE_PRIMARY_INDEX, fixture.fileId()),
+                    () -> hasFileRecordLockWaitBlockedBy(fixture.fileId(), uploadTransactionId.get()),
                     "首次签发未在上传持有的版本组 anchor 上形成真实 MySQL 锁等待");
+            assertThat(hasFileRecordLockWaitBlockedBy(versionTwo.getId(), uploadTransactionId.get()))
+                    .as("The anchor wait must not match another file in the same version group")
+                    .isFalse();
+            assertThat(hasFileRecordLockWaitBlockedBy(fixture.fileId(), -1L))
+                    .as("The anchor wait must not match an unrelated transaction")
+                    .isFalse();
 
-            releaseVersionRow.countDown();
+            releaseSuccessCommit.countDown();
             File uploaded = uploadFuture.get(WAIT_SECONDS, TimeUnit.SECONDS);
             ProofArchive archive = proofFuture.get(WAIT_SECONDS, TimeUnit.SECONDS);
-            versionRowBlocker.get(WAIT_SECONDS, TimeUnit.SECONDS);
 
             assertThat(uploaded.getStatus()).isEqualTo(FileUploadStatus.SUCCESS.getCode());
             assertValidArchive(archive);
         } finally {
-            releaseVersionRow.countDown();
+            releaseSuccessCommit.countDown();
             cancelIfRunning(uploadFuture);
             cancelIfRunning(proofFuture);
         }
@@ -1006,24 +1061,61 @@ class SignedProofLifecycleConcurrencyIT extends BaseIntegrationTest {
     }
 
     /**
-     * 在独立事务中持有指定 file 主键行锁，供 upload-first 时序稳定停在真实更新点。
+     * Reads the real transaction identity after the upload has written its file row.
      */
-    private Future<Void> holdFileRow(
-            Long fileId,
-            CountDownLatch rowHeld,
-            CountDownLatch releaseRow
-    ) {
-        return executor.submit(() -> inTenant(() -> inNewTransaction(() -> {
-            Long lockedId = jdbcTemplate.queryForObject(
-                    "SELECT id FROM file WHERE tenant_id = ? AND id = ? FOR UPDATE",
-                    Long.class,
-                    TENANT_ID,
-                    fileId);
-            assertThat(lockedId).isEqualTo(fileId);
-            rowHeld.countDown();
-            awaitLatch(releaseRow, "file blocker 等待释放超时");
-            return null;
-        })));
+    private Long currentFileLockTransactionId() {
+        return jdbcTemplate.queryForObject(
+                """
+                        SELECT DISTINCT locks.ENGINE_TRANSACTION_ID
+                          FROM performance_schema.data_locks locks
+                          JOIN performance_schema.threads thread ON thread.THREAD_ID = locks.THREAD_ID
+                         WHERE thread.PROCESSLIST_ID = CONNECTION_ID()
+                           AND locks.OBJECT_SCHEMA = DATABASE()
+                           AND locks.OBJECT_NAME = 'file'
+                           AND locks.LOCK_TYPE = 'TABLE'
+                           AND locks.LOCK_STATUS = 'GRANTED'
+                        """, Long.class);
+    }
+
+    /**
+     * Requires an exact granted primary-record lock owned by the upload transaction.
+     */
+    private boolean hasGrantedFileRecordLock(Long fileId, Long transactionId) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                        SELECT COUNT(*) FROM performance_schema.data_locks
+                         WHERE OBJECT_SCHEMA = DATABASE() AND OBJECT_NAME = 'file'
+                           AND INDEX_NAME = 'PRIMARY' AND LOCK_TYPE = 'RECORD'
+                           AND LOCK_MODE LIKE 'X%' AND LOCK_STATUS = 'GRANTED'
+                           AND LOCK_DATA = CAST(? AS CHAR) AND ENGINE_TRANSACTION_ID = ?
+                        """, Integer.class, fileId, transactionId);
+        return count != null && count > 0;
+    }
+
+    /**
+     * Proves a real v1 anchor wait belongs to this upload, including secondary-index record locks.
+     */
+    private boolean hasFileRecordLockWaitBlockedBy(Long fileId, Long transactionId) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                        SELECT COUNT(*)
+                          FROM performance_schema.data_lock_waits waits
+                          JOIN performance_schema.data_locks held
+                            ON held.ENGINE = waits.ENGINE
+                           AND held.ENGINE_LOCK_ID = waits.BLOCKING_ENGINE_LOCK_ID
+                         WHERE held.OBJECT_SCHEMA = DATABASE() AND held.OBJECT_NAME = 'file'
+                           AND held.LOCK_TYPE = 'RECORD'
+                           AND held.LOCK_STATUS = 'GRANTED' AND held.LOCK_MODE LIKE 'X%'
+                           AND (
+                                (held.INDEX_NAME = 'uk_file_tenant_id_version'
+                                 AND held.LOCK_DATA = CONCAT(CAST(? AS CHAR), ', ', CAST(? AS CHAR), ', 1'))
+                                OR (held.INDEX_NAME = 'PRIMARY'
+                                    AND held.LOCK_DATA = CAST(? AS CHAR))
+                           )
+                           AND waits.BLOCKING_ENGINE_TRANSACTION_ID = ?
+                           AND waits.REQUESTING_ENGINE_TRANSACTION_ID <> ?
+                        """, Integer.class, TENANT_ID, fileId, fileId, transactionId, transactionId);
+        return count != null && count > 0;
     }
 
     /**

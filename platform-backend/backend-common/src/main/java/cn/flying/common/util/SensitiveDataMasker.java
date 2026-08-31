@@ -1,12 +1,18 @@
 package cn.flying.common.util;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.StreamReadConstraints;
+import com.fasterxml.jackson.core.StreamWriteConstraints;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.server.PathContainer;
 
+import java.io.IOException;
+import java.io.Writer;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -21,7 +27,20 @@ import java.util.regex.Pattern;
  */
 public final class SensitiveDataMasker {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final int MAX_LOG_VALUE_CHARS = 65536;
+    private static final int MAX_LOG_DEPTH = 32;
+    private static final int MAX_LOG_NODES = 4096;
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper(JsonFactory.builder()
+            .streamReadConstraints(StreamReadConstraints.builder()
+                    .maxDocumentLength(MAX_LOG_VALUE_CHARS)
+                    .maxStringLength(MAX_LOG_VALUE_CHARS)
+                    .maxNestingDepth(MAX_LOG_DEPTH)
+                    .maxNumberLength(128)
+                    .build())
+            .streamWriteConstraints(StreamWriteConstraints.builder().maxNestingDepth(MAX_LOG_DEPTH).build())
+            .build()).enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+    private static final Set<String> CAPABILITY_FIELDS = Set.of(
+            "uploadurl", "presignedurl", "downloadurl", "signature", "awsaccesskeyid");
 
     /**
      * 脱敏后的替换值
@@ -126,6 +145,8 @@ public final class SensitiveDataMasker {
             "signature",
             "presignedurl",
             "presigned_url",
+            "uploadurl",
+            "upload_url",
             "downloadurl",
             "download_url",
             "grantreference",
@@ -159,17 +180,12 @@ public final class SensitiveDataMasker {
             "save"
     );
 
-    /**
-     * 用于匹配 JSON 中敏感字段的正则表达式
-     * 匹配格式：\"fieldName\":\"value\" 或 \"fieldName\":value
-     * 支持值中包含转义引号的情况，如 \"password\":\"test\\\"123\"
-     */
-    private static final List<Pattern> SENSITIVE_PATTERNS = SENSITIVE_FIELD_NAMES.stream()
-            .map(field -> Pattern.compile(
-                    "\"" + field + "\"\\s*:\\s*(\"(?:[^\"\\\\]|\\\\.)*\"|[^,}\\]]+)",
-                    Pattern.CASE_INSENSITIVE
-            ))
-            .toList();
+    /** Bounded field detection for incomplete JSON and textual capability assignments. */
+    private static final Pattern LOG_FIELD = Pattern.compile(
+            "(?:[\"']([^\"'\\\\]{1,128})[\"']|([a-zA-Z][a-zA-Z0-9_.-]{0,127}))\\s*[:=]");
+    private static final Set<String> CANONICAL_SENSITIVE_FIELDS = SENSITIVE_FIELD_NAMES.stream()
+            .map(field -> field.replace("_", ""))
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
     private SensitiveDataMasker() {
         // 私有构造函数，防止实例化
@@ -186,19 +202,177 @@ public final class SensitiveDataMasker {
             return json;
         }
 
-        String result = json;
-        for (Pattern pattern : SENSITIVE_PATTERNS) {
-            result = pattern.matcher(result).replaceAll(match -> {
-                String matched = match.group();
-                int colonIndex = matched.indexOf(':');
-                if (colonIndex == -1) {
-                    return matched;
-                }
-                String fieldPart = matched.substring(0, colonIndex + 1);
-                return fieldPart + "\"" + MASKED_VALUE + "\"";
-            });
+        return maskLogString(json, 0, new int[]{MAX_LOG_NODES, MAX_LOG_VALUE_CHARS * 2});
+    }
+
+    /** Redact structured copies before previews; malformed or over-budget data never falls back to raw secrets. */
+    private static String maskLogString(String text, int depth, int[] budget) {
+        if (text == null || text.isEmpty()) {
+            return text;
         }
-        return result;
+        if (text.length() > MAX_LOG_VALUE_CHARS || depth >= MAX_LOG_DEPTH || --budget[0] < 0) {
+            return MASKED_VALUE;
+        }
+        budget[1] -= text.length();
+        if (budget[1] < 0) {
+            return MASKED_VALUE;
+        }
+        String trimmed = text.stripLeading();
+        if (trimmed.startsWith("{") || trimmed.startsWith("[") || trimmed.startsWith("\"")) {
+            try {
+                Object value = OBJECT_MAPPER.readValue(text, Object.class);
+                return OBJECT_MAPPER.writeValueAsString(maskLogValue(value, depth + 1, budget));
+            } catch (JsonProcessingException ignored) {
+                // Inspect truncated/escaped forms below, without ever logging parser diagnostics.
+            }
+        }
+        String detection = text;
+        for (int i = 0; i < 4; i++) {
+            String decoded = decodeLogEscapes(detection);
+            if (decoded.equals(detection)) {
+                break;
+            }
+            detection = decoded;
+        }
+        if (!decodeLogEscapes(detection).equals(detection)) {
+            return MASKED_VALUE;
+        }
+        String lower = detection.toLowerCase(Locale.ROOT);
+        if (lower.contains("x-amz-") || lower.contains("awsaccesskeyid") || lower.contains("x-goog-")) {
+            return MASKED_VALUE;
+        }
+        var fields = LOG_FIELD.matcher(detection);
+        while (fields.find()) {
+            String field = fields.group(1) != null ? fields.group(1) : fields.group(2);
+            if (isCapabilityField(canonicalField(field))
+                    || (detection.indexOf('"') >= 0 && isSensitiveField(field))) {
+                return MASKED_VALUE;
+            }
+        }
+        return text;
+    }
+
+    /** Decode a bounded detection-only view; never emit decoded strings or depend on permissive URL parsing. */
+    private static String decodeLogEscapes(String value) {
+        StringBuilder decoded = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '%' && i + 2 < value.length()) {
+                int high = Character.digit(value.charAt(i + 1), 16);
+                int low = Character.digit(value.charAt(i + 2), 16);
+                if (high >= 0 && low >= 0) {
+                    decoded.append((char) (high * 16 + low));
+                    i += 2;
+                    continue;
+                }
+            }
+            if (c == '\\' && i + 1 < value.length()) {
+                char next = value.charAt(i + 1);
+                if (next == 'u' && i + 5 < value.length()) {
+                    try {
+                        decoded.append((char) Integer.parseInt(value.substring(i + 2, i + 6), 16));
+                        i += 5;
+                        continue;
+                    } catch (NumberFormatException ignored) {
+                        // Keep malformed escapes for the conservative field/value detector.
+                    }
+                }
+                if (next == '\\' || next == '/' || next == '"') {
+                    decoded.append(next);
+                    i++;
+                    continue;
+                }
+            }
+            decoded.append(c);
+        }
+        return decoded.toString();
+    }
+
+    /** Copy containers with shared depth/node budgets, applying one policy to strings, maps and lists. */
+    private static Object maskLogValue(Object value, int depth, int[] budget) {
+        if (depth >= MAX_LOG_DEPTH || --budget[0] < 0 || budget[1] <= 0) {
+            return MASKED_VALUE;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (budget[0] <= 0 || budget[1] <= 0) {
+                    copy.put("<omitted>", MASKED_VALUE);
+                    break;
+                }
+                String key = String.valueOf(entry.getKey());
+                copy.put(maskLogString(key, depth + 1, budget), isSensitiveField(key)
+                        ? MASKED_VALUE : maskLogValue(entry.getValue(), depth + 1, budget));
+            }
+            return copy;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = new ArrayList<>();
+            for (Object item : list) {
+                if (budget[0] <= 0 || budget[1] <= 0) {
+                    copy.add(MASKED_VALUE);
+                    break;
+                }
+                copy.add(maskLogValue(item, depth + 1, budget));
+            }
+            return copy;
+        }
+        if (value instanceof CharSequence text) {
+            return maskLogString(text.toString(), depth + 1, budget);
+        }
+        if (value != null && value.getClass().isArray()) {
+            List<Object> copy = new ArrayList<>();
+            int length = java.lang.reflect.Array.getLength(value);
+            for (int i = 0; i < length && budget[0] > 0 && budget[1] > 0; i++) {
+                copy.add(maskLogValue(java.lang.reflect.Array.get(value, i), depth + 1, budget));
+            }
+            return copy;
+        }
+        if (value != null && !(value instanceof Number) && !(value instanceof Boolean)) {
+            try {
+                return maskLogValue(OBJECT_MAPPER.readValue(serializeForLog(value), Object.class), depth + 1, budget);
+            } catch (IOException ignored) {
+                return "[" + value.getClass().getSimpleName() + "]";
+            }
+        }
+        return value;
+    }
+
+    /** Create a detached, bounded diagnostic graph; no original Throwable remains in logging arguments. */
+    public static Throwable maskThrowable(Throwable throwable) {
+        return copyThrowable(throwable, new IdentityHashMap<>(), new int[]{64}, 0);
+    }
+
+    /** Preserve exception types, stack locations, causes and suppressed diagnostics without secret messages. */
+    private static Throwable copyThrowable(Throwable source, IdentityHashMap<Throwable, Boolean> seen,
+                                           int[] budget, int depth) {
+        if (source == null) {
+            return null;
+        }
+        if (depth >= MAX_LOG_DEPTH || --budget[0] < 0 || seen.put(source, Boolean.TRUE) != null) {
+            return new RuntimeException("<omitted exception graph>");
+        }
+        RuntimeException copy = new RuntimeException(source.getClass().getName() + ": "
+                + maskSensitiveFields(source.getMessage()));
+        StackTraceElement[] stack = source.getStackTrace();
+        StackTraceElement[] safeStack = new StackTraceElement[Math.min(stack.length, 256)];
+        for (int i = 0; i < safeStack.length; i++) {
+            StackTraceElement frame = stack[i];
+            safeStack[i] = new StackTraceElement(maskSensitiveFields(frame.getClassName()),
+                    maskSensitiveFields(frame.getMethodName()), maskSensitiveFields(frame.getFileName()), frame.getLineNumber());
+        }
+        copy.setStackTrace(safeStack);
+        Throwable cause = copyThrowable(source.getCause(), seen, budget, depth + 1);
+        if (cause != null) {
+            copy.initCause(cause);
+        }
+        for (Throwable suppressed : source.getSuppressed()) {
+            if (budget[0] <= 0) {
+                break;
+            }
+            copy.addSuppressed(copyThrowable(suppressed, seen, budget, depth + 1));
+        }
+        return copy;
     }
 
     /**
@@ -414,39 +588,7 @@ public final class SensitiveDataMasker {
             return data;
         }
 
-        Map<String, Object> result = new HashMap<>();
-        for (Map.Entry<String, Object> entry : data.entrySet()) {
-            String key = entry.getKey();
-            Object value = entry.getValue();
-
-            if (isSensitiveField(key)) {
-                result.put(key, MASKED_VALUE);
-            } else if (value instanceof Map) {
-                result.put(key, maskSensitiveFields((Map<String, Object>) value));
-            } else if (value instanceof List) {
-                result.put(key, maskSensitiveFieldsInList((List<Object>) value));
-            } else {
-                result.put(key, value);
-            }
-        }
-        return result;
-    }
-
-    /**
-     * 对 List 中的敏感字段进行脱敏
-     */
-    @SuppressWarnings("unchecked")
-    private static List<Object> maskSensitiveFieldsInList(List<Object> list) {
-        return list.stream()
-                .map(item -> {
-                    if (item instanceof Map) {
-                        return maskSensitiveFields((Map<String, Object>) item);
-                    } else if (item instanceof List) {
-                        return maskSensitiveFieldsInList((List<Object>) item);
-                    }
-                    return item;
-                })
-                .toList();
+        return (Map<String, Object>) maskLogValue(data, 0, new int[]{MAX_LOG_NODES, MAX_LOG_VALUE_CHARS * 2});
     }
 
     /**
@@ -462,9 +604,11 @@ public final class SensitiveDataMasker {
         }
 
         try {
-            String json = OBJECT_MAPPER.writeValueAsString(obj);
+            Object safeInput = obj instanceof Map || obj instanceof List || obj instanceof CharSequence
+                    ? maskLogValue(obj, 0, new int[]{MAX_LOG_NODES, MAX_LOG_VALUE_CHARS * 2}) : obj;
+            String json = serializeForLog(safeInput);
             return maskSensitiveFields(json);
-        } catch (JsonProcessingException e) {
+        } catch (IOException e) {
             // 序列化失败时返回简单的类名表示
             return "[" + obj.getClass().getSimpleName() + "]";
         }
@@ -482,11 +626,40 @@ public final class SensitiveDataMasker {
         }
 
         try {
-            String json = OBJECT_MAPPER.writeValueAsString(objects);
+            String json = serializeForLog(maskLogValue(objects, 0, new int[]{MAX_LOG_NODES, MAX_LOG_VALUE_CHARS * 2}));
             return maskSensitiveFields(json);
-        } catch (JsonProcessingException e) {
+        } catch (IOException e) {
             return "[...]";
         }
+    }
+
+    /** Bound serialization before allocating a complete DTO/collection log copy. */
+    private static String serializeForLog(Object value) throws IOException {
+        BoundedLogWriter writer = new BoundedLogWriter();
+        OBJECT_MAPPER.writeValue(writer, value);
+        return writer.buffer.toString();
+    }
+
+    /** Reject oversized serialization instead of returning a potentially secret-bearing prefix. */
+    private static final class BoundedLogWriter extends Writer {
+        private final StringBuilder buffer = new StringBuilder();
+
+        /** Append only within the inspection budget; Jackson stops immediately on overflow. */
+        @Override
+        public void write(char[] chars, int offset, int length) throws IOException {
+            if (length > MAX_LOG_VALUE_CHARS - buffer.length()) {
+                throw new IOException("Log serialization limit exceeded");
+            }
+            buffer.append(chars, offset, length);
+        }
+
+        /** This memory-only writer has no external resource to flush. */
+        @Override
+        public void flush() { }
+
+        /** Closing the writer never publishes the accumulated sensitive buffer. */
+        @Override
+        public void close() { }
     }
 
     /**
@@ -499,8 +672,32 @@ public final class SensitiveDataMasker {
         if (fieldName == null || fieldName.isEmpty()) {
             return false;
         }
-        String lowerFieldName = fieldName.toLowerCase();
-        return SENSITIVE_FIELD_NAMES.contains(lowerFieldName);
+        if (fieldName.length() > MAX_LOG_VALUE_CHARS) {
+            return true;
+        }
+        String canonical = canonicalField(fieldName);
+        return CANONICAL_SENSITIVE_FIELDS.contains(canonical) || isCapabilityField(canonical);
+    }
+
+    /** Normalize aliases for lookup only, including repeated percent/JSON escapes under a fixed budget. */
+    private static String canonicalField(String field) {
+        String decoded = field;
+        for (int i = 0; i < 4; i++) {
+            String next = decodeLogEscapes(decoded);
+            if (next.equals(decoded)) {
+                break;
+            }
+            decoded = next;
+        }
+        if (!decodeLogEscapes(decoded).equals(decoded)) {
+            return "signature";
+        }
+        return decoded.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+    }
+
+    /** Match URL aliases and signed-query fields even when their values are detached from the original URL. */
+    private static boolean isCapabilityField(String canonical) {
+        return CAPABILITY_FIELDS.contains(canonical) || canonical.startsWith("xamz") || canonical.startsWith("xgoog");
     }
 
     private record PathParts(String path, String suffix) {
