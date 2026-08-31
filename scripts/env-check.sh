@@ -153,46 +153,198 @@ check_nacos() {
 
     section 1 "Nacos ($host:$port)"
 
-    # Connectivity
-    if curl -sf --max-time 5 "http://$host:$port/nacos/v1/console/health/readiness" &>/dev/null; then
-        ok "Nacos is reachable and ready"
-    elif tcp_check "$host" "$port"; then
-        warn "Nacos port open but readiness endpoint failed"
-    else
-        fail "Cannot connect to Nacos at $host:$port"
-        info "Start with: docker compose -f docker-compose.infra.yml up -d nacos"
+    if ! required_secret NACOS_USERNAME; then return; fi
+    if ! required_secret NACOS_PASSWORD; then return; fi
+    if ! has_cmd python3; then
+        fail "python3 is required for bounded Nacos JSON/authentication checks"
         return
     fi
 
-    # Deep check: login API
-    if ! required_secret NACOS_USERNAME; then return; fi
-    if ! required_secret NACOS_PASSWORD; then return; fi
-    local user="$NACOS_USERNAME"
-    local pass="$NACOS_PASSWORD"
-    local token
-    token=$(curl -sf --max-time 5 -X POST \
-        "http://$host:$port/nacos/v1/auth/login" \
-        --data-urlencode "username=$user" \
-        --data-urlencode "password=$pass" 2>/dev/null | grep -o '"accessToken":"[^"]*"' | cut -d'"' -f4 || true)
+    # Keep secrets in the inherited environment and private HTTP requests, never argv.
+    if ! python3 - <<'PY'
+import http.client
+import json
+import os
+import re
+import signal
+import socket
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 
-    if [ -n "$token" ]; then
-        ok "Nacos login successful (user: $user)"
 
-        # Check key config Data IDs
-        for data_id in "backend-web.yaml" "platform-storage.yaml"; do
-            local resp
-            # Keep pre-check running even if a single Nacos query fails.
-            resp=$(curl -sf --max-time 5 \
-                "http://$host:$port/nacos/v1/cs/configs?dataId=$data_id&group=DEFAULT_GROUP&accessToken=$token" 2>/dev/null || true)
-            if [ -n "$resp" ] && [ "$resp" != "config data not exist" ]; then
-                ok "Config found: $data_id"
-            else
-                warn "Config not found: $data_id"
-                info "Import Nacos configs from nacos-config-template.yaml"
-            fi
-        done
-    else
-        warn "Nacos login failed (user: $user) - auth may be disabled or credentials wrong"
+class CheckFailure(Exception):
+    """Carry only fixed, credential-free diagnostic messages."""
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Prevent credentials or tokens from following redirected endpoints."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        """Reject every redirect, including redirects to another trusted-looking host."""
+        return None
+
+
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+base = "http://{}:{}/nacos".format(
+    os.environ.get("NACOS_HOST") or "localhost", os.environ.get("NACOS_PORT") or "8848")
+limit = 1024 * 1024
+
+
+def deadline(_signum, _frame):
+    """Bound total request time, including slow response bodies and DNS lookup."""
+    raise CheckFailure("Nacos request unavailable or timed out")
+
+
+signal.signal(signal.SIGALRM, deadline)
+
+
+def fetch(path, params=None, form=None):
+    """Read one bounded response without logging its body, URL, token or exception."""
+    url = base + path
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    data = urllib.parse.urlencode(form).encode() if form is not None else None
+    signal.alarm(5)
+    try:
+        try:
+            req = urllib.request.Request(url, data=data)
+            response = opener.open(req, timeout=5)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            status = response.code
+            body = response.read(limit + 1)
+        if len(body) > limit:
+            raise CheckFailure("Nacos response exceeded the inspection limit")
+        return status, body.decode("utf-8")
+    except (urllib.error.URLError, TimeoutError, socket.timeout):
+        raise CheckFailure("Nacos request unavailable or timed out") from None
+    except (OSError, ValueError, http.client.HTTPException, UnicodeError):
+        raise CheckFailure("Nacos response is unreadable") from None
+    finally:
+        signal.alarm(0)
+
+
+def document(body):
+    """Parse exactly one JSON object, rejecting duplicate keys and invalid constants."""
+    def unique(pairs):
+        """Reject ambiguous JSON fields rather than silently choosing a value."""
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError()
+            result[key] = value
+        return result
+
+    def invalid(_value):
+        """Reject non-JSON NaN and Infinity literals."""
+        raise ValueError()
+
+    try:
+        value = json.loads(body, object_pairs_hook=unique, parse_constant=invalid)
+    except (ValueError, TypeError, RecursionError):
+        raise CheckFailure("Nacos returned malformed JSON") from None
+    if not isinstance(value, dict):
+        raise CheckFailure("Nacos returned an invalid response object")
+    return value
+
+
+def require_success(status, value, phase):
+    """Validate HTTP and business codes without mistaking errors for found configs."""
+    code = value.get("code")
+    if status in (401, 403) or code in (10001, 401, 403):
+        raise CheckFailure("Nacos authentication or authorization denied: " + phase)
+    if status != 200:
+        raise CheckFailure("Nacos HTTP failure during " + phase + ": " + str(status))
+    if type(code) is not int or code != 0:
+        raise CheckFailure("Nacos unsuccessful result during " + phase)
+
+
+def check():
+    """Prefer v3 and use legacy APIs only after confirming an older server version."""
+    status, body = fetch("/v3/admin/core/state/readiness")
+    legacy = False
+    if status in (404, 405, 501):
+        # A missing URL alone is not a version signal: reverse proxies also return404.
+        state_status, state_body = fetch("/v1/console/server/state")
+        state = document(state_body)
+        version = state.get("version")
+        if state_status != 200 or not isinstance(version, str) or not re.match(r"^[12]\.", version):
+            raise CheckFailure("Nacos v3 API unavailable; legacy server version not confirmed")
+        legacy = True
+        status, body = fetch("/v1/console/health/readiness")
+        if status != 200 or body.strip().lower() != "ok":
+            raise CheckFailure("Nacos legacy readiness failed")
+    else:
+        if status in (401, 403):
+            raise CheckFailure("Nacos readiness authorization denied")
+        ready = document(body)
+        require_success(status, ready, "readiness")
+        if ready.get("data") != "ok":
+            raise CheckFailure("Nacos is not ready")
+    print("  [OK]   Nacos readiness verified (" + ("legacy" if legacy else "v3") + ")")
+
+    login_path = "/v1/auth/login" if legacy else "/v3/auth/user/login"
+    status, body = fetch(login_path, form={
+        "username": os.environ["NACOS_USERNAME"], "password": os.environ["NACOS_PASSWORD"]})
+    if status in (401, 403):
+        raise CheckFailure("Nacos authentication denied")
+    if status != 200:
+        raise CheckFailure("Nacos login HTTP failure: " + str(status))
+    login = document(body)
+    if "code" in login and (type(login["code"]) is not int or login["code"] != 0):
+        raise CheckFailure("Nacos login result is unsuccessful")
+    token = login.get("accessToken")
+    if not isinstance(token, str) or not token or len(token) > 16384:
+        raise CheckFailure("Nacos login did not return a valid token")
+    print("  [OK]   Nacos authenticated login successful")
+
+    namespace = os.environ.get("NACOS_NAMESPACE") or "public"
+    group = os.environ.get("NACOS_GROUP") or "DEFAULT_GROUP"
+    for data_id in ("backend-web.yaml", "platform-storage.yaml"):
+        if legacy:
+            params = {"dataId": data_id, "group": group, "accessToken": token,
+                      "tenant": "" if namespace == "public" else namespace}
+            status, body = fetch("/v1/cs/configs", params=params)
+            if status in (401, 403):
+                raise CheckFailure("Nacos configuration authorization denied: " + data_id)
+            if status == 404 and body.strip() == "config data not exist":
+                raise CheckFailure("Nacos configuration not found: " + data_id)
+            if status != 200:
+                raise CheckFailure("Nacos configuration HTTP failure: " + data_id)
+            if not body.strip() or body.strip() == "config data not exist":
+                raise CheckFailure("Nacos configuration content is empty or missing: " + data_id)
+        else:
+            status, body = fetch("/v3/client/cs/config", params={
+                "dataId": data_id, "groupName": group, "namespaceId": namespace,
+                "accessToken": token})
+            if status in (401, 403):
+                raise CheckFailure("Nacos configuration authorization denied: " + data_id)
+            value = document(body)
+            if status in (200, 404) and value.get("code") == 20004:
+                raise CheckFailure("Nacos configuration not found: " + data_id)
+            require_success(status, value, "configuration " + data_id)
+            config = value.get("data")
+            if not isinstance(config, dict):
+                raise CheckFailure("Nacos configuration response is invalid: " + data_id)
+            if (config.get("success") is not True or config.get("resultCode") != 200
+                    or type(config.get("errorCode")) is not int or config["errorCode"] != 0
+                    or not isinstance(config.get("content"), str)
+                    or not config["content"].strip()):
+                raise CheckFailure("Nacos configuration result is unsuccessful: " + data_id)
+        print("  [OK]   Config found: " + data_id)
+
+
+try:
+    check()
+except CheckFailure as failure:
+    print("  [FAIL] " + str(failure))
+    sys.exit(1)
+PY
+    then
+        fail "Nacos readiness/authentication/configuration validation failed"
     fi
 }
 
