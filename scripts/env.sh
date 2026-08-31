@@ -94,6 +94,7 @@ get_skywalking_opts() {
 # OpenTelemetry 配置
 # ================================
 export OTEL_AGENT_HOME="${OTEL_AGENT_HOME:-$PROJECT_ROOT/agent/otel}"
+export OTEL_EXPORTER_OTLP_PROTOCOL="${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}"
 export OTEL_EXPORTER_OTLP_ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4317}"
 export OTEL_TRACES_SAMPLER="${OTEL_TRACES_SAMPLER:-parentbased_traceidratio}"
 export OTEL_TRACES_SAMPLER_ARG="${OTEL_TRACES_SAMPLER_ARG:-0.1}"
@@ -110,7 +111,7 @@ check_otel_agent() {
     fi
 }
 
-# 生成 OpenTelemetry JVM 选项
+# Build agent options from effective values; signal-specific environment overrides remain untouched.
 get_otel_opts() {
     local service_name=$1
 
@@ -120,6 +121,7 @@ get_otel_opts() {
             -Dotel.traces.exporter=otlp \
             -Dotel.metrics.exporter=otlp \
             -Dotel.logs.exporter=none \
+            -Dotel.exporter.otlp.protocol=${OTEL_EXPORTER_OTLP_PROTOCOL} \
             -Dotel.exporter.otlp.endpoint=${OTEL_EXPORTER_OTLP_ENDPOINT} \
             -Dotel.traces.sampler=${OTEL_TRACES_SAMPLER} \
             -Dotel.traces.sampler.arg=${OTEL_TRACES_SAMPLER_ARG}"

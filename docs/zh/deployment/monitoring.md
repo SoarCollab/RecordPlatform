@@ -212,9 +212,33 @@ groups:
 
 | 环境变量 | 默认值 | 说明 |
 |----------|--------|------|
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | 与默认 gRPC 监听端口匹配的显式传输协议 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Collector 地址 |
 | `OTEL_TRACES_SAMPLER` | `parentbased_traceidratio` | 采样策略 |
 | `OTEL_TRACES_SAMPLER_ARG` | `0.1` | 采样率 (10%) |
+
+脚本和三个应用镜像均显式默认使用 `grpc` 与 4317 端口。镜像使用容器网络中的
+`http://otel-collector:4317`，不是脚本的 localhost。切换 HTTP/protobuf 时，
+脚本在 `.env` 中同时设置下面两项，容器则同时传入对应环境变量：
+
+```bash
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+```
+
+容器内应使用实际可达的 Collector 主机名。自定义端口原样保留，脚本不会根据端口
+猜测协议或改写端点。生成的 JVM 协议和端点参数来自最终环境值；镜像入口不写死
+与环境变量冲突的 JVM 参数。不要另行配置相互矛盾的 system properties，其优先级
+高于环境变量。Java Agent 2.x 自身默认使用 HTTP/protobuf，参见官方
+[Agent 配置](https://opentelemetry.io/docs/zero-code/java/agent/configuration/)。
+
+单信号覆盖 `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` / `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
+以及 `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL` / `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
+保持不变且优先于通用项。HTTP 单信号端点必须带 `/v1/traces` 或 `/v1/metrics`，
+通用 HTTP 端点则是基础 URL，参见官方
+[Exporter 配置](https://opentelemetry.io/docs/languages/java/configuration/#properties-exporters)。
+验收必须在 Jaeger 中看到真实应用 trace，并通过 Prometheus 查询 JVM metrics；
+监测容器健康或合成遥测成功不能替代应用遥测验收。
 
 W3C Trace Context 标准传播，支持跨服务链路追踪。
 

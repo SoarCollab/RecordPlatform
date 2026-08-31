@@ -213,9 +213,36 @@ The project integrates OpenTelemetry Java Agent v2.26.1 for automatic trace and 
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | Explicit transport matching the default gRPC listener |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Collector endpoint |
 | `OTEL_TRACES_SAMPLER` | `parentbased_traceidratio` | Sampling strategy |
 | `OTEL_TRACES_SAMPLER_ARG` | `0.1` | Sampling rate (10%) |
+
+The scripts and all three application images explicitly default to `grpc` with
+port 4317. Images use `http://otel-collector:4317` on the container network instead
+of the scripts' localhost endpoint. Set both values in `.env` for scripts, or pass
+both as container environment overrides when switching to HTTP/protobuf:
+
+```bash
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+```
+
+Use the reachable Collector hostname inside containers. Custom endpoint ports are
+preserved verbatim; scripts do not infer transport or rewrite endpoints. Generated
+JVM protocol/endpoint options reflect the effective environment values; image
+entrypoints do not hardcode conflicting JVM properties. Avoid separately supplying
+contradictory system properties, which have higher priority than environment
+settings. Java Agent 2.x otherwise defaults to HTTP/protobuf. See the official
+[agent configuration](https://opentelemetry.io/docs/zero-code/java/agent/configuration/).
+
+Signal-specific `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` / `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
+and `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL` / `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` remain
+untouched and take priority over generic settings. HTTP signal endpoints must
+include `/v1/traces` or `/v1/metrics`; the generic HTTP endpoint is a base URL.
+See the official [exporter configuration](https://opentelemetry.io/docs/languages/java/configuration/#properties-exporters).
+Validate real application traces in Jaeger and JVM metrics through Prometheus;
+healthy monitoring containers or synthetic telemetry alone do not prove application export.
 
 Uses W3C Trace Context propagation for cross-service distributed tracing.
 
