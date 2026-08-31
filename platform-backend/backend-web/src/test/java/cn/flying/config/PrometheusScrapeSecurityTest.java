@@ -24,7 +24,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -60,6 +59,32 @@ class PrometheusScrapeSecurityTest {
     private static final String HASH = new BCryptPasswordEncoder(4).encode(PASSWORD);
     private static final String CONTEXT = "/record-platform";
     private AnnotationConfigWebApplicationContext context;
+
+    /** Scan with the real integration application's exclusions without creating infrastructure beans. */
+    @Test
+    void integrationComponentScanExcludesIsolatedSecurityConfiguration() {
+        var scan = cn.flying.test.TestApplication.class
+                .getAnnotation(org.springframework.context.annotation.ComponentScan.class);
+        var scanner = new org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider(true);
+        for (var filter : scan.excludeFilters()) {
+            for (Class<?> type : filter.classes()) {
+                switch (filter.type()) {
+                    case ANNOTATION -> scanner.addExcludeFilter(new org.springframework.core.type.filter.AnnotationTypeFilter(
+                            type.asSubclass(java.lang.annotation.Annotation.class)));
+                    case ASSIGNABLE_TYPE -> scanner.addExcludeFilter(new org.springframework.core.type.filter.AssignableTypeFilter(type));
+                    default -> fail("Update this regression to apply the integration application's new filter type");
+                }
+            }
+        }
+        var candidates = java.util.Arrays.stream(scan.basePackages())
+                .flatMap(basePackage -> scanner.findCandidateComponents(basePackage).stream())
+                .map(org.springframework.beans.factory.config.BeanDefinition::getBeanClassName)
+                .collect(java.util.stream.Collectors.toSet());
+        assertTrue(candidates.contains(SecurityConfiguration.class.getName()));
+        assertTrue(candidates.contains(PrometheusScrapeSecurity.class.getName()));
+        assertFalse(candidates.contains(TestConfiguration.class.getName()),
+                "Isolated test beans must not enter the integration component scan");
+    }
 
     /** Dispose each isolated credential context and detect leaked request authority. */
     @AfterEach
@@ -440,7 +465,7 @@ class PrometheusScrapeSecurityTest {
     }
 
     /** Supply only application dependencies; the scrape manager must stay private to its filter. */
-    @Configuration(proxyBeanMethods = false)
+    @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods = false)
     @EnableWebSecurity
     @org.springframework.web.servlet.config.annotation.EnableWebMvc
     @Import({SecurityConfiguration.class, PrometheusScrapeSecurity.class, TenantFilter.class,
