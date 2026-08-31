@@ -7,6 +7,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.springframework.amqp.rabbit.connection.Connection;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.Status;
@@ -16,10 +18,12 @@ import org.springframework.mock.env.MockEnvironment;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -27,6 +31,37 @@ import static org.mockito.Mockito.verify;
 
 @DisplayName("RabbitMQHealthIndicator Tests")
 class RabbitMQHealthIndicatorTest {
+
+    /** Reproduces the inherited mock failure and verifies both real health callback result types. */
+    @Test
+    void integrationFixtureShouldExecuteCallbacksWithoutEnablingMessagePublishing() throws Exception {
+        RabbitTemplate template = mock(RabbitTemplate.class);
+        RabbitMQHealthIndicator custom = new RabbitMQHealthIndicator(template, new SynchronousExecutorService());
+        ReflectionTestUtils.setField(custom, "healthQueue", "file.stored.queue");
+        assertThatThrownBy(() -> custom.getHealth(false)).isInstanceOf(NullPointerException.class);
+
+        ConnectionFactory factory = mock(ConnectionFactory.class);
+        Connection connection = mock(Connection.class);
+        Channel channel = mock(Channel.class);
+        com.rabbitmq.client.Connection brokerConnection = mock(com.rabbitmq.client.Connection.class);
+        when(factory.createConnection()).thenReturn(connection);
+        when(connection.createChannel(false)).thenReturn(channel);
+        when(channel.isOpen()).thenReturn(true);
+        when(channel.getConnection()).thenReturn(brokerConnection);
+        when(brokerConnection.getServerProperties()).thenReturn(Map.of("version", "fixture-broker"));
+        when(channel.queueDeclarePassive("file.stored.queue"))
+                .thenReturn(new AMQP.Queue.DeclareOk.Builder()
+                        .queue("file.stored.queue").messageCount(0).consumerCount(2).build());
+        RabbitHealthProbeFixture.enableHealthCallbacks(template, factory);
+
+        assertThat(custom.getHealth(false).getStatus()).isEqualTo(Status.UP);
+        Health builtIn = new org.springframework.boot.actuate.amqp.RabbitHealthIndicator(template).getHealth(true);
+        assertThat(builtIn.getStatus()).isEqualTo(Status.UP);
+        assertThat(builtIn.getDetails()).containsEntry("version", "fixture-broker");
+        org.mockito.Mockito.clearInvocations(factory);
+        template.convertAndSend("fixture-exchange", "fixture-key", "synthetic message");
+        org.mockito.Mockito.verifyNoInteractions(factory);
+    }
 
     /** Verifies that the packaged health probe targets the declared queue, not its routing key. */
     @Test

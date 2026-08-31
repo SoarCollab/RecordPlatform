@@ -5,7 +5,9 @@ import cn.flying.dao.mapper.FileSagaMapper;
 import cn.flying.dao.mapper.OutboxEventMapper;
 import cn.flying.test.BaseIntegrationTest;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.actuate.health.Health;
@@ -42,6 +44,14 @@ class CrossTenantHealthIndicatorIT extends BaseIntegrationTest {
     private HealthIndicator saga;
     @Autowired
     private MockMvc mockMvc;
+    @Autowired
+    private ConnectionFactory rabbitConnectionFactory;
+
+    /** Runs health callbacks against the existing RabbitMQ container without enabling message sends. */
+    @BeforeEach
+    void configureRealRabbitHealthProbes() {
+        RabbitHealthProbeFixture.enableHealthCallbacks(rabbitTemplate, rabbitConnectionFactory);
+    }
 
     /** Removes thread context; Spring rolls back every fixture row after the test. */
     @AfterEach
