@@ -1,0 +1,16 @@
+# Install native dependencies and build assets inside the target image.
+node_modules
+dist
+.svelte-kit
+coverage
+.pnpm-store
+.cache
+
+# Keep local configuration and diagnostics out of the build context.
+.env
+.env.*
+!.env.example
+*.log
+logs
+.git
+.DS_Store

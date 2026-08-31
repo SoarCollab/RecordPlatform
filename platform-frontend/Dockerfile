@@ -9,8 +9,9 @@ RUN corepack enable
 
 WORKDIR /app
 
-# Install dependencies first (layer caching: only re-runs on lockfile change)
+# Install dependencies first (cache invalidates when manifests or patches change)
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches/ ./patches/
 RUN corepack pnpm install --frozen-lockfile
 
 # Copy source and build SPA
