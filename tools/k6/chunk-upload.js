@@ -1,6 +1,6 @@
 import http from 'k6/http';
 import { sleep } from 'k6';
-import { randomBytes } from 'k6/crypto';
+import { buildTextFixture, FIXTURE_CONTENT_TYPE } from './lib/fixture.js';
 import {
   createConstantVusOptions,
   ensureRequiredConfig,
@@ -39,7 +39,7 @@ export const options = createConstantVusOptions(
  */
 export function runChunkUploadFlow(context, scenarioName = 'chunk-upload') {
   const headers = buildAuthHeaders(context.config.tenantId, context.token);
-  const fileName = `k6-${context.config.runId}-${__VU}-${__ITER}.bin`;
+  const fileName = `k6-${context.config.runId}-${__VU}-${__ITER}.txt`;
   const fileSize = uploadConfig.totalChunks * uploadConfig.chunkSize;
   const startedAt = Date.now();
 
@@ -49,7 +49,7 @@ export function runChunkUploadFlow(context, scenarioName = 'chunk-upload') {
     {
       fileName,
       fileSize: String(fileSize),
-      contentType: 'application/octet-stream',
+      contentType: FIXTURE_CONTENT_TYPE,
       chunkSize: String(uploadConfig.chunkSize),
       totalChunks: String(uploadConfig.totalChunks),
     },
@@ -72,9 +72,9 @@ export function runChunkUploadFlow(context, scenarioName = 'chunk-upload') {
   let chunksOk = true;
   for (let chunkIndex = 0; chunkIndex < uploadConfig.totalChunks; chunkIndex += 1) {
     const chunkTags = buildRequestTags(scenarioName, 'upload_chunk', 'PUT');
-    const bytes = randomBytes(uploadConfig.chunkSize);
+    const bytes = buildTextFixture(uploadConfig.chunkSize, `${fileName}:${chunkIndex}`);
     const payload = {
-      file: http.file(bytes, `chunk-${chunkIndex}.bin`, 'application/octet-stream'),
+      file: http.file(bytes, `chunk-${chunkIndex}.txt`, FIXTURE_CONTENT_TYPE),
     };
 
     const chunkRes = put(

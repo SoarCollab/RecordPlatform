@@ -40,6 +40,23 @@ class DocumentationEvidenceConsistencyTest(unittest.TestCase):
         result = check_consistency.check_evidence(REPO_ROOT)
         self.assertEqual([], result.issues)
 
+    def test_prometheus_machine_identity_docs_keep_password_file_and_verified_tls(self) -> None:
+        """Require bilingual least-privilege setup without anonymous or insecure scrape examples."""
+        for language in ("en", "zh"):
+            content = (REPO_ROOT / "docs" / language / "deployment/monitoring.md").read_text(encoding="utf-8")
+            for token in ("PROMETHEUS_SCRAPE_ENABLED", "PROMETHEUS_SCRAPE_USERNAME",
+                          "PROMETHEUS_SCRAPE_PASSWORD_HASH", "security.prometheus-scrape.password-hash",
+                          "PROMETHEUS_SCRAPE", "password_file:", "scheme: https", "ca_file:",
+                          "--cacert", "--user collector", "promtool check config", "SIGHUP", "401", "400"):
+                with self.subTest(language=language, token=token):
+                    self.assertIn(token, content)
+            self.assertNotIn("insecure_skip_verify", content)
+            self.assertNotRegex(content, r"curl[^\n]*\s-k\b")
+            self.assertNotIn("targets: ['backend:8000']", content)
+        environment = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+        self.assertIn("PROMETHEUS_SCRAPE_ENABLED=false", environment)
+        self.assertIn("PROMETHEUS_SCRAPE_PASSWORD_HASH=''", environment)
+
     def test_flyway_bootstrap_permissions_remain_narrow_and_version_scoped(self) -> None:
         """Keep bootstrap permission guidance separate from historical repair commands."""
         content = (REPO_ROOT / "docs/operations/flyway-release-compatibility.md").read_text(encoding="utf-8")

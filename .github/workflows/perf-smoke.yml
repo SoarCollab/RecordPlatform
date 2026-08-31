@@ -66,7 +66,7 @@ jobs:
       TENANT_ID: ${{ secrets.TENANT_ID }}
       USERNAME: ${{ secrets.USERNAME }}
       PASSWORD: ${{ secrets.PASSWORD }}
-      K6_DOCKER_IMAGE: grafana/k6@sha256:8cd78f9d0de5f50bc8821cceecf356d5d9e839e6611c226a3fcf13c591080fbd
+      K6_DOCKER_IMAGE: grafana/k6@sha256:70af91f86cd8e142e0544a4edaf79835a80033f71974b92edd5ac36fd4442a7b # 0.57.0
       CLEANUP: "true"
       ENVIRONMENT_FINGERPRINT: ${{ inputs.environment_fingerprint }}
       SMOKE_FILE_QUERY_VUS: ${{ inputs.concurrency }}

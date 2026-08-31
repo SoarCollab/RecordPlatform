@@ -36,7 +36,7 @@ import static org.mockito.ArgumentMatchers.any;
 @DisplayName("TenantFilter Tests")
 class TenantFilterTest {
 
-    private final TenantFilter filter = new TenantFilter();
+    private final TenantFilter filter = new TenantFilter(new cn.flying.config.PrometheusScrapeSecurity(false, "", ""));
 
     @Mock
     private FilterChain filterChain;

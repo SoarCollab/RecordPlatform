@@ -52,6 +52,7 @@ public final class SensitiveDataMasker {
      */
     private static final Set<String> SENSITIVE_FIELD_NAMES = Set.of(
             "password",
+            "passwordhash",
             "oldpassword",
             "old_password",
             "newpassword",

@@ -113,14 +113,55 @@ saga:
 
 ## Prometheus 配置
 
+### 专用采集身份
+
+后端指标**不允许匿名读取**。机器采集身份默认关闭；已有 admin/monitor Bearer
+访问仍需匹配的业务租户。通过以下后端配置显式启用机器采集：
+
+| 环境变量 | 应用属性 | 默认值 |
+|---|---|---|
+| `PROMETHEUS_SCRAPE_ENABLED` | `security.prometheus-scrape.enabled` | `false` |
+| `PROMETHEUS_SCRAPE_USERNAME` | `security.prometheus-scrape.username` | 空 |
+| `PROMETHEUS_SCRAPE_PASSWORD_HASH` | `security.prometheus-scrape.password-hash` | 空 |
+
+使用独立用户名（1–64 位 ASCII 字母/数字、点、下划线或连字符，首位必须是字母或
+数字）及 BCrypt 哈希（`$2a$`、`$2b$` 或 `$2y$`）。启用后缺失或非法配置会使
+启动失败，拒绝明文或 `{noop}` 密码。仅配置的 servlet context 下精确的
+`GET`/`HEAD /actuator/prometheus` 接受此 Basic 身份。它只有
+`PROMETHEUS_SCRAPE` 权限，**不是**业务 admin/monitor，不得访问文件、审计/日志、
+其他 actuator、子路径或写方法。机器路径忽略调用者租户头，不建立业务租户上下文；
+不要给采集器编造 `X-Tenant-ID`。
+
+在本地密码管理器生成强随机密码，保存至 Prometheus 私有 `password_file`
+（仅所有者可读写 `0600`，只包含密码且无末尾换行）。使用可信工具交互生成
+BCrypt，例如 `htpasswd -cB -C 12 /private/path/scrape.htpasswd collector`，在提示中
+输入同一密码，不要使用 `-b` 将密码放入命令行。后端私有配置只保存哈希，不含
+`username:` 前缀。哈希文件同样限制权限；真实用户名、哈希、密码文件和证书均不提交。
+
+shell/dotenv 中用单引号包裹完整哈希以保留 `$`；shell 未引用或双引号赋值会展开
+这些字符。变量必须实际导出给后端进程（Compose 的 `.env` 本身不会自动注入容器
+环境）；直接写应用 YAML 的哈希也需正确引用。禁止凭据调试转储或 URL 携带密码。
+此功能不配置 TLS：仅通过证书验证的 HTTPS 暴露，可由明确管理的内网反向代理终止
+TLS。保留已有后端 TLS/转发头策略，不能信任任意调用者提供的转发头。
+
 ### 抓取配置
+
+以下是需要替换的运维模板，不是可直接使用的地址或凭据。修改 DNS/端口并只读挂载
+私有文件；证书 SAN 必须匹配目标名称。`ca_file` 存放受信 CA 或显式信任的自签
+公钥证书，必须保持 TLS 证书校验。
 
 ```yaml
 scrape_configs:
   - job_name: 'recordplatform-backend'
+    scheme: https
     metrics_path: '/record-platform/actuator/prometheus'
+    basic_auth:
+      username: 'collector'
+      password_file: '/run/secrets/prometheus-scrape-password'
+    tls_config:
+      ca_file: '/run/secrets/backend-ca.crt'
     static_configs:
-      - targets: ['backend:8000']
+      - targets: ['backend.example.internal:443']
 
   # storage 和 fisco 是 Dubbo Provider，没有内嵌 HTTP 服务器，
   # 不直接暴露 /actuator/prometheus。通过 OTel Collector 的 Prometheus 导出端点采集。
@@ -129,6 +170,34 @@ scrape_configs:
     static_configs:
       - targets: ['otel-collector:8889']
 ```
+
+### 轮换与用户验收
+
+修改后端用户名/哈希需要**重启后端**。同时发布新哈希与匹配的私有密码文件，重启
+后端，再执行 `promtool check config` 并重载 Prometheus（SIGHUP 或显式开启的
+lifecycle reload 接口）。单凭据轮换可能短暂中断采集，不承诺零停机重叠。确认新
+密码成功、旧密码拒绝后再停用旧凭据。
+
+部署后由用户执行以下检查；源码测试不是服务器验收。`curl --user collector`
+会提示输入密码，避免出现在参数或历史中；使用受信 CA/公钥证书，不能跳过校验：
+
+```bash
+curl -q --cacert /private/path/backend-ca.crt --user collector --fail \
+  https://backend.example.internal/record-platform/actuator/prometheus
+curl -q --cacert /private/path/backend-ca.crt --user collector --head \
+  https://backend.example.internal/record-platform/actuator/prometheus
+curl -q --cacert /private/path/backend-ca.crt --user collector --write-out '%{http_code}\n' \
+  https://backend.example.internal/record-platform/actuator/info
+```
+
+前两项应返回 200（GET 含真实指标）。采集凭据访问其他受保护路径不得返回指标或
+业务数据。使用错误/旧密码重复第一项应返回 401 且无指标。无凭据又无租户时，
+既有外层租户过滤器返回 400；有租户但无认证时返回 401。确认 Prometheus 的后端
+target 为 UP 且出现新的业务指标；仅有 OTel/JVM 数据不代表后端 target 正常。
+已有 Bearer admin/monitor 访问和普通业务登录也应继续正常。
+
+参考：[Spring Basic authentication](https://docs.spring.io/spring-security/reference/servlet/authentication/passwords/basic.html)、
+[Prometheus HTTP authentication and TLS configuration](https://prometheus.io/docs/prometheus/latest/configuration/configuration/)。
 
 ### 告警规则
 

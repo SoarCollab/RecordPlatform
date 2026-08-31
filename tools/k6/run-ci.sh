@@ -22,6 +22,7 @@ Environment (required):
   USERNAME
   PASSWORD
   K6_DOCKER_IMAGE               Docker 引擎必填，且必须使用 digest 固定镜像
+  K6_CA_CERT_FILE               Docker 可选：本地可信 PEM CA/自签公共证书文件
   ENVIRONMENT_FINGERPRINT       同环境 baseline 比较标识（默认按目标掩码/引擎/OS 生成）
 USAGE
 }
@@ -288,6 +289,18 @@ run_with_docker_k6() {
     -v "$PWD:/workspace:ro"
     -w /workspace
   )
+
+  # Mount only the public trust bundle; keep TLS verification enabled.
+  if [[ -n "${K6_CA_CERT_FILE:-}" ]]; then
+    if [[ ! -f "$K6_CA_CERT_FILE" || ! -r "$K6_CA_CERT_FILE" ]]; then
+      echo '[ERROR] K6_CA_CERT_FILE must be a readable public PEM certificate file' >&2
+      return 1
+    fi
+    local ca_file
+    ca_file="$(cd "$(dirname "$K6_CA_CERT_FILE")" && pwd)/$(basename "$K6_CA_CERT_FILE")"
+    docker_args+=(-v "$ca_file:/etc/ssl/certs/record-platform-ca.pem:ro"
+      -e SSL_CERT_FILE=/etc/ssl/certs/record-platform-ca.pem)
+  fi
 
   if should_add_docker_host_gateway_alias; then
     docker_args+=(--add-host "host.docker.internal:host-gateway")
