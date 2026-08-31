@@ -42,7 +42,7 @@ spring:
           max-attempts: 3
           multiplier: 2.0
     health:
-      queue: file.stored
+      queue: file.stored.queue
 
   security:
     jwt:

@@ -1,5 +1,7 @@
 package cn.flying.health;
 
+import cn.flying.config.RabbitConfiguration;
+import com.rabbitmq.client.AMQP;
 import com.rabbitmq.client.Channel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -8,6 +10,9 @@ import org.mockito.Mockito;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.Status;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
@@ -18,9 +23,43 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 @DisplayName("RabbitMQHealthIndicator Tests")
 class RabbitMQHealthIndicatorTest {
+
+    /** Verifies that the packaged health probe targets the declared queue, not its routing key. */
+    @Test
+    void health_shouldProbeTheConfiguredApplicationQueue() throws Exception {
+        MockEnvironment environment = new MockEnvironment();
+        for (var source : new YamlPropertySourceLoader()
+                .load("application", new ClassPathResource("application.yml"))) {
+            environment.getPropertySources().addLast(source);
+        }
+        String queueName = environment.getRequiredProperty("spring.rabbitmq.health.queue");
+        String declaredQueue = new RabbitConfiguration().fileStoredQueue().getName();
+        Channel channel = mock(Channel.class);
+        when(channel.isOpen()).thenReturn(true);
+        when(channel.queueDeclarePassive(declaredQueue))
+                .thenReturn(new AMQP.Queue.DeclareOk.Builder()
+                        .queue(declaredQueue).messageCount(0).consumerCount(2).build());
+        RabbitTemplate rabbitTemplate = mock(RabbitTemplate.class);
+        when(rabbitTemplate.execute(any())).thenAnswer(invocation -> {
+            org.springframework.amqp.rabbit.core.ChannelCallback<Health> callback = invocation.getArgument(0);
+            return callback.doInRabbit(channel);
+        });
+        RabbitMQHealthIndicator indicator = new RabbitMQHealthIndicator(
+                rabbitTemplate, new SynchronousExecutorService());
+        ReflectionTestUtils.setField(indicator, "healthQueue", queueName);
+
+        assertThat(queueName).isEqualTo(declaredQueue);
+        Health health = indicator.health();
+
+        assertThat(health.getStatus()).isEqualTo(Status.UP);
+        assertThat(health.getDetails()).containsEntry("queue", declaredQueue)
+                .containsEntry("messageCount", 0).containsEntry("consumerCount", 2);
+        verify(channel).queueDeclarePassive(declaredQueue);
+    }
 
     @Test
     @DisplayName("health() should dispatch probe via configured executor")
