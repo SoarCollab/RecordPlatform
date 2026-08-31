@@ -302,6 +302,12 @@ groups:
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Collector 地址 |
 | `OTEL_TRACES_SAMPLER` | `parentbased_traceidratio` | 采样策略 |
 | `OTEL_TRACES_SAMPLER_ARG` | `0.1` | 采样率 (10%) |
+| `OTEL_INSTRUMENTATION_MICROMETER_ENABLED` | provider `true`，backend `false` | 非 HTTP 的 FISCO/storage 服务通过 bridge 导出业务指标 |
+
+脚本在每次生成服务参数时选择 bridge 默认值，不会在 source `env.sh` 时全局开启。
+显式 `true`/`false` 原样保留，脚本中的空值使用默认值。后端默认仍使用原生、经过认证的
+Actuator scrape。Agent 2.26.1 自身默认关闭 Micrometer instrumentation，参见官方
+[instrumentation 配置](https://opentelemetry.io/docs/zero-code/java/agent/disable/)。
 
 脚本和三个应用镜像均显式默认使用 `grpc` 与 4317 端口。镜像使用容器网络中的
 `http://otel-collector:4317`，不是脚本的 localhost。切换 HTTP/protobuf 时，
@@ -458,7 +464,7 @@ output {
 | SLI | 指标来源 | 计算方式 |
 |-----|---------|---------|
 | **上传成功率** | `saga_total_total{status}` | completed / (completed + failed + compensated) |
-| **存证 P99 延迟** | `otel_blockchain_operation_duration_seconds{quantile="0.99"}` | 基于 Collector 导出的 P99 样本做 `max_over_time(...[window])` 窗口汇总 |
+| **存证 P99 延迟** | `otel_blockchain_operation_duration_seconds_bucket` | 对 FISCO 观察值计算 `histogram_quantile(0.99, sum by (le) (rate(...[window])))` |
 | **存储可用性** | `s3_node_online_status` | 对按 `(node, fault_domain)` 去重后的瞬时在线节点占比做 30 天滚动平均 |
 | **API 错误率** | `http_server_requests_seconds_count{status}` | 5xx 数量 / 总请求数 |
 
@@ -511,4 +517,21 @@ rule_files:
 | API 错误率 | 错误率时序图 + Top-5 错误端点 |
 | Resilience4j | 断路器状态 + 重试次数 |
 
-> **注意**：存证延迟通过 OTel Collector 的 Prometheus exporter 暴露，因此指标名带有 `otel_` 前缀。它仍然使用 Micrometer 预计算的客户端分位数（`.publishPercentiles()`），因此当前 SLO 规则用 `max_over_time(...)` 对导出的 P99 样本做窗口汇总，而不是 `histogram_quantile(...)`。这些分位数不可跨多实例聚合。如需多实例部署，请在 `FiscoMetrics.java` 的 Timer builder 中添加 `.publishPercentileHistogram(true)`。
+> **注意**：Agent 2.26.1 默认 Micrometer bridge 将 Timer 导出为秒单位的直方图，而非客户端 quantile 序列，即使 Timer 调用了 `.publishPercentiles()`。规则和面板限定 `job="otel-collector",exported_job="record-platform-fisco",operation="storeFile"`，先对每条 counter 计算 `rate`，再按 `le` 求和并跨实例估算分位数。现有 5m/30m/1h recording 名称代表对应区间的观察值，不再是客户端分位数上包络。桶内插值是估算而非精确分位数；保留秒单位和 5 秒阈值。参见 [Prometheus 直方图函数](https://prometheus.io/docs/prometheus/latest/querying/functions/#histogram_quantile)。
+
+### 采集健康与无数据语义
+
+面板独立展示已配置 target 的健康和观察次数。`RecordPlatformScrapeTargetDown` 只对
+已配置的 `recordplatform-backend` / `otel-collector` 连续失败 2 分钟告警。
+源指标缺失告警要求对应 scrape 成功持续 5 分钟，并检查启动即注册的 Saga meter、
+FISCO `otel_blockchain_health` 和三个明确服务的 JVM meters。未配置的可选 job 不告警；
+部署时必须校验必需 job 定义，删除全部 job 无法仅靠不存在的 `up` 序列检测。
+
+无请求或上传时比率未定义，从未调用的 Timer 没有观察值。缺失库存/遥测是未知，不能
+填成 100% 可用或零延迟。有成功 API 请求但从未发生 5xx 时错误率为 0%；所有 HTTP
+输入缺失时保持缺失。新部署的 30 天指标仅覆盖实际保留的观察数据，不代表完成了
+30 天 SLO 窗口。Exporter 缓存存在以及新的 scrape 时间戳不证明生产者刚刚发送数据，
+仍需独立验证生产者信号持续推进。外部告警通知投递属于独立配置。
+
+执行 `bash tools/ci/check-monitoring.sh`，使用固定镜像、无网络的 `promtool check rules`
+和数值 `promtool test rules`；Required CI 强制执行同一检查，不以缺少工具为成功。

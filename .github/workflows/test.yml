@@ -1227,6 +1227,9 @@ jobs:
       - name: Run Required CI policy tests
         run: python3 -m unittest discover -s tools/ci/tests -v
 
+      - name: Validate monitoring rules with pinned Prometheus
+        run: bash tools/ci/check-monitoring.sh
+
       - name: Initialize pinned k6 runtime without network access
         run: |
           node --experimental-vm-modules --test tools/k6/tests/*.test.mjs
