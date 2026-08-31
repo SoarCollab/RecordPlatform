@@ -1203,6 +1203,9 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
+      - name: Build Frontend Docker Image
+        run: docker build -f platform-frontend/Dockerfile -t recordplatform-frontend:ci platform-frontend
+
   required-ci:
     name: Required CI
     needs:

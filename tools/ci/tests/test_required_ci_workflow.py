@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+import shlex
 import unittest
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 
@@ -143,6 +145,136 @@ class MonitoringImageTest(unittest.TestCase):
                     r"(?m)^\s+image:\s*(jaegertracing/all-in-one:\S+)", content
                 )
                 self.assertEqual(images, [expected_image])
+
+
+def frontend_dependency_inputs(dockerfile: str, context: Path) -> dict[str, bytes]:
+    """Resolve the build stage's simple COPY inputs before frozen dependency installation."""
+    inputs: dict[str, bytes] = {}
+    for line in dockerfile.splitlines():
+        instruction = shlex.split(line, comments=True)
+        if not instruction:
+            continue
+        if instruction == ["RUN", "corepack", "pnpm", "install", "--frozen-lockfile"]:
+            return inputs
+        if instruction[0] != "COPY":
+            continue
+        sources, destination = instruction[1:-1], Path(instruction[-1])
+        if not sources or destination.is_absolute() or ".." in destination.parts:
+            raise AssertionError("Unsupported dependency COPY destination")
+        for source in sources:
+            if (
+                source.startswith("--")
+                or Path(source).is_absolute()
+                or ".." in Path(source).parts
+            ):
+                raise AssertionError("Unsupported dependency COPY source")
+            source_path = context / source
+            if source_path.is_dir():
+                for file in source_path.rglob("*"):
+                    if file.is_file():
+                        target = destination / file.relative_to(source_path)
+                        inputs[str(target)] = file.read_bytes()
+            elif source_path.is_file():
+                inputs[str(destination / source_path.name)] = source_path.read_bytes()
+            else:
+                raise AssertionError(f"Missing dependency COPY source: {source}")
+    raise AssertionError("Frozen frontend dependency installation not found")
+
+
+class FrontendDependencyLayerTest(unittest.TestCase):
+    """Keep every configured pnpm patch available in the cacheable dependency layer."""
+
+    def assert_patch_inputs(self, dockerfile: str) -> None:
+        """Compare each declared patch with its actual pre-install path and bytes."""
+        context = PROJECT_ROOT / "platform-frontend"
+        inputs = frontend_dependency_inputs(dockerfile, context)
+        workspace = inputs["pnpm-workspace.yaml"].decode("utf-8")
+        section = re.search(r"(?m)^patchedDependencies:\n((?:[ \t].*\n|\n)+)", workspace)
+        self.assertIsNotNone(section, "Expected the frontend security patch configuration")
+        declarations = [line for line in section.group(1).splitlines() if line.strip()]
+        self.assertTrue(declarations)
+        for declaration in declarations:
+            key, separator, value = declaration.strip().partition(": ")
+            self.assertTrue(key and separator, "Unsupported patch declaration")
+            patch_path = value.strip("\"'")
+            self.assertIn(patch_path, tuple(inputs), "Patch must be copied before frozen install")
+            self.assertEqual(inputs[patch_path], (context / patch_path).read_bytes())
+
+    def test_frontend_dependency_layer_contains_configured_patches(self) -> None:
+        """Validate the real Dockerfile against all workspace patch declarations."""
+        dockerfile = (PROJECT_ROOT / "platform-frontend/Dockerfile").read_text(encoding="utf-8")
+        self.assert_patch_inputs(dockerfile)
+
+    def test_missing_late_or_misplaced_patch_copy_is_rejected(self) -> None:
+        """Prove the guard rejects the original omission and ineffective COPY variants."""
+        dockerfile = (PROJECT_ROOT / "platform-frontend/Dockerfile").read_text(encoding="utf-8")
+        copy = "COPY patches/ ./patches/\n"
+        self.assertIn(copy, dockerfile)
+        for mutated in (
+            dockerfile.replace(copy, ""),
+            dockerfile.replace(copy, "") + "\n" + copy,
+            dockerfile.replace(copy, "COPY patches/ ./wrong-directory/\n"),
+        ):
+            with self.subTest(dockerfile=mutated), self.assertRaises(AssertionError):
+                self.assert_patch_inputs(mutated)
+
+    def test_context_excludes_host_outputs_and_private_environment(self) -> None:
+        """Evaluate root-relative ignore rules on required and forbidden context paths."""
+        context = PROJECT_ROOT / "platform-frontend"
+        patterns = [
+            line.strip()
+            for line in (context / ".dockerignore").read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
+        examples = {
+            "node_modules/.pnpm/native-linux-gnu/binding.node": False,
+            "dist/index.html": False,
+            ".svelte-kit/output/client/app.js": False,
+            "coverage/lcov.info": False,
+            ".pnpm-store/package/index.json": False,
+            ".cache/build.json": False,
+            ".env": False,
+            ".env.production": False,
+            ".env.local": False,
+            "pnpm-debug.log": False,
+            "logs/build.txt": False,
+            ".env.example": True,
+            "package.json": True,
+            "pnpm-lock.yaml": True,
+            "pnpm-workspace.yaml": True,
+            "src/app.html": True,
+            "svelte.config.js": True,
+            "nginx.conf": True,
+        }
+        examples.update({
+            str(path.relative_to(context)): True
+            for path in (context / "patches").rglob("*.patch")
+        })
+        for candidate, expected in examples.items():
+            included = True
+            ancestors = [
+                str(path)
+                for path in (Path(candidate), *Path(candidate).parents)
+                if str(path) != "."
+            ]
+            for pattern in patterns:
+                # This repository uses root-relative rules, with last-match exceptions.
+                if any(fnmatchcase(path, pattern.lstrip("!")) for path in ancestors):
+                    included = pattern.startswith("!")
+            with self.subTest(path=candidate):
+                self.assertEqual(included, expected)
+
+    def test_required_build_checks_real_frontend_image_after_host_build(self) -> None:
+        """Keep target-platform Docker compilation blocking after host output exists."""
+        build = job_block(TEST_WORKFLOW.read_text(encoding="utf-8"), "build-check")
+        step = "      - name: Build Frontend Docker Image\n"
+        self.assertIn(step, build)
+        docker_step = build.split(step, 1)[1].split("      - name:", 1)[0]
+        self.assertEqual(
+            docker_step.strip(),
+            "run: docker build -f platform-frontend/Dockerfile -t recordplatform-frontend:ci platform-frontend",
+        )
+        self.assertLess(build.index("          pnpm build"), build.index(step))
 
 
 if __name__ == "__main__":
