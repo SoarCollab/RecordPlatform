@@ -246,7 +246,7 @@ public class OperationLogAspect {
             }
             
             // 设置操作状态和时间，ResponseEntity 4xx/5xx 也属于失败
-            String failureMessage = resolveFailureMessage(result, e);
+            String failureMessage = SensitiveDataMasker.maskSensitiveFields(resolveFailureMessage(result, e));
             boolean failed = failureMessage != null;
             operationLog.setStatus(failed ? 1 : 0);
             operationLog.setOperationTime(LocalDateTime.now());

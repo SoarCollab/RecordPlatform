@@ -14,6 +14,138 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class SensitiveDataMaskerTest {
 
+    /** Exercise collection, serialization and Throwable limits through public log-copy entrypoints. */
+    @Test
+    void shouldOmitOverBudgetLogCopiesWithoutPublishingPrefixes() {
+        String sentinel = "bounded-copy-sentinel";
+        assertTimeoutPreemptively(java.time.Duration.ofSeconds(2), () -> {
+            Map<String, Object> manyFields = new java.util.LinkedHashMap<>();
+            for (int i = 0; i < 5000; i++) {
+                manyFields.put("field" + i, i);
+            }
+            assertTrue(SensitiveDataMasker.maskSensitiveFields(manyFields).containsKey("<omitted>"));
+            String manyItems = SensitiveDataMasker.maskAndSerialize(java.util.Collections.nCopies(5000, 1));
+            assertTrue(manyItems.contains("******"));
+            assertTrue(SensitiveDataMasker.isSensitiveField("x".repeat(65537)));
+
+            CapabilityFixture hugeDto = new CapabilityFixture(sentinel, "x".repeat(70000));
+            assertFalse(SensitiveDataMasker.maskAndSerialize(hugeDto).contains(sentinel));
+            assertFalse(SensitiveDataMasker.maskSensitiveFields(Map.of("value", hugeDto)).toString().contains(sentinel));
+            List<String> oversizedCopy = java.util.Collections.nCopies(1000, "x".repeat(100));
+            assertEquals("[...]", SensitiveDataMasker.maskAndSerialize(oversizedCopy));
+            assertFalse(SensitiveDataMasker.maskAndSerialize(Map.of("values", oversizedCopy)).contains("x".repeat(100)));
+
+            assertNull(SensitiveDataMasker.maskThrowable(null));
+            IllegalStateException graph = new IllegalStateException("ordinary graph root");
+            for (int i = 0; i < 80; i++) {
+                graph.addSuppressed(new IllegalArgumentException("X-Amz-Signature=" + sentinel));
+            }
+            Throwable copied = SensitiveDataMasker.maskThrowable(graph);
+            assertTrue(copied.getSuppressed().length < graph.getSuppressed().length);
+            java.io.StringWriter output = new java.io.StringWriter();
+            copied.printStackTrace(new java.io.PrintWriter(output));
+            assertFalse(output.toString().contains(sentinel));
+        });
+    }
+
+    /** Excessive encoding and malformed JSON escapes must remain safe without emitting a decoded secret. */
+    @Test
+    void shouldFailSafeOnExcessiveAndMalformedLogEscapes() {
+        String sentinel = "escape-bound-sentinel";
+        String field = "upload%5furl";
+        for (int i = 0; i < 6; i++) {
+            field = field.replace("%", "%25");
+        }
+        assertTrue(SensitiveDataMasker.isSensitiveField(field));
+        assertFalse(SensitiveDataMasker.maskSensitiveFields(field + "=" + sentinel).contains(sentinel));
+        String malformed = "prefix \\uZZZZ \\\"uploadUrl\\\"=\\/" + sentinel;
+        assertFalse(SensitiveDataMasker.maskSensitiveFields(malformed).contains(sentinel));
+        assertEquals("ordinary \\uZZZZ diagnostic", SensitiveDataMasker.maskSensitiveFields("ordinary \\uZZZZ diagnostic"));
+    }
+
+    /** Encoded field names and standalone signed query fields must not evade string/map parity. */
+    @Test
+    void shouldMaskStandaloneCapabilityFieldsAndBoundWork() {
+        String secret = "standalone-capability-sentinel";
+        for (String field : List.of("X-Amz-Signature", "X-Amz-Credential", "X-Amz-Security-Token",
+                "X-Goog-Signature", "AWSAccessKeyId", "upload%255furl", "UPLOAD.URL", "upload url")) {
+            Map<String, Object> value = Map.of(field, secret, "ordinary", "retained");
+            assertFalse(SensitiveDataMasker.maskSensitiveFields(value).toString().contains(secret), field);
+            assertFalse(SensitiveDataMasker.maskAndSerialize(value).contains(secret), field);
+            assertFalse(SensitiveDataMasker.maskSensitiveFields("{\"" + field + "\":\"" + secret).contains(secret), field);
+        }
+        assertEquals("Error code: 42", SensitiveDataMasker.maskSensitiveFields("Error code: 42"));
+        assertTimeoutPreemptively(java.time.Duration.ofSeconds(2), () -> {
+            String deeplyNested = "[".repeat(2000) + "{\"uploadUrl\":\"" + secret + "\"}" + "]".repeat(2000);
+            assertFalse(SensitiveDataMasker.maskSensitiveFields(deeplyNested).contains(secret));
+            assertFalse(SensitiveDataMasker.maskSensitiveFields("x".repeat(100000) + secret).contains(secret));
+            Map<String, Object> cycle = new HashMap<>();
+            cycle.put("loop", cycle);
+            cycle.put("uploadUrl", secret);
+            assertFalse(SensitiveDataMasker.maskAndSerialize(cycle).contains(secret));
+            assertFalse(SensitiveDataMasker.maskSensitiveFields(cycle).toString().contains(secret));
+        });
+    }
+
+    /** Throwable snapshots must be detached, bounded and preserve nonsensitive stack/cause context. */
+    @Test
+    void shouldBoundAndSanitizeThrowableGraph() {
+        IllegalStateException first = new IllegalStateException("ordinary diagnostic");
+        IllegalArgumentException second = new IllegalArgumentException("X-Amz-Signature=throwable-sentinel");
+        first.initCause(second);
+        second.initCause(first);
+        first.addSuppressed(second);
+        Throwable copy = SensitiveDataMasker.maskThrowable(first);
+        java.io.StringWriter text = new java.io.StringWriter();
+        copy.printStackTrace(new java.io.PrintWriter(text));
+        assertFalse(text.toString().contains("throwable-sentinel"));
+        assertTrue(text.toString().contains("ordinary diagnostic"));
+        assertTrue(text.toString().contains("IllegalArgumentException"));
+        assertSame(first, second.getCause());
+    }
+
+    /** Preserve collection/DTO structure while sanitizing all signed values, including array elements. */
+    @Test
+    void shouldRedactArrayAndDtoCopiesWithoutChangingOriginals() {
+        String url = "https://storage.example/object?X-Amz-Signature=array-dto-sentinel";
+        CapabilityFixture fixture = new CapabilityFixture(url, "ordinary");
+        Map<String, Object> input = Map.of("value", fixture, "array", new String[]{url, "ordinary"});
+        String masked = SensitiveDataMasker.maskAndSerialize(input);
+        assertFalse(masked.contains("array-dto-sentinel"));
+        assertTrue(masked.contains("\"name\":\"ordinary\""));
+        assertFalse(SensitiveDataMasker.maskSensitiveFields(input).toString().contains("array-dto-sentinel"));
+        assertEquals(url, fixture.uploadUrl());
+    }
+
+    private record CapabilityFixture(String uploadUrl, String name) { }
+
+    /** Verify capability aliases and equivalent log representations without mutating inputs. */
+    @Test
+    void shouldRedactPresignedCapabilitiesAcrossRepresentations() {
+        String signature = "synthetic-signature-sentinel";
+        String url = "https://storage.example/bucket/object?X-Amz-Credential=synthetic-credential"
+                + "&X-Amz-Signature=" + signature;
+        for (String alias : List.of("uploadUrl", "UPLOAD_URL", "upload-url", "upload.url", "presignedUrl")) {
+            Map<String, Object> source = Map.of("parts", List.of(Map.of(alias, url)), "name", "ordinary");
+            assertFalse(SensitiveDataMasker.maskAndSerialize(source).contains(signature));
+            assertFalse(SensitiveDataMasker.maskSensitiveFields(source).toString().contains(signature));
+            assertTrue(source.toString().contains(signature));
+        }
+        for (String value : List.of(url, url.replace("-", "%2D"),
+                java.net.URLEncoder.encode(url, java.nio.charset.StandardCharsets.UTF_8),
+                url.replace("X-Amz", "X\\u002dAmz"),
+                "{\"uploadUrl\":\"" + url,
+                "{\"up\\u006coadUrl\":\"" + url + "\"}")) {
+            assertFalse(SensitiveDataMasker.maskSensitiveFields(value).contains(signature), value);
+            assertFalse(SensitiveDataMasker.maskAndSerialize(List.of(value)).contains(signature), value);
+            assertFalse(SensitiveDataMasker.maskSensitiveFields(Map.of("message", value)).toString()
+                    .contains(signature), value);
+        }
+        assertEquals("https://docs.example/path?version=3", SensitiveDataMasker.maskSensitiveFields(
+                "https://docs.example/path?version=3"));
+        assertEquals("ordinary failure", SensitiveDataMasker.maskSensitiveFields("ordinary failure"));
+    }
+
     @Test
     @DisplayName("JSON字符串中的password字段应被脱敏")
     void maskSensitiveFields_shouldMaskPassword() {
