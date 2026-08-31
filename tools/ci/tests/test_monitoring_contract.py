@@ -11,6 +11,17 @@ ROOT = Path(__file__).resolve().parents[3]
 class MonitoringContractTest(unittest.TestCase):
     """Assert source consumers remain aligned with real promtool fixtures."""
 
+    def test_saga_selectors_retain_the_native_exporter_contract(self) -> None:
+        """Keep config-only changes bound to the family exercised by the Java exporter test."""
+        for relative in ('config/prometheus/recording-rules.yml',
+                         'config/prometheus/alerting-rules.yml',
+                         'config/prometheus/tests/slo-rules.test.yml'):
+            content = (ROOT / relative).read_text()
+            self.assertNotIn('saga_total_total', content)
+            self.assertIn('saga_total{', content)
+        contract = ROOT / 'platform-backend/backend-web/src/test/java/cn/flying/config/SagaPrometheusContractTest.java'
+        self.assertIn('new PrometheusMeterRegistry(PrometheusConfig.DEFAULT)', contract.read_text())
+
     def test_dashboard_latency_queries_have_numerical_fixtures(self) -> None:
         """Every actual latency panel query must be exercised by the rule engine."""
         dashboard = json.loads((ROOT / 'config/grafana/slo-dashboard.json').read_text())

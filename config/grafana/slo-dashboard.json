@@ -84,6 +84,7 @@
         }
       ],
       "title": "Upload Success Rate",
+      "description": "Uses the backend's actual saga_total counter family. No terminal outcomes means undefined success ratio; missing telemetry is unknown, not healthy.",
       "type": "stat"
     },
     {

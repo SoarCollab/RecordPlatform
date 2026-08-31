@@ -49,7 +49,7 @@ groups:
         expr: |
           (up{job="recordplatform-backend"} == 1)
           unless on(job, instance)
-          saga_total_total{job="recordplatform-backend",status="started"}
+          saga_total{job="recordplatform-backend",status="started"}
         for: 5m
         labels:
           severity: warning

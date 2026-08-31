@@ -11,6 +11,28 @@ group_eval_order:
   - slo:attestation_latency
 
 tests:
+  - name: actual-saga-export-after-success-does-not-fire-missing-metrics
+    interval: 1m
+    input_series:
+      - series: 'up{job="recordplatform-backend",instance="backend"}'
+        values: '1+0x10'
+      - series: 'saga_total{job="recordplatform-backend",instance="backend",status="started"}'
+        values: '0 1+0x9'
+      - series: 'saga_total{job="recordplatform-backend",instance="backend",status="completed"}'
+        values: '0 1+0x9'
+      - series: 'saga_total{job="recordplatform-backend",instance="backend",status="failed"}'
+        values: '0+0x10'
+      - series: 'saga_total{job="recordplatform-backend",instance="backend",status="compensated"}'
+        values: '0+0x10'
+    promql_expr_test:
+      - expr: sli:upload_success:ratio_rate5m
+        eval_time: 2m
+        exp_samples: [{labels: 'sli:upload_success:ratio_rate5m', value: 1}]
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RecordPlatformBackendMetricsMissing
+        exp_alerts: []
+
   - name: successful-api-without-ever-registering-5xx-is-zero-not-absent
     interval: 1m
     input_series:
@@ -36,11 +58,11 @@ tests:
         values: '0+90x65'
       - series: 'http_server_requests_seconds_count{job="recordplatform-backend",status="500"}'
         values: '0+10x65'
-      - series: 'saga_total_total{status="completed"}'
+      - series: 'saga_total{status="completed"}'
         values: '0+90x65'
-      - series: 'saga_total_total{status="failed"}'
+      - series: 'saga_total{status="failed"}'
         values: '0+5x65'
-      - series: 'saga_total_total{status="compensated"}'
+      - series: 'saga_total{status="compensated"}'
         values: '0+5x65'
     promql_expr_test:
       - expr: sli:api_error:ratio_rate5m
@@ -55,11 +77,11 @@ tests:
     input_series:
       - series: 'http_server_requests_seconds_count{job="recordplatform-backend",status="200"}'
         values: '0+0x10'
-      - series: 'saga_total_total{status="completed"}'
+      - series: 'saga_total{status="completed"}'
         values: '0+0x10'
-      - series: 'saga_total_total{status="failed"}'
+      - series: 'saga_total{status="failed"}'
         values: '0+0x10'
-      - series: 'saga_total_total{status="compensated"}'
+      - series: 'saga_total{status="compensated"}'
         values: '0+0x10'
     promql_expr_test:
       - expr: 'sli:api_error:ratio_rate5m == sli:api_error:ratio_rate5m'
@@ -218,7 +240,7 @@ tests:
         values: '1+0x10'
       - series: 'up{job="recordplatform-backend",instance="present"}'
         values: '1+0x10'
-      - series: 'saga_total_total{job="recordplatform-backend",instance="present",status="started"}'
+      - series: 'saga_total{job="recordplatform-backend",instance="present",status="started"}'
         values: '0+0x10'
     alert_rule_test:
       - eval_time: 4m
