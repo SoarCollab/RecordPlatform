@@ -540,10 +540,16 @@ FISCO Timer 必须提供显式 `serviceLevelObjectives(Duration...)` 桶边界�
 阈值。固定版本 bridge 中，仅配置客户端 percentiles 或
 `publishPercentileHistogram(true)` 不会提供可用的有限桶建议。真实操作后，除
 `_count`/`_sum` 外还必须确认有限 `le` 桶；只有 `+Inf` 时即使计数非零也无法计算分位数。
+显式秒单位桶边界为0.05、0.1、0.25、0.5、1、2.5、5、7.5、10、30、60。
 验收 `rate` 需在首次导出基线之后再观察一次累计计数增长。
 `RecordPlatformFiscoHistogramBucketsMissing` 仅在已配置 Collector 为 up、storeFile
 计数非零但同一生产者/链/操作缺少有限桶时持续2分钟告警。其他服务、生产者或
 Collector target 的桶不能掩盖缺失；从未调用或计数为零的 Timer 不触发此告警。
+
+FISCO 链状态数量默认按十进制解析，只有 SDK 文本明确以 `0x`/`0X` 开头才按十六进制
+解析；裸 `54` 应为十进制54，不能把它当成 `0x54` 得到84。非法、负值或溢出继续保持既有的零值回退，不能
+仅因数据来自区块链 SDK 就推断进制。契约测试使用真实 SDK 响应 DTO，经生产 service、
+adapter 直达 gauge 验证。
 
 ### 采集健康与无数据语义
 

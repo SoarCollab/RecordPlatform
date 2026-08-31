@@ -568,11 +568,19 @@ including the 5-second SLO. In the pinned bridge, client percentiles or
 `publishPercentileHistogram(true)` alone do not provide usable finite bucket advice.
 After a genuine operation, verify finite `le` buckets as well as `_count`/`_sum`;
 a lone `+Inf` bucket cannot produce a percentile even with nonzero observations.
+The explicit second-based boundaries are 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 7.5, 10, 30, 60.
 Use a later cumulative increment after the first export baseline for `rate` checks.
 `RecordPlatformFiscoHistogramBucketsMissing` warns after2 minutes only when a
 configured Collector is up and an observed storeFile counter is positive but the
 same producer/chain/operation has no finite buckets. Another service, producer or
 Collector target cannot mask the gap. Never-called or zero-count timers do not fire it.
+
+FISCO chain status quantities are decimal unless the SDK text explicitly starts
+with `0x`/`0X`. A bare `54` means decimal 54, not decimal 84 from a hexadecimal
+reinterpretation. The adapter preserves the
+existing zero fallback for invalid, negative or overflowing values; it does not
+infer hexadecimal merely because the data came from a blockchain SDK. The contract
+test follows a real SDK response DTO through the production service/adapter into gauges.
 
 ### Collection health and no-data behavior
 
