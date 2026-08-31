@@ -114,6 +114,13 @@ check_otel_agent() {
 # Build agent options from effective values; signal-specific environment overrides remain untouched.
 get_otel_opts() {
     local service_name=$1
+    local micrometer_default=false
+    case "$service_name" in
+        record-platform-storage|record-platform-fisco) micrometer_default=true ;;
+    esac
+    # Providers have no HTTP metrics endpoint; bridge their application meters.
+    # Resolve per invocation so starting all services cannot leak provider defaults.
+    local micrometer_enabled=${OTEL_INSTRUMENTATION_MICROMETER_ENABLED:-$micrometer_default}
 
     if check_otel_agent; then
         echo "-javaagent:${OTEL_AGENT_HOME}/opentelemetry-javaagent.jar \
@@ -121,6 +128,7 @@ get_otel_opts() {
             -Dotel.traces.exporter=otlp \
             -Dotel.metrics.exporter=otlp \
             -Dotel.logs.exporter=none \
+            -Dotel.instrumentation.micrometer.enabled=${micrometer_enabled} \
             -Dotel.exporter.otlp.protocol=${OTEL_EXPORTER_OTLP_PROTOCOL} \
             -Dotel.exporter.otlp.endpoint=${OTEL_EXPORTER_OTLP_ENDPOINT} \
             -Dotel.traces.sampler=${OTEL_TRACES_SAMPLER} \

@@ -336,6 +336,13 @@ The project integrates OpenTelemetry Java Agent v2.26.1 for automatic trace and 
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Collector endpoint |
 | `OTEL_TRACES_SAMPLER` | `parentbased_traceidratio` | Sampling strategy |
 | `OTEL_TRACES_SAMPLER_ARG` | `0.1` | Sampling rate (10%) |
+| `OTEL_INSTRUMENTATION_MICROMETER_ENABLED` | provider `true`, backend `false` | Bridge application meters for non-HTTP FISCO/storage providers |
+
+The provider bridge is selected per service, not globally when sourcing `env.sh`.
+Explicit `true`/`false` overrides are preserved; empty script values use the default.
+Backend retains its native authenticated Actuator scrape and is not bridged by default.
+Agent 2.26.1 otherwise disables Micrometer instrumentation; see the official
+[instrumentation controls](https://opentelemetry.io/docs/zero-code/java/agent/disable/).
 
 The scripts and all three application images explicitly default to `grpc` with
 port 4317. Images use `http://otel-collector:4317` on the container network instead
@@ -495,7 +502,7 @@ output {
 | SLI | Metric Source | Calculation |
 |-----|--------------|-------------|
 | **Upload Success Rate** | `saga_total_total{status}` | completed / (completed + failed + compensated) |
-| **Attestation P99 Latency** | `otel_blockchain_operation_duration_seconds{quantile="0.99"}` | `max_over_time(...[window])` over collector-exported P99 samples |
+| **Attestation P99 Latency** | `otel_blockchain_operation_duration_seconds_bucket` | `histogram_quantile(0.99, sum by (le) (rate(...[window])))` over FISCO observations |
 | **Storage Availability** | `s3_node_online_status` | 30-day rolling average of the deduplicated online-node ratio (`max by (node, fault_domain)`) |
 | **API Error Rate** | `http_server_requests_seconds_count{status}` | 5xx count / total count |
 
@@ -548,4 +555,25 @@ Import `config/grafana/slo-dashboard.json` into Grafana. The dashboard includes:
 | API Error Rate | Error rate time series + top-5 error endpoints |
 | Resilience4j | Circuit breaker states + retry counts |
 
-> **Note:** Attestation latency is scraped from the OTel Collector Prometheus exporter, so the metric carries the collector namespace prefix (`otel_`). It still uses Micrometer pre-computed client-side quantiles (`.publishPercentiles()`), so the SLO rules roll up window-specific values with `max_over_time(...)` instead of `histogram_quantile(...)`. These quantiles are not aggregatable across multiple service instances. For multi-instance deployments, add `.publishPercentileHistogram(true)` to `FiscoMetrics.java` timer builders.
+> **Note:** Agent 2.26.1's default Micrometer bridge exports timers as histograms in seconds, not client-side quantile series, even if a timer calls `.publishPercentiles()`. Recording rules and dashboard scope `job="otel-collector",exported_job="record-platform-fisco",operation="storeFile"`, apply `rate` before summing by `le`, then estimate quantiles across instances. The existing 5m/30m/1h recording names now represent observations in each interval, not an upper envelope of client summaries. Bucket interpolation is an estimate, not an exact percentile; retain seconds and the 5-second threshold. See [Prometheus histogram functions](https://prometheus.io/docs/prometheus/latest/querying/functions/#histogram_quantile).
+
+### Collection health and no-data behavior
+
+The dashboard shows configured target health and observation counts separately from
+business SLOs. `RecordPlatformScrapeTargetDown` covers only configured
+`recordplatform-backend` / `otel-collector` targets after 2 minutes. Source-missing
+alerts require a successful corresponding scrape for 5 minutes and check the eager
+Saga meter, FISCO `otel_blockchain_health`, and JVM meters of the three named services.
+Unconfigured optional jobs do not page. Validate required job definitions during
+deployment; removing every job cannot be detected from their absent `up` series.
+
+No requests or uploads means undefined ratios, and a never-used timer has no
+observations. Missing inventory/telemetry is unknown, never 100% availability or
+zero latency. Real successful API traffic with no 5xx series yields 0% errors;
+absent HTTP input remains absent. New deployments' 30-day values cover only retained
+observations, not a completed 30-day SLO window. Exporter cache presence and a new
+scrape timestamp do not prove fresh producer ingestion; verify advancing producer
+signals separately. External notification delivery is a separate configuration.
+
+Run `bash tools/ci/check-monitoring.sh` for pinned, network-isolated `promtool check rules`
+and numerical `promtool test rules`; Required CI executes the same fail-closed gate.

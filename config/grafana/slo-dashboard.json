@@ -26,7 +26,7 @@
       }
     ]
   },
-  "description": "SLO/SLI overview for RecordPlatform: upload success, attestation latency, storage availability, API error rate, error budgets, and resilience metrics.",
+  "description": "SLO/SLI overview. Missing telemetry is unknown, not healthy. Idle intervals have undefined ratios/latency; inspect source health and observation counts. 30-day values cover only retained observations, not a completed 30-day window on a new deployment.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -45,6 +45,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
+          "noValue": "Unknown / no traffic",
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -65,7 +66,7 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": ["last"],
           "fields": "",
           "values": false
         },
@@ -77,6 +78,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
           "expr": "sli:upload_success:ratio_rate30d",
+          "instant": true,
           "legendFormat": "Upload Success (30d)",
           "refId": "A"
         }
@@ -89,6 +91,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
+          "noValue": "Unknown / no traffic",
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -109,7 +112,7 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": ["last"],
           "fields": "",
           "values": false
         },
@@ -121,6 +124,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
           "expr": "sli:attestation_latency:p99_1h",
+          "instant": true,
           "legendFormat": "Attestation P99 (1h)",
           "refId": "A"
         }
@@ -133,6 +137,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
+          "noValue": "Unknown / no traffic",
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -153,7 +158,7 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": ["last"],
           "fields": "",
           "values": false
         },
@@ -165,6 +170,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
           "expr": "sli:storage_availability:ratio_rolling30d",
+          "instant": true,
           "legendFormat": "Storage Availability (30d rolling)",
           "refId": "A"
         }
@@ -177,6 +183,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
+          "noValue": "Unknown / no traffic",
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -197,7 +204,7 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": ["last"],
           "fields": "",
           "values": false
         },
@@ -209,6 +216,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
           "expr": "sli:api_error:ratio_rate30d",
+          "instant": true,
           "legendFormat": "API Error Rate (30d)",
           "refId": "A"
         }
@@ -228,6 +236,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
+          "noValue": "Unknown / no traffic",
           "mappings": [],
           "max": 1,
           "min": 0,
@@ -250,7 +259,7 @@
         "minVizWidth": 75,
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": ["last"],
           "fields": "",
           "values": false
         },
@@ -263,6 +272,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
           "expr": "sli:upload_success:error_budget_remaining",
+          "instant": true,
           "legendFormat": "Upload Budget Remaining",
           "refId": "A"
         }
@@ -275,6 +285,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
+          "noValue": "Unknown / no traffic",
           "mappings": [],
           "max": 1,
           "min": 0,
@@ -297,7 +308,7 @@
         "minVizWidth": 75,
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": ["last"],
           "fields": "",
           "values": false
         },
@@ -310,6 +321,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
           "expr": "sli:api_error:error_budget_remaining",
+          "instant": true,
           "legendFormat": "API Budget Remaining",
           "refId": "A"
         }
@@ -435,24 +447,25 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
-          "expr": "otel_blockchain_operation_duration_seconds{operation=\"storeFile\",quantile=\"0.5\"}",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(otel_blockchain_operation_duration_seconds_bucket{job=\"otel-collector\",exported_job=\"record-platform-fisco\",operation=\"storeFile\"}[5m])))",
           "legendFormat": "P50",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
-          "expr": "otel_blockchain_operation_duration_seconds{operation=\"storeFile\",quantile=\"0.95\"}",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(otel_blockchain_operation_duration_seconds_bucket{job=\"otel-collector\",exported_job=\"record-platform-fisco\",operation=\"storeFile\"}[5m])))",
           "legendFormat": "P95",
           "refId": "B"
         },
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
-          "expr": "otel_blockchain_operation_duration_seconds{operation=\"storeFile\",quantile=\"0.99\"}",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(otel_blockchain_operation_duration_seconds_bucket{job=\"otel-collector\",exported_job=\"record-platform-fisco\",operation=\"storeFile\"}[5m])))",
           "legendFormat": "P99",
           "refId": "C"
         }
       ],
-      "title": "Attestation Latency (storeFile)",
+      "description": "Histogram estimates in seconds over 5 minutes, aggregated across FISCO instances. No observations means undefined latency, not zero. Estimates interpolate within bucket boundaries.",
+      "title": "Attestation Latency (storeFile, 5m histogram)",
       "type": "timeseries"
     },
     {
@@ -523,6 +536,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
+          "noValue": "Unknown / no traffic",
           "custom": {
             "align": "auto",
             "cellOptions": { "type": "auto" },
@@ -650,6 +664,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
+          "noValue": "Unknown / no traffic",
           "custom": {
             "align": "auto",
             "cellOptions": { "type": "auto" },
@@ -716,6 +731,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
+          "noValue": "Unknown / no traffic",
           "mappings": [
             {
               "options": {
@@ -744,7 +760,7 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": ["last"],
           "fields": "",
           "values": false
         },
@@ -756,6 +772,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
           "expr": "max by (name, instance) ((resilience4j_circuitbreaker_state{state=\"closed\"} * 0) or (resilience4j_circuitbreaker_state{state=\"open\"} * 1) or (resilience4j_circuitbreaker_state{state=\"half_open\"} * 2))",
+          "instant": true,
           "legendFormat": "{{name}} {{instance}}",
           "refId": "A"
         }
@@ -817,6 +834,40 @@
       ],
       "title": "Retry Call Rate",
       "type": "timeseries"
+    },
+    {
+      "id": 22,
+      "type": "text",
+      "title": "Observation and no-data semantics",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 53 },
+      "options": {
+        "mode": "markdown",
+        "content": "**Unknown is not healthy.** Check source health below before interpreting an empty SLO. Idle traffic produces undefined ratios/latency; a never-used operation has no timer samples. Missing storage inventory is unknown. Successful requests with no 5xx produce 0% errors. A new deployment's 30-day values cover only retained observations, not a completed 30-day SLO window. Collector cache presence is not proof of fresh producer export."
+      }
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Configured monitoring targets (current)",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 56 },
+      "fieldConfig": { "defaults": { "noValue": "Unknown / not configured", "unit": "none", "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none" },
+      "targets": [{ "refId": "A", "expr": "up{job=~\"recordplatform-backend|otel-collector\"}", "legendFormat": "{{job}} / {{instance}}", "instant": true }]
+    },
+    {
+      "id": 24,
+      "type": "stat",
+      "title": "Business observations (5m)",
+      "description": "Zero means idle only when the source exists; absent input stays unknown. Attestation counters appear only after the first real operation.",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 56 },
+      "fieldConfig": { "defaults": { "noValue": "Unknown / no observations", "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" }, "mappings": [] }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none" },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(http_server_requests_seconds_count{job=\"recordplatform-backend\"}[5m]))", "legendFormat": "API requests", "instant": true },
+        { "refId": "B", "expr": "sum(increase(otel_blockchain_operation_duration_seconds_count{job=\"otel-collector\",exported_job=\"record-platform-fisco\",operation=\"storeFile\"}[5m]))", "legendFormat": "Attestations", "instant": true }
+      ]
     }
   ],
   "refresh": "30s",
