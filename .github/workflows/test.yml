@@ -127,6 +127,23 @@ jobs:
       - name: Run Backend Tests
         run: mvn -f platform-backend/pom.xml clean verify -pl backend-common,backend-service,backend-web -am -Pit
 
+      - name: Require Cross-Tenant Health IT Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          report = Path(
+              "platform-backend/backend-web/target/failsafe-reports/"
+              "TEST-cn.flying.health.CrossTenantHealthIndicatorIT.xml"
+          )
+          suite = ET.parse(report).getroot()
+          for name, expected in {"tests": 1, "skipped": 0, "failures": 0, "errors": 0}.items():
+              actual = suite.get(name)
+              if actual != str(expected):
+                  raise SystemExit(f"CrossTenantHealthIndicatorIT {name}={actual}; expected {expected}")
+          PY
+
       - name: Require Vault Transit Key Wrapping IT Execution
         run: |
           python3 - <<'PY'
@@ -1226,6 +1243,9 @@ jobs:
 
       - name: Run Required CI policy tests
         run: python3 -m unittest discover -s tools/ci/tests -v
+
+      - name: Validate monitoring rules with pinned Prometheus
+        run: bash tools/ci/check-monitoring.sh
 
       - name: Initialize pinned k6 runtime without network access
         run: |

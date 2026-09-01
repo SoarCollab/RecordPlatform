@@ -24,6 +24,7 @@ Complete environment setup guide for RecordPlatform from scratch.
 | Node.js | 20+ | Frontend build |
 | pnpm | 10+ | Frontend package manager |
 | Git | 2.30+ | Version control |
+| Python | 3.9+ | Bounded Nacos pre-check and deployment helpers |
 
 ## Step 1: Configure Environment Variables
 
@@ -230,6 +231,21 @@ Check a single service:
 ```bash
 ./scripts/env-check.sh --service mysql
 ```
+
+The Nacos check uses the v3 readiness, login and read-only client configuration APIs.
+It validates HTTP status and JSON result fields, including nested client success.
+Only an unsupported v3 readiness URL plus an independently confirmed Nacos1/2 version
+permits the legacy v1 path. Authentication failures, unavailable services and malformed
+responses never trigger fallback or configuration import. On v3, business code `20004`
+means configuration missing; an arbitrary HTTP404 alone does not.
+Optional `NACOS_NAMESPACE` / `NACOS_GROUP` select the pre-check lookup scope and must
+match the application; defaults are `public` / `DEFAULT_GROUP`, and empty namespace
+is normalized to public (legacy `tenant=`). The v3 request uses `namespaceId` and
+`groupName`, not legacy `tenant` and `group`. Each request is limited to5 seconds and
+1 MiB; redirects/proxies are disabled and tokens/configuration bodies are not printed.
+Successful token-based reads verify usable credentials and configuration, not that
+the server rejects anonymous access; authentication enforcement needs a separate audit.
+See the official [Nacos client API](https://nacos.io/en/docs/latest/manual/user/open-api/).
 
 ## Step 6: Build and Start
 

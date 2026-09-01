@@ -21,11 +21,25 @@ The `/actuator/health` endpoint includes:
 | `db` | MySQL connectivity |
 | `redis` | Redis connectivity |
 | `rabbit` | RabbitMQ connectivity |
+| `rabbitmq` | Passive probe of the configured application queue |
 | `s3Storage` | S3 node availability |
 | `saga` | Saga transaction health |
 | `outbox` | Outbox event health |
 | `encryption` | Encryption strategy status |
 
+The application queue probe defaults to `spring.rabbitmq.health.queue=file.stored.queue`.
+`file.stored` is the routing key, not a queue name; the passive probe must not create a queue
+or consume messages. An unavailable configured queue reports `DEGRADED`.
+
+Outbox and Saga health aggregate counts across all tenants at the Actuator `getHealth`
+entry point. They do not assume tenant `0`, change ordinary tenant-scoped queries, or retain
+a cross-tenant context after the check. The default `show-details: never` still hides these
+counts from anonymous health responses.
+
+Aggregate status precedence is `DOWN,OUT_OF_SERVICE,DEGRADED,UP,UNKNOWN`; a degraded
+component must not become an overall `UP`. HTTP compatibility remains unchanged:
+`DOWN` and `OUT_OF_SERVICE` return 503, while `DEGRADED` returns 200. Consumers must inspect
+the JSON status, not HTTP status alone; `scripts/start.sh` accepts only top-level `UP`.
 ### Sample Response
 
 ```json
@@ -62,6 +76,12 @@ The `/actuator/health` endpoint includes:
 | `saga_duration` | Timer | Execution/compensation duration |
 | `saga_running` | Gauge | Currently running Sagas |
 | `saga_pending_compensation` | Gauge | Sagas awaiting compensation |
+
+The production `SagaMetrics` counter named `saga.total` is exported by the pinned
+Prometheus registry as `saga_total`, with `status=started|completed|failed|compensated`.
+All four states are registered before traffic. The exporter already normalizes the
+counter suffix; do not append a second `_total`. The executable exporter contract
+checks the real registration against both rule files and numerical fixtures.
 
 ### Outbox Metrics
 
@@ -322,6 +342,13 @@ The project integrates OpenTelemetry Java Agent v2.26.1 for automatic trace and 
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Collector endpoint |
 | `OTEL_TRACES_SAMPLER` | `parentbased_traceidratio` | Sampling strategy |
 | `OTEL_TRACES_SAMPLER_ARG` | `0.1` | Sampling rate (10%) |
+| `OTEL_INSTRUMENTATION_MICROMETER_ENABLED` | provider `true`, backend `false` | Bridge application meters for non-HTTP FISCO/storage providers |
+
+The provider bridge is selected per service, not globally when sourcing `env.sh`.
+Explicit `true`/`false` overrides are preserved; empty script values use the default.
+Backend retains its native authenticated Actuator scrape and is not bridged by default.
+Agent 2.26.1 otherwise disables Micrometer instrumentation; see the official
+[instrumentation controls](https://opentelemetry.io/docs/zero-code/java/agent/disable/).
 
 The scripts and all three application images explicitly default to `grpc` with
 port 4317. Images use `http://otel-collector:4317` on the container network instead
@@ -480,8 +507,8 @@ output {
 
 | SLI | Metric Source | Calculation |
 |-----|--------------|-------------|
-| **Upload Success Rate** | `saga_total_total{status}` | completed / (completed + failed + compensated) |
-| **Attestation P99 Latency** | `otel_blockchain_operation_duration_seconds{quantile="0.99"}` | `max_over_time(...[window])` over collector-exported P99 samples |
+| **Upload Success Rate** | `saga_total{status}` | completed / (completed + failed + compensated) |
+| **Attestation P99 Latency** | `otel_blockchain_operation_duration_seconds_bucket` | `histogram_quantile(0.99, sum by (le) (rate(...[window])))` over FISCO observations |
 | **Storage Availability** | `s3_node_online_status` | 30-day rolling average of the deduplicated online-node ratio (`max by (node, fault_domain)`) |
 | **API Error Rate** | `http_server_requests_seconds_count{status}` | 5xx count / total count |
 
@@ -534,4 +561,44 @@ Import `config/grafana/slo-dashboard.json` into Grafana. The dashboard includes:
 | API Error Rate | Error rate time series + top-5 error endpoints |
 | Resilience4j | Circuit breaker states + retry counts |
 
-> **Note:** Attestation latency is scraped from the OTel Collector Prometheus exporter, so the metric carries the collector namespace prefix (`otel_`). It still uses Micrometer pre-computed client-side quantiles (`.publishPercentiles()`), so the SLO rules roll up window-specific values with `max_over_time(...)` instead of `histogram_quantile(...)`. These quantiles are not aggregatable across multiple service instances. For multi-instance deployments, add `.publishPercentileHistogram(true)` to `FiscoMetrics.java` timer builders.
+> **Note:** Agent 2.26.1's default Micrometer bridge exports timers as histograms in seconds, not client-side quantile series, even if a timer calls `.publishPercentiles()`. Recording rules and dashboard scope `job="otel-collector",exported_job="record-platform-fisco",operation="storeFile"`, apply `rate` before summing by `le`, then estimate quantiles across instances. The existing 5m/30m/1h recording names now represent observations in each interval, not an upper envelope of client summaries. Bucket interpolation is an estimate, not an exact percentile; retain seconds and the 5-second threshold. See [Prometheus histogram functions](https://prometheus.io/docs/prometheus/latest/querying/functions/#histogram_quantile).
+
+FISCO timers must provide explicit `serviceLevelObjectives(Duration...)` boundaries,
+including the 5-second SLO. In the pinned bridge, client percentiles or
+`publishPercentileHistogram(true)` alone do not provide usable finite bucket advice.
+After a genuine operation, verify finite `le` buckets as well as `_count`/`_sum`;
+a lone `+Inf` bucket cannot produce a percentile even with nonzero observations.
+The explicit second-based boundaries are 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 7.5, 10, 30, 60.
+Use a later cumulative increment after the first export baseline for `rate` checks.
+`RecordPlatformFiscoHistogramBucketsMissing` warns after2 minutes only when a
+configured Collector is up and an observed storeFile counter is positive but the
+same producer/chain/operation has no finite buckets. Another service, producer or
+Collector target cannot mask the gap. Never-called or zero-count timers do not fire it.
+
+FISCO chain status quantities are decimal unless the SDK text explicitly starts
+with `0x`/`0X`. A bare `54` means decimal 54, not decimal 84 from a hexadecimal
+reinterpretation. The adapter preserves the
+existing zero fallback for invalid, negative or overflowing values; it does not
+infer hexadecimal merely because the data came from a blockchain SDK. The contract
+test follows a real SDK response DTO through the production service/adapter into gauges.
+
+### Collection health and no-data behavior
+
+The dashboard shows configured target health and observation counts separately from
+business SLOs. `RecordPlatformScrapeTargetDown` covers only configured
+`recordplatform-backend` / `otel-collector` targets after 2 minutes. Source-missing
+alerts require a successful corresponding scrape for 5 minutes and check the eager
+Saga meter, FISCO `otel_blockchain_health`, and JVM meters of the three named services.
+Unconfigured optional jobs do not page. Validate required job definitions during
+deployment; removing every job cannot be detected from their absent `up` series.
+
+No requests or uploads means undefined ratios, and a never-used timer has no
+observations. Missing inventory/telemetry is unknown, never 100% availability or
+zero latency. Real successful API traffic with no 5xx series yields 0% errors;
+absent HTTP input remains absent. New deployments' 30-day values cover only retained
+observations, not a completed 30-day SLO window. Exporter cache presence and a new
+scrape timestamp do not prove fresh producer ingestion; verify advancing producer
+signals separately. External notification delivery is a separate configuration.
+
+Run `bash tools/ci/check-monitoring.sh` for pinned, network-isolated `promtool check rules`
+and numerical `promtool test rules`; Required CI executes the same fail-closed gate.

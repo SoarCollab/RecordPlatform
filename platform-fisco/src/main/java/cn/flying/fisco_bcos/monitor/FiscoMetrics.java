@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -26,6 +27,14 @@ import java.util.concurrent.atomic.AtomicLong;
 @Component
 @RequiredArgsConstructor
 public class FiscoMetrics {
+
+    // Explicit SLO boundaries survive the OTel bridge; client-side percentiles do not supply buckets.
+    private static final Duration[] OPERATION_LATENCY_BUCKETS = {
+            Duration.ofMillis(50), Duration.ofMillis(100), Duration.ofMillis(250),
+            Duration.ofMillis(500), Duration.ofSeconds(1), Duration.ofMillis(2500),
+            Duration.ofSeconds(5), Duration.ofMillis(7500), Duration.ofSeconds(10),
+            Duration.ofSeconds(30), Duration.ofSeconds(60)
+    };
 
     private final MeterRegistry registry;
     private final BlockChainAdapter chainAdapter;
@@ -77,6 +86,7 @@ public class FiscoMetrics {
                 .tag("chain", chainTag)
                 .tag("operation", "storeFile")
                 .publishPercentiles(0.5, 0.95, 0.99)
+                .serviceLevelObjectives(OPERATION_LATENCY_BUCKETS)
                 .register(registry);
 
         queryFileTimer = Timer.builder("blockchain.operation.duration")
@@ -84,6 +94,7 @@ public class FiscoMetrics {
                 .tag("chain", chainTag)
                 .tag("operation", "queryFile")
                 .publishPercentiles(0.5, 0.95, 0.99)
+                .serviceLevelObjectives(OPERATION_LATENCY_BUCKETS)
                 .register(registry);
 
         deleteFileTimer = Timer.builder("blockchain.operation.duration")
@@ -91,6 +102,7 @@ public class FiscoMetrics {
                 .tag("chain", chainTag)
                 .tag("operation", "deleteFile")
                 .publishPercentiles(0.5, 0.95, 0.99)
+                .serviceLevelObjectives(OPERATION_LATENCY_BUCKETS)
                 .register(registry);
 
         shareFileTimer = Timer.builder("blockchain.operation.duration")
@@ -98,6 +110,7 @@ public class FiscoMetrics {
                 .tag("chain", chainTag)
                 .tag("operation", "shareFile")
                 .publishPercentiles(0.5, 0.95, 0.99)
+                .serviceLevelObjectives(OPERATION_LATENCY_BUCKETS)
                 .register(registry);
 
         // 区块链状态仪表盘 (按链类型区分)

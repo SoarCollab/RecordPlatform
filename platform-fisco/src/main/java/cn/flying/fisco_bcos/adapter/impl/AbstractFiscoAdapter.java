@@ -550,9 +550,9 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
             if (totalTransactionCount != null) {
                 TotalTransactionCount.TransactionCountInfo info = totalTransactionCount.getTotalTransactionCount();
                 if (info != null) {
-                    builder.blockNumber(parseHexLong(info.getBlockNumber()))
-                            .transactionCount(parseHexLong(info.getTransactionCount()))
-                            .failedTransactionCount(parseHexLong(info.getFailedTransactionCount()));
+                    builder.blockNumber(parseChainQuantity(info.getBlockNumber()))
+                            .transactionCount(parseChainQuantity(info.getTransactionCount()))
+                            .failedTransactionCount(parseChainQuantity(info.getFailedTransactionCount()));
                 }
             }
 
@@ -616,24 +616,24 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
     // ==================== 私有辅助方法 ====================
 
     /**
-     * 解析十六进制字符串为 long
-     * 支持带或不带 0x/0X 前缀的格式
+     * Parses SDK decimal quantities, or hexadecimal quantities with an explicit 0x/0X prefix.
      *
-     * @param hexValue 十六进制字符串
-     * @return 解析后的 long 值，解析失败返回 0
+     * @param value an SDK block height or transaction count
+     * @return a nonnegative long, preserving the zero fallback for missing or invalid quantities
      */
-    protected long parseHexLong(String hexValue) {
-        if (hexValue == null || hexValue.isEmpty()) return 0L;
+    protected long parseChainQuantity(String value) {
+        if (value == null || value.isEmpty()) return 0L;
         try {
-            String cleanHex = hexValue;
-            // 移除 0x/0X 前缀
-            if (cleanHex.startsWith("0x") || cleanHex.startsWith("0X")) {
-                cleanHex = cleanHex.substring(2);
+            boolean hexadecimal = value.startsWith("0x") || value.startsWith("0X");
+            String digits = hexadecimal ? value.substring(2) : value;
+            if (digits.isEmpty()) return 0L;
+            long parsed = new java.math.BigInteger(digits, hexadecimal ? 16 : 10).longValueExact();
+            if (parsed < 0) {
+                throw new NumberFormatException("Chain quantities must be nonnegative");
             }
-            if (cleanHex.isEmpty()) return 0L;
-            return new java.math.BigInteger(cleanHex, 16).longValue();
-        } catch (NumberFormatException e) {
-            log.warn("[parseHexLong] 解析失败: {}", hexValue);
+            return parsed;
+        } catch (NumberFormatException | ArithmeticException e) {
+            log.warn("[parseChainQuantity] Invalid chain quantity: {}", value);
             return 0L;
         }
     }

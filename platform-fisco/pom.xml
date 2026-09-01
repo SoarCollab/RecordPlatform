@@ -33,6 +33,7 @@
         <commons-io.version>2.22.0</commons-io.version>
         <commons-lang3.version>3.20.0</commons-lang3.version>
         <bcprov.version>1.84</bcprov.version>
+        <otel-agent-test.version>2.26.1</otel-agent-test.version>
     </properties>
     <dependencies>
         <dependency>
@@ -81,6 +82,13 @@
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Exercise the deployed bridge without adding its SDK to application dependencies. -->
+        <dependency>
+            <groupId>io.opentelemetry.javaagent</groupId>
+            <artifactId>opentelemetry-javaagent</artifactId>
+            <version>${otel-agent-test.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -248,6 +256,7 @@
                             测试环境（CI/沙箱）可能限制写入真实用户目录，因此将 user.home 指向模块的 target 目录，确保测试可重复且无外部副作用。
                          -->
                         <user.home>${project.build.directory}</user.home>
+                        <fisco.test.otel-agent>${settings.localRepository}/io/opentelemetry/javaagent/opentelemetry-javaagent/${otel-agent-test.version}/opentelemetry-javaagent-${otel-agent-test.version}.jar</fisco.test.otel-agent>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

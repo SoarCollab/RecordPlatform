@@ -1,6 +1,7 @@
 package cn.flying.health;
 
 import cn.flying.common.annotation.TenantScope;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.dao.entity.FileSagaStatus;
 import cn.flying.dao.mapper.FileSagaMapper;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,15 @@ public class SagaHealthIndicator implements HealthIndicator {
 
     @Value("${saga.health.pending-compensation-threshold:50}")
     private long pendingCompensationThreshold;
+
+    /**
+     * Applies the declared system-wide scope at Actuator's entry point, whose default
+     * self-invocation bypasses method advice, while preserving detail policy and caller context.
+     */
+    @Override
+    public Health getHealth(boolean includeDetails) {
+        return TenantContext.runWithoutIsolation(() -> HealthIndicator.super.getHealth(includeDetails));
+    }
 
     @Override
     @TenantScope(ignoreIsolation = true)

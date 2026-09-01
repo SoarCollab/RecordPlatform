@@ -24,6 +24,7 @@
 | Node.js | 20+ | 前端构建 |
 | pnpm | 10+ | 前端包管理 |
 | Git | 2.30+ | 版本控制 |
+| Python | 3.9+ | 有界 Nacos 预检查及部署辅助脚本 |
 
 ## 步骤 1：配置环境变量
 
@@ -215,6 +216,17 @@ Artifact 升级属于需审查的代码变更：两份 Solidity 源码、签入 
 ```bash
 ./scripts/env-check.sh --service mysql
 ```
+
+Nacos 检查优先使用 v3 readiness、login 和只读 client 配置接口，同时验证 HTTP 状态、
+JSON 业务码和嵌套客户端结果。只有 v3 readiness 接口明确不支持且独立确认服务器为
+Nacos1/2 才使用旧 v1 路径；鉴权失败、服务不可用、响应格式错误均不触发降级或配置导入。
+v3 业务码 `20004` 表示配置不存在，任意 HTTP404 本身不等于配置丢失。
+可选 `NACOS_NAMESPACE` / `NACOS_GROUP` 仅指定预检查查询范围，必须与应用一致；默认
+`public` / `DEFAULT_GROUP`，空 namespace 归一为 public（旧接口发送 `tenant=`）。
+v3 参数为 `namespaceId` / `groupName`，而非旧 `tenant` / `group`。每次请求上限5秒和
+1 MiB；禁止重定向和代理，不输出 token 或配置正文。带 token 的读取成功只证明凭据与
+配置可用，不证明服务器拒绝匿名访问；鉴权强制执行需要独立审计。
+参见官方 [Nacos 客户端 API](https://nacos.io/en/docs/latest/manual/user/open-api/)。
 
 ## 步骤 6：构建与启动
 
