@@ -272,6 +272,7 @@ jobs:
             platform-verifier/target/record-platform-verifier-SHA256SUMS
             release-images/*.tar
             release-images/*.tags
+            tools/ci/verify_public_images.py
           retention-days: 1
 
   publish:
@@ -308,6 +309,15 @@ jobs:
               [ -n "$tag" ] && docker push "$tag"
             done < "$tag_file"
           done
+
+      - name: Verify anonymous image pulls
+        timeout-minutes: 30
+        env:
+          IMAGE_OWNER: ${{ github.repository_owner }}
+        run: |
+          python3 release-bundle/tools/ci/verify_public_images.py \
+            --images-dir release-bundle/release-images \
+            --owner "$IMAGE_OWNER"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3

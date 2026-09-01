@@ -8,6 +8,7 @@ Deployment and operations guide for RecordPlatform.
 - [Docker Compose](docker-compose) - Container-based deployment
 - [Production](production.md) - Production environment setup
 - [Monitoring](monitoring) - Metrics, alerts, and health checks
+- [Container releases](container-release) - Public GHCR packages and anonymous pull verification
 
 ## Deployment Options
 
