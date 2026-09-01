@@ -10,9 +10,9 @@
   "devDependencies": {
     "@braintree/sanitize-url": "^7.1.2",
     "@types/node": "25.3.3",
-    "cytoscape": "^3.33.1",
+    "cytoscape": "^3.34.0",
     "cytoscape-cose-bilkent": "^4.1.0",
-    "dayjs": "^1.11.19",
+    "dayjs": "^1.11.23",
     "debug": "^4.4.3",
     "mermaid": "^11.15.0",
     "typescript": "5.9.3",
