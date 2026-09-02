@@ -208,6 +208,7 @@ public class FileAdminServiceImpl implements FileAdminService {
     @Transactional
     public void updateFileStatus(String fileId, Integer status, String reason) {
         Long id = IdUtils.fromExternalId(fileId);
+        Long tenantId = TenantContext.requireTenantId();
         File file = fileMapper.selectById(id);
         if (file == null) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "文件不存在");
@@ -218,20 +219,35 @@ public class FileAdminServiceImpl implements FileAdminService {
         if (targetStatus == FileUploadStatus.NOOP) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "文件状态不合法");
         }
-        if (targetStatus == FileUploadStatus.SUCCESS
-                && !Objects.equals(file.getStatus(), FileUploadStatus.SUCCESS.getCode())) {
+        FileUploadStatus currentStatus = file.getStatus() == null
+                ? FileUploadStatus.NOOP
+                : FileUploadStatus.getByCode(file.getStatus());
+        if (!isAllowedAdminStatusTransition(currentStatus, targetStatus)) {
             throw new GeneralException(
                     ResultEnum.PARAM_ERROR,
-                    "管理员状态接口不能绕过上传校验将文件提升为成功状态");
+                    "管理员仅允许在已完成与已删除状态之间转换");
         }
 
-        LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
-                .eq(File::getId, id)
-                .set(File::getStatus, status);
-
-        fileMapper.update(null, wrapper);
+        int updated = fileMapper.updateStatusByAdminWithCas(
+                id,
+                tenantId,
+                currentStatus.getCode(),
+                targetStatus.getCode());
+        if (updated != 1) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "文件状态已发生变化，请刷新后重试");
+        }
         LOGGER.info("管理员更新文件状态: fileId={}, oldStatus={}, newStatus={}, reason={}",
                 fileId, file.getStatus(), status, reason);
+    }
+
+    /**
+     * Checks the closed administrator file-status transition matrix.
+     */
+    private boolean isAllowedAdminStatusTransition(
+            FileUploadStatus currentStatus,
+            FileUploadStatus targetStatus) {
+        return (currentStatus == FileUploadStatus.SUCCESS && targetStatus == FileUploadStatus.DELETE)
+                || (currentStatus == FileUploadStatus.DELETE && targetStatus == FileUploadStatus.SUCCESS);
     }
 
     @Override

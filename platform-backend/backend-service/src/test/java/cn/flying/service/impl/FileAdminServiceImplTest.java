@@ -1,5 +1,6 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
@@ -20,14 +21,20 @@ import cn.flying.dao.vo.admin.AdminFileVO;
 import cn.flying.dao.vo.admin.AdminShareQueryParam;
 import cn.flying.dao.vo.admin.AdminShareVO;
 import cn.flying.service.key.FileKeyEnvelopeService;
+import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.apache.ibatis.annotations.Update;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.*;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -37,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -628,16 +636,64 @@ class FileAdminServiceImplTest {
             assertEquals(ResultEnum.PARAM_ERROR, ex.getResultEnum());
         }
 
-        @Test
-        @DisplayName("should update file status successfully")
-        void updateFileStatus_success() {
+        @ParameterizedTest
+        @NullAndEmptySource
+        @ValueSource(strings = {"99", "-2"})
+        @DisplayName("should reject missing and unknown target statuses")
+        void updateFileStatus_invalidTarget_rejected(String rawStatus) {
             File file = createFile();
             when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+            Integer targetStatus = rawStatus == null || rawStatus.isEmpty()
+                    ? null
+                    : Integer.valueOf(rawStatus);
+
+            GeneralException exception = assertThrows(
+                    GeneralException.class,
+                    () -> fileAdminService.updateFileStatus("ext_" + FILE_ID, targetStatus, "invalid target"));
+
+            assertEquals(ResultEnum.PARAM_ERROR, exception.getResultEnum());
+            verify(fileMapper, never()).updateStatusByAdminWithCas(anyLong(), anyLong(), anyInt(), anyInt());
+        }
+
+        @Test
+        @DisplayName("should mark a completed file as deleted with tenant-scoped CAS")
+        void updateFileStatus_successToDelete_updatesWithCas() {
+            File file = createFile();
+            when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+            when(fileMapper.updateStatusByAdminWithCas(
+                    FILE_ID,
+                    TENANT_ID,
+                    FileUploadStatus.SUCCESS.getCode(),
+                    FileUploadStatus.DELETE.getCode())).thenReturn(1);
 
             assertDoesNotThrow(() -> fileAdminService.updateFileStatus("ext_" + FILE_ID, 2, "admin update"));
 
             verify(fileMapper).selectById(FILE_ID);
-            verify(fileMapper).update(isNull(), any());
+            verify(fileMapper).updateStatusByAdminWithCas(
+                    FILE_ID,
+                    TENANT_ID,
+                    FileUploadStatus.SUCCESS.getCode(),
+                    FileUploadStatus.DELETE.getCode());
+        }
+
+        @Test
+        @DisplayName("should restore a deleted file with tenant-scoped CAS")
+        void updateFileStatus_deleteToSuccess_updatesWithCas() {
+            File file = createFile().setStatus(FileUploadStatus.DELETE.getCode());
+            when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+            when(fileMapper.updateStatusByAdminWithCas(
+                    FILE_ID,
+                    TENANT_ID,
+                    FileUploadStatus.DELETE.getCode(),
+                    FileUploadStatus.SUCCESS.getCode())).thenReturn(1);
+
+            assertDoesNotThrow(() -> fileAdminService.updateFileStatus("ext_" + FILE_ID, 1, "restore"));
+
+            verify(fileMapper).updateStatusByAdminWithCas(
+                    FILE_ID,
+                    TENANT_ID,
+                    FileUploadStatus.DELETE.getCode(),
+                    FileUploadStatus.SUCCESS.getCode());
         }
 
         /**
@@ -654,7 +710,72 @@ class FileAdminServiceImplTest {
                     () -> fileAdminService.updateFileStatus("ext_" + FILE_ID, 1, "manual promotion"));
 
             assertEquals(ResultEnum.PARAM_ERROR, exception.getResultEnum());
-            verify(fileMapper, never()).update(isNull(), any());
+            verify(fileMapper, never()).updateStatusByAdminWithCas(anyLong(), anyLong(), anyInt(), anyInt());
+        }
+
+        @ParameterizedTest
+        @CsvSource({
+                "1, 1",
+                "2, 2",
+                "1, 0",
+                "1, -1",
+                "2, 0",
+                "2, -1",
+                "0, 2",
+                "-1, 2"
+        })
+        @DisplayName("should reject every transition outside completed and deleted pair")
+        void updateFileStatus_otherTransitions_rejected(int currentStatus, int targetStatus) {
+            File file = createFile().setStatus(currentStatus);
+            when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+
+            GeneralException exception = assertThrows(
+                    GeneralException.class,
+                    () -> fileAdminService.updateFileStatus("ext_" + FILE_ID, targetStatus, "invalid transition"));
+
+            assertEquals(ResultEnum.PARAM_ERROR, exception.getResultEnum());
+            verify(fileMapper, never()).updateStatusByAdminWithCas(anyLong(), anyLong(), anyInt(), anyInt());
+        }
+
+        @Test
+        @DisplayName("should fail closed when the file status changes concurrently")
+        void updateFileStatus_concurrentChange_rejected() {
+            File file = createFile();
+            when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+            when(fileMapper.updateStatusByAdminWithCas(
+                    FILE_ID,
+                    TENANT_ID,
+                    FileUploadStatus.SUCCESS.getCode(),
+                    FileUploadStatus.DELETE.getCode())).thenReturn(0);
+
+            GeneralException exception = assertThrows(
+                    GeneralException.class,
+                    () -> fileAdminService.updateFileStatus("ext_" + FILE_ID, 2, "stale update"));
+
+            assertEquals(ResultEnum.PARAM_ERROR, exception.getResultEnum());
+        }
+
+        @Test
+        @DisplayName("should bind the mapper update to tenant, id, expected status and active rows")
+        void updateFileStatus_mapperContractIsTenantScopedCas() throws NoSuchMethodException {
+            var method = FileMapper.class.getMethod(
+                    "updateStatusByAdminWithCas",
+                    Long.class,
+                    Long.class,
+                    int.class,
+                    int.class);
+            String sql = String.join(" ", method.getAnnotation(Update.class).value())
+                    .replaceAll("\\s+", " ")
+                    .toLowerCase(Locale.ROOT);
+            InterceptorIgnore interceptorIgnore = method.getAnnotation(InterceptorIgnore.class);
+
+            assertAll(
+                    () -> assertTrue(sql.contains("where id = #{id}")),
+                    () -> assertTrue(sql.contains("tenant_id = #{tenantid}")),
+                    () -> assertTrue(sql.contains("status = #{expectedstatus}")),
+                    () -> assertTrue(sql.contains("deleted = 0")),
+                    () -> assertNotNull(interceptorIgnore),
+                    () -> assertEquals("true", interceptorIgnore.tenantLine()));
         }
     }
 

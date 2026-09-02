@@ -8,6 +8,11 @@
   import { useUpload } from "$stores/upload.svelte";
   import { formatFileSize, formatDateTime } from "$utils/format";
   import {
+    FILE_STATUS_FILTER_OPTIONS,
+    toFileStatusQuery,
+    type FileStatusFilter,
+  } from "$utils/file-status-filter";
+  import {
     getFiles,
     deleteFile,
     createShare,
@@ -42,7 +47,7 @@
   let total = $state(0);
   let pageSize = $state(10);
   let keyword = $state("");
-  let statusFilter = $state<FileStatus | undefined>(undefined);
+  let statusFilter = $state<FileStatusFilter>("");
   let startTime = $state("");
   let endTime = $state("");
   let selectedFileIds = $state<Set<string>>(new Set());
@@ -114,7 +119,7 @@
         pageNum: page,
         pageSize,
         keyword: keyword || undefined,
-        status: statusFilter,
+        status: toFileStatusQuery(statusFilter),
         startTime: toQueryDateTime(startTime),
         endTime: toQueryDateTime(endTime),
       });
@@ -528,9 +533,9 @@
       }}
       class="border-input bg-background ring-offset-background focus-visible:ring-ring h-10 rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
     >
-      <option value={undefined}>全部状态</option>
-      {#each Object.entries(FileStatusLabel) as [value, label]}
-        <option value={Number(value)}>{label}</option>
+      <option value="">全部状态</option>
+      {#each FILE_STATUS_FILTER_OPTIONS as option}
+        <option value={option.value}>{option.label}</option>
       {/each}
     </select>
     <DateTimePicker bind:value={startTime} placeholder="开始时间" />
@@ -546,7 +551,7 @@
       variant="outline"
       onclick={() => {
         keyword = "";
-        statusFilter = undefined;
+        statusFilter = "";
         startTime = "";
         endTime = "";
         page = 1;
