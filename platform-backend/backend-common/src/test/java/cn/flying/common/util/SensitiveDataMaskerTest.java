@@ -25,6 +25,16 @@ class SensitiveDataMaskerTest {
         }
     }
 
+    /** Treat compound secret-token field names as sensitive structured audit data. */
+    @Test
+    void shouldMaskSecretTokenAliases() {
+        String sentinel = "synthetic-secret-token";
+        for (String field : List.of("secretToken", "secret_token", "secret-token", "SECRET_TOKEN")) {
+            assertTrue(SensitiveDataMasker.isSensitiveField(field));
+            assertFalse(SensitiveDataMasker.maskAndSerialize(Map.of(field, sentinel)).contains(sentinel));
+        }
+    }
+
     /** Exercise collection, serialization and Throwable limits through public log-copy entrypoints. */
     @Test
     void shouldOmitOverBudgetLogCopiesWithoutPublishingPrefixes() {

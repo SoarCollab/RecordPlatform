@@ -394,7 +394,7 @@ class OperationLogAspectTest {
     }
 
     /**
-     * Verifies the explicit-message and result-enum fallbacks around the business-detail branch.
+     * Verifies every safe message source and fallback around the business-detail branch.
      */
     @Test
     @DisplayName("Should resolve GeneralException message sources in priority order")
@@ -413,9 +413,35 @@ class OperationLogAspectTest {
                 null,
                 new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED)
         );
+        String structuredData = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "resolveFailureMessage",
+                null,
+                new GeneralException(
+                        ResultEnum.PARAM_IS_INVALID,
+                        java.util.Map.of("reason", "safe structured reason", "secretToken", "raw-secret")
+                )
+        );
+        String plainMessage = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "resolveFailureMessage",
+                null,
+                new IllegalStateException("plain failure")
+        );
+        String plainClass = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "resolveFailureMessage",
+                null,
+                new IllegalStateException()
+        );
 
         assertThat(explicit).isEqualTo("explicit business reason");
         assertThat(resultEnum).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED.getMessage());
+        assertThat(structuredData)
+                .contains("safe structured reason")
+                .doesNotContain("raw-secret");
+        assertThat(plainMessage).isEqualTo("plain failure");
+        assertThat(plainClass).isEqualTo("IllegalStateException");
     }
 
     /**
