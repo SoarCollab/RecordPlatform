@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { api } from "$api/client";
-  import { loadPreviewText } from "$utils/file-preview";
+  import { classifyFilePreview, loadPreviewText } from "$utils/file-preview";
 
   interface Props {
     url: string;
@@ -15,50 +14,49 @@
   let textContent = $state("");
   let loadingText = $state(false);
   let textError = $state<string | null>(null);
+  let nativePreviewError = $state(false);
 
-  // 根据 contentType 判断预览类型
-  const previewType = $derived(getPreviewType(contentType));
+  const previewType = $derived(classifyFilePreview(fileName, contentType));
 
-  function getPreviewType(
-    type: string,
-  ): "image" | "video" | "audio" | "pdf" | "text" | "unsupported" {
-    if (type.startsWith("image/")) return "image";
-    if (type.startsWith("video/")) return "video";
-    if (type.startsWith("audio/")) return "audio";
-    if (type === "application/pdf") return "pdf";
-    if (
-      type.startsWith("text/") ||
-      type === "application/json" ||
-      type === "application/xml" ||
-      type === "application/javascript"
-    ) {
-      return "text";
+  $effect(() => {
+    const sourceUrl = url;
+    const sourceFileName = fileName;
+    const sourceContentType = contentType;
+    const sourcePreviewType = previewType;
+    let cancelled = false;
+
+    // Reset state whenever a reused preview component receives another file.
+    void sourceFileName;
+    void sourceContentType;
+    nativePreviewError = false;
+    textContent = "";
+    textError = null;
+    loadingText = sourcePreviewType === "text";
+    if (sourcePreviewType === "text") {
+      void loadTextContent(sourceUrl, () => cancelled);
     }
-    return "unsupported";
-  }
 
-  onMount(() => {
-    if (previewType === "text") {
-      loadTextContent();
-    }
+    return () => {
+      cancelled = true;
+    };
   });
 
-  async function loadTextContent() {
-    loadingText = true;
-    textError = null;
+  /** Loads one captured text source and ignores completion after the source changes. */
+  async function loadTextContent(
+    sourceUrl: string,
+    isCancelled: () => boolean,
+  ): Promise<void> {
     try {
-      const text = await loadPreviewText(url, (requestUrl) =>
+      const text = await loadPreviewText(sourceUrl, (requestUrl) =>
         api.fetchText(requestUrl),
       );
-      // 为提升性能限制文本长度
-      textContent =
-        text.length > 100000
-          ? text.slice(0, 100000) + "\n\n... (内容过长，已截断)"
-          : text;
+      if (!isCancelled()) textContent = text;
     } catch (err) {
-      textError = err instanceof Error ? err.message : "加载失败";
+      if (!isCancelled()) {
+        textError = err instanceof Error ? err.message : "加载失败";
+      }
     } finally {
-      loadingText = false;
+      if (!isCancelled()) loadingText = false;
     }
   }
 
@@ -76,12 +74,23 @@
 </script>
 
 <div class="file-preview {className}">
-  {#if previewType === "image"}
+  {#if nativePreviewError}
+    <div
+      class="bg-muted/30 flex flex-col items-center justify-center gap-4 rounded-lg border p-12"
+    >
+      <p class="font-medium">浏览器无法解码此文件</p>
+      <p class="text-muted-foreground text-sm">可下载后使用本地应用打开</p>
+      <a class="text-primary text-sm underline" href={url} download={fileName}
+        >下载文件</a
+      >
+    </div>
+  {:else if previewType === "image"}
     <div class="bg-muted/30 flex items-center justify-center p-4">
       <img
         src={url}
         alt={fileName}
         class="max-h-[70vh] max-w-full rounded-lg object-contain shadow-lg"
+        onerror={() => (nativePreviewError = true)}
       />
     </div>
   {:else if previewType === "video"}
@@ -91,6 +100,7 @@
         controls
         class="max-h-[70vh] max-w-full rounded-lg"
         preload="metadata"
+        onerror={() => (nativePreviewError = true)}
       >
         <track kind="captions" />
         您的浏览器不支持视频播放
@@ -118,7 +128,12 @@
         </svg>
       </div>
       <p class="text-sm font-medium">{fileName}</p>
-      <audio src={url} controls class="w-full max-w-md">
+      <audio
+        src={url}
+        controls
+        class="w-full max-w-md"
+        onerror={() => (nativePreviewError = true)}
+      >
         您的浏览器不支持音频播放
       </audio>
     </div>
@@ -172,6 +187,9 @@
       </div>
       <p class="text-muted-foreground">此文件类型不支持预览</p>
       <p class="text-muted-foreground text-sm">{contentType}</p>
+      <a class="text-primary text-sm underline" href={url} download={fileName}
+        >下载文件</a
+      >
     </div>
   {/if}
 </div>

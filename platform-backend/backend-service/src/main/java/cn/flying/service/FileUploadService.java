@@ -8,6 +8,7 @@ import cn.flying.dao.vo.file.DirectUploadSessionVO;
 import cn.flying.dao.vo.file.ProgressVO;
 import cn.flying.dao.vo.file.ResumeUploadVO;
 import cn.flying.dao.vo.file.StartUploadVO;
+import cn.flying.dao.vo.file.UploadPolicyVO;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
@@ -18,6 +19,13 @@ import org.springframework.web.multipart.MultipartFile;
  */
 
 public interface FileUploadService {
+    /**
+     * Returns the current server-authoritative upload and preview policy.
+     *
+     * @return upload policy
+     */
+    UploadPolicyVO getUploadPolicy();
+
     /**
      * 开始上传
      * @param uid 用户ID

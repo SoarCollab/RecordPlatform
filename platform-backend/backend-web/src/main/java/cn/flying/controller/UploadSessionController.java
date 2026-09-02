@@ -15,6 +15,7 @@ import cn.flying.dao.vo.file.FileUploadStatusVO;
 import cn.flying.dao.vo.file.ProgressVO;
 import cn.flying.dao.vo.file.ResumeUploadVO;
 import cn.flying.dao.vo.file.StartUploadVO;
+import cn.flying.dao.vo.file.UploadPolicyVO;
 import cn.flying.service.FileUploadService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -54,6 +55,18 @@ public class UploadSessionController {
     private final FileUploadService fileUploadService;
 
     /**
+     * Returns the current server-authoritative upload and preview policy.
+     *
+     * @return upload policy
+     */
+    @GetMapping("/policy")
+    @Operation(summary = "获取上传策略")
+    @OperationLog(module = "文件分片上传模块", operationType = "查询", description = "获取上传策略")
+    public Result<UploadPolicyVO> getUploadPolicy() {
+        return Result.success(fileUploadService.getUploadPolicy());
+    }
+
+    /**
      * 创建上传会话。
      *
      * @param userId           用户 ID
@@ -75,7 +88,8 @@ public class UploadSessionController {
             @Pattern(regexp = "^[\\p{IsHan}a-zA-Z0-9\\u4e00-\\u9fa5._\\-\\s,;!@#$%&()+=]+$")
             String fileName,
             @Schema(description = "文件大小") @RequestParam("fileSize") @Min(1) @Max(4294967296L) long fileSize,
-            @Schema(description = "文件类型") @RequestParam(value = "contentType") @NotBlank String contentType,
+            @Schema(description = "文件类型；浏览器未提供时可为空")
+            @RequestParam(value = "contentType", required = false) @Size(max = 255) String contentType,
             @Schema(description = "客户端ID") @RequestParam(value = "clientId", required = false)
             @Pattern(regexp = "^[A-Za-z0-9-]{1,64}$", message = "clientId 格式无效") String providedClientId,
             @Schema(description = "分片大小") @RequestParam(value = "chunkSize") @Min(1) @Max(83886080) int chunkSize,

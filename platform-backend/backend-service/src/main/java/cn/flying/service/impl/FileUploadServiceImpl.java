@@ -26,6 +26,7 @@ import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.manifest.FramedManifestFinalizationService;
 import cn.flying.service.remote.FileRemoteClient;
+import cn.flying.service.upload.FileUploadPolicyRegistry;
 import cn.flying.platformapi.request.AbortDirectMultipartUploadRequest;
 import cn.flying.platformapi.request.CompleteDirectMultipartUploadRequest;
 import cn.flying.platformapi.request.CreateDirectMultipartUploadRequest;
@@ -129,21 +130,6 @@ public class FileUploadServiceImpl implements FileUploadService {
     private static final String DIRECT_STAGE_CHAIN_ATTESTED = "CHAIN_ATTESTED";
     private static final String DIRECT_STAGE_FILE_STORED = "FILE_STORED";
     private static final String DIRECT_STAGE_MANIFEST_STORED = "MANIFEST_STORED";
-    // --- 允许的文件类型 ---
-    private static final Set<String> ALLOWED_FILE_EXTENSIONS = Set.of(
-            "jpg", "jpeg", "png", "gif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "zip", "rar", "7z"
-    );
-    private static final Map<String, String> ALLOWED_MIME_TYPES = Map.ofEntries(
-            Map.entry("image/jpeg", "jpg"), Map.entry("image/png", "png"), Map.entry("image/gif", "gif"),
-            Map.entry("application/pdf", "pdf"), Map.entry("application/msword", "doc"),
-            Map.entry("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"),
-            Map.entry("application/vnd.ms-excel", "xls"),
-            Map.entry("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"),
-            Map.entry("application/vnd.ms-powerpoint", "ppt"),
-            Map.entry("application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"),
-            Map.entry("text/plain", "txt"), Map.entry("application/zip", "zip"),
-            Map.entry("application/x-rar-compressed", "rar"), Map.entry("application/x-7z-compressed", "7z")
-    );
     // --- 线程池配置 ---
     @Qualifier("fileProcessTaskExecutor")
     private final Executor fileProcessingExecutor;
@@ -252,6 +238,14 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     // === Service 方法实现 ===
+
+    /**
+     * Returns the stable upload policy consumed by the frontend.
+     */
+    @Override
+    public UploadPolicyVO getUploadPolicy() {
+        return FileUploadPolicyRegistry.toView(MAX_FILE_SIZE_BYTES);
+    }
 
     /**
      * 记录定时扫描时采用的截止时间和暂停分类，供 finalizer 锁内重新判定。
@@ -934,9 +928,8 @@ public class FileUploadServiceImpl implements FileUploadService {
             throw new GeneralException("分片大小必须在 1B 到 " + (MAX_CHUNK_SIZE_BYTES / 1024 / 1024) + "MB 之间");
         }
         validateUploadPlan(fileSize, chunkSize, totalChunks);
-        if (!isFileTypeAllowed(fileName, contentType)) {
-            throw new GeneralException("不支持的文件类型");
-        }
+        FileUploadPolicyRegistry.validate(fileName, contentType);
+        String normalizedContentType = FileUploadPolicyRegistry.normalizeForPersistence(contentType);
         validateUploadTargetFile(userId, fileName, fileSize, targetFileId);
 
         boolean hasProvidedClientId = !CommonUtils.isBlank(clientId);
@@ -1002,12 +995,12 @@ public class FileUploadServiceImpl implements FileUploadService {
         checkQuotaForNewUploadSession(tenantId, userId, fileSize, targetFileId);
 
         log.info("处理上传开始请求: 文件名={}, 文件大小={}, 内容类型={}, 用户SUID={}, 客户端ID={}",
-                fileName, fileSize, contentType, SUID, clientId);
+                fileName, fileSize, normalizedContentType, SUID, clientId);
 
         // --- 创建新会话 ---
         try {
             FileUploadState newState = new FileUploadState(
-                    userId, fileName, fileSize, contentType, clientId, chunkSize, totalChunks, targetFileId
+                    userId, fileName, fileSize, normalizedContentType, clientId, chunkSize, totalChunks, targetFileId
             );
             newState.setTenantId(tenantId);
             newState.setRecoverySchemaVersion(CURRENT_RECOVERY_SCHEMA_VERSION);
@@ -1323,9 +1316,8 @@ public class FileUploadServiceImpl implements FileUploadService {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "分片总数不能为空");
         }
         validateUploadPlan(request.getFileSize(), request.getChunkSize(), request.getTotalChunks());
-        if (!isFileTypeAllowed(request.getFileName(), request.getContentType())) {
-            throw new GeneralException(ResultEnum.FILE_ACCEPT_NOT_SUPPORT);
-        }
+        FileUploadPolicyRegistry.validate(request.getFileName(), request.getContentType());
+        request.setContentType(FileUploadPolicyRegistry.normalizeForPersistence(request.getContentType()));
         if (CommonUtils.isEmpty(request.getParts()) || request.getParts().size() != request.getTotalChunks()) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片元数据数量与上传计划不匹配");
         }
@@ -3926,17 +3918,6 @@ public class FileUploadServiceImpl implements FileUploadService {
         return SAFE_FILENAME_PATTERN.matcher(fileName).matches();
     }
 
-    private boolean isFileTypeAllowed(String fileName, String contentType) {
-        String extension = getFileExtension(fileName);
-        if (contentType != null) {
-            String lowerContentType = contentType.toLowerCase();
-            if (ALLOWED_MIME_TYPES.containsKey(lowerContentType)) {
-                return true;
-            }
-        }
-        return extension != null && ALLOWED_FILE_EXTENSIONS.contains(extension);
-    }
-
     // 创建恢复会话响应 DTO
     private StartUploadVO createResumeDto(FileUploadState state) {
         // 恢复时同时返回 uploadedChunks / processedChunks，便于客户端决定跳过上传或仅等待服务端处理
@@ -3967,12 +3948,6 @@ public class FileUploadServiceImpl implements FileUploadService {
         if (fileName.endsWith(".") || fileName.endsWith(" ")) return true;
         String upperName = fileName.toUpperCase();
         return upperName.matches("^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$");
-    }
-
-    private String getFileExtension(String fileName) {
-        if (fileName == null) return null;
-        int dotIndex = fileName.lastIndexOf('.');
-        return (dotIndex > 0 && dotIndex < fileName.length() - 1) ? fileName.substring(dotIndex + 1).toLowerCase() : null;
     }
 
     /**

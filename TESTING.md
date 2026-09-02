@@ -2,7 +2,7 @@
 
 本项目采用"单元测试优先 + 少量高价值集成测试"的策略，目标是在 CI 中尽早发现回归，同时保持本地开发的执行成本足够低。
 
-## 当前测试文件快照（336 files）
+## 当前测试文件快照（340 files）
 
 > 2026-09-02 按 canonical source tree 中的 `*Test.java` / `*IT.java` / `*.test.ts` / `*.spec.ts` / `test_*.py` / `*_test.py` 统计。该数字是文件快照，不等同 test case 数；以下长表只说明代表性覆盖。`tools/docs/check_consistency.py --check-evidence` 会从 exact tree 重新计算并核对本表。
 
@@ -10,11 +10,11 @@
 | --- | ---: |
 | `platform-backend/backend-common` | 13 |
 | `platform-backend/backend-api` | 1 |
-| `platform-backend/backend-service` | 96 |
+| `platform-backend/backend-service` | 97 |
 | `platform-backend/backend-web` | 108 |
-| `platform-backend` | 218 |
+| `platform-backend` | 219 |
 | `platform-storage` | 28 |
-| `platform-frontend` | 46 |
+| `platform-frontend` | 49 |
 | `platform-verifier` | 15 |
 | `platform-fisco` | 14 |
 | `platform-api` | 3 |
@@ -22,7 +22,7 @@
 | `tools/contracts` | 4 |
 | `tools/docs` | 1 |
 | `tools` | 12 |
-| `total` | 336 |
+| `total` | 340 |
 
 ### 后端单元测试（backend-common，代表性测试类）
 
@@ -44,6 +44,7 @@
 | 测试类 | 覆盖范围 |
 |--------|----------|
 | FileUploadServiceTest | 分块上传、暂停/恢复、状态管理、所有权验证 |
+| FileUploadPolicyRegistryTest | 上传扩展名/MIME 矩阵、空 MIME 降级与主动内容预览策略 |
 | FileUploadServiceConcurrencyTest | 上传并发安全 |
 | FileServiceTest | 分享生成（公开/私密）、取消/更新分享、访问计数 |
 | FileServiceConcurrencyTest | 文件操作并发安全 |
@@ -205,6 +206,7 @@
 | AuditDashboard.render.test.ts | 高频告警聚焦与精确身份、IP、时间窗钻取 |
 | chartLifecycle.test.ts | ECharts 同步初始化、单次重试、resize 与销毁 |
 | charts.render.test.ts | 三类审计图表挂载后生成 canvas |
+| upload-policy.render.test.ts | 上传页策略加载、accept 同步、快速拒绝与加载失败回退 |
 
 ### 测试工具类
 

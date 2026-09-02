@@ -515,10 +515,35 @@ class OpenApiContractExportTest {
                 directSessionRequestSchema,
                 "fileName",
                 "fileSize",
-                "contentType",
                 "chunkSize",
                 "totalChunks",
                 "parts");
+        assertThat(directSessionRequestSchema.path("properties").has("contentType")).isTrue();
+        assertThat(directSessionRequestSchema.path("properties").path("contentType")
+                .path("maxLength").asInt()).isEqualTo(255);
+        JsonNode uploadPolicyOperation = rootNode.path("paths")
+                .path("/api/v1/upload-sessions/policy").path("get");
+        assertThat(uploadPolicyOperation.isMissingNode()).isFalse();
+        assertThat(uploadPolicyOperation.path("responses").path("200")
+                .path("content").path("*/*").path("schema").path("$ref").asText())
+                .isEqualTo("#/components/schemas/ResultUploadPolicyVO");
+        assertProtectedOperation(rootNode, "/api/v1/upload-sessions/policy", "get");
+        JsonNode uploadPolicySchema = rootNode.path("components").path("schemas").path("UploadPolicyVO");
+        assertRequiredFields(uploadPolicySchema, "maxFileSizeBytes", "fileTypes");
+        JsonNode uploadFileTypePolicySchema = rootNode.path("components").path("schemas")
+                .path("UploadFileTypePolicyVO");
+        assertRequiredFields(
+                uploadFileTypePolicySchema,
+                "extension",
+                "category",
+                "categoryLabel",
+                "previewMode",
+                "mimeTypes");
+        List<String> previewModes = new ArrayList<>();
+        uploadFileTypePolicySchema.path("properties").path("previewMode").path("enum")
+                .forEach(value -> previewModes.add(value.asText()));
+        assertThat(previewModes)
+                .containsExactlyInAnyOrder("image", "video", "audio", "pdf", "text", "unsupported");
         assertRequiredFields(
                 rootNode.path("components").path("schemas").path("DirectUploadPartUrlVO"),
                 "index",

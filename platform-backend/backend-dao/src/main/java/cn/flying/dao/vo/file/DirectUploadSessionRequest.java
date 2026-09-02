@@ -36,8 +36,8 @@ public class DirectUploadSessionRequest {
     @Schema(description = "文件大小", requiredMode = Schema.RequiredMode.REQUIRED)
     private Long fileSize;
 
-    @NotBlank
-    @Schema(description = "文件类型")
+    @Size(max = 255)
+    @Schema(description = "文件类型；浏览器未提供时可为空")
     private String contentType;
 
     @Pattern(regexp = "^[A-Za-z0-9-]{1,64}$", message = "clientId 格式无效")

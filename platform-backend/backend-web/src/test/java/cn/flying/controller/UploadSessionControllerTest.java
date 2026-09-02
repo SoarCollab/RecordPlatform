@@ -9,6 +9,7 @@ import cn.flying.dao.vo.file.FileUploadStatusVO;
 import cn.flying.dao.vo.file.ProgressVO;
 import cn.flying.dao.vo.file.ResumeUploadVO;
 import cn.flying.dao.vo.file.StartUploadVO;
+import cn.flying.dao.vo.file.UploadPolicyVO;
 import cn.flying.service.FileUploadService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -93,6 +94,20 @@ class UploadSessionControllerTest {
         verify(fileUploadService).completeUpload(userId, clientId);
         verify(fileUploadService).pauseUpload(userId, clientId);
         verify(fileUploadService).uploadChunk(eq(userId), eq(clientId), eq(1), any());
+    }
+
+    /**
+     * Verifies the authenticated policy endpoint delegates to the upload service.
+     */
+    @Test
+    void shouldReturnUploadPolicy() {
+        UploadPolicyVO policy = new UploadPolicyVO(4096L, List.of());
+        when(fileUploadService.getUploadPolicy()).thenReturn(policy);
+
+        Result<UploadPolicyVO> result = controller.getUploadPolicy();
+
+        assertEquals(policy, result.getData());
+        verify(fileUploadService).getUploadPolicy();
     }
 
     /**

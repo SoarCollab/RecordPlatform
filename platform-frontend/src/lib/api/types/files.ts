@@ -8,6 +8,18 @@ type RequiredFields<T, K extends keyof T> = Omit<T, K> & {
 };
 
 /**
+ * Server-authoritative upload file type policy.
+ * @see UploadFileTypePolicyVO.java
+ */
+export type UploadFileTypePolicyVO = OpenApiSchema<"UploadFileTypePolicyVO">;
+
+/**
+ * Server-authoritative upload policy.
+ * @see UploadPolicyVO.java
+ */
+export type UploadPolicyVO = OpenApiSchema<"UploadPolicyVO">;
+
+/**
  * 文件信息
  * @see FileVO.java
  */
