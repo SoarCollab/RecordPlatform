@@ -13,10 +13,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * Verifies the explicit global-or-current permission boundary against real MySQL and MyBatis interceptors.
@@ -53,6 +55,10 @@ class PermissionTenantIsolationIT extends BaseIntegrationTest {
         insertPermission(DISABLED_PERMISSION_ID, CURRENT_TENANT, CODE_PREFIX + "disabled", VISIBLE_MODULE, 0);
         insertPermission(OTHER_PERMISSION_ID, OTHER_TENANT, CODE_PREFIX + "other", OTHER_MODULE, 1);
 
+        assertThat(tenantIdForPermissionCode(CODE_PREFIX + "global")).isZero();
+        assertThat(tenantIdForPermissionCode(CODE_PREFIX + "current")).isEqualTo(CURRENT_TENANT);
+        assertThat(tenantIdForPermissionCode(CODE_PREFIX + "disabled")).isEqualTo(CURRENT_TENANT);
+
         List<SysPermission> tree = TenantContext.callWithTenantIsolation(
                         CURRENT_TENANT,
                         () -> permissionService.getPermissionTree(CURRENT_TENANT))
@@ -85,13 +91,21 @@ class PermissionTenantIsolationIT extends BaseIntegrationTest {
                 .containsExactly(CODE_PREFIX + "current", CODE_PREFIX + "disabled");
         assertThat(firstPage.getRecords())
                 .extracting(SysPermission::getTenantId)
-                .containsOnly(0L, CURRENT_TENANT);
+                .containsExactly(CURRENT_TENANT, CURRENT_TENANT);
         assertThat(secondPage.getRecords())
                 .extracting(SysPermission::getCode)
                 .containsExactly(CODE_PREFIX + "global");
         assertThat(secondPage.getRecords())
                 .extracting(SysPermission::getTenantId)
                 .containsOnly(0L);
+        List<SysPermission> pageRecords = new ArrayList<>(firstPage.getRecords());
+        pageRecords.addAll(secondPage.getRecords());
+        assertThat(pageRecords)
+                .extracting(SysPermission::getCode, SysPermission::getTenantId)
+                .containsExactly(
+                        tuple(CODE_PREFIX + "current", CURRENT_TENANT),
+                        tuple(CODE_PREFIX + "disabled", CURRENT_TENANT),
+                        tuple(CODE_PREFIX + "global", 0L));
         assertThat(modules).contains(VISIBLE_MODULE).doesNotContain(OTHER_MODULE);
         assertThat(TenantContext.getTenantId()).isNull();
     }
@@ -185,5 +199,19 @@ class PermissionTenantIsolationIT extends BaseIntegrationTest {
                 Integer.class,
                 permissionId);
         return count != null && count == 1;
+    }
+
+    /**
+     * Read the persisted source tenant directly, bypassing MyBatis result mapping.
+     */
+    private long tenantIdForPermissionCode(String code) {
+        Long tenantId = jdbcTemplate.queryForObject(
+                "SELECT tenant_id FROM sys_permission WHERE code = ?",
+                Long.class,
+                code);
+        if (tenantId == null) {
+            throw new IllegalStateException("Missing permission fixture tenant");
+        }
+        return tenantId;
     }
 }
