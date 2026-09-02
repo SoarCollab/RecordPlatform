@@ -57,8 +57,13 @@ public class SysAuditServiceImpl implements SysAuditService {
     
     @Override
     public List<HighFrequencyOperationVO> getHighFrequencyOperations() {
-        // 直接使用Mapper查询视图
-        return operationLogMapper.selectHighFrequencyOperations();
+        Long tenantId = requireTenantIdForAudit();
+        int threshold = getPositiveAuditConfig("HIGH_FREQ_THRESHOLD", DEFAULT_HIGH_FREQ_THRESHOLD);
+        return operationLogMapper.selectHighFrequencyOperations(
+                tenantId,
+                LocalDateTime.now().minusMinutes(5),
+                threshold
+        );
     }
     
     @Override
@@ -145,6 +150,7 @@ public class SysAuditServiceImpl implements SysAuditService {
     @Override
     public Map<String, Object> getAuditOverview() {
         Map<String, Object> overview = new HashMap<>();
+        Long tenantId = requireTenantIdForAudit();
         LocalDate today = LocalDate.now();
         LocalDateTime startOfDay = today.atStartOfDay();
         LocalDateTime endOfDay = today.plusDays(1).atStartOfDay(); // Exclusive end
@@ -156,7 +162,15 @@ public class SysAuditServiceImpl implements SysAuditService {
             overview.put("todayErrorOperations", operationLogMapper.selectErrorOperationsBetween(startOfDay, endOfDay));
             overview.put("todaySensitiveOperations", operationLogMapper.selectSensitiveOperationsCountBetween(startOfDay, endOfDay));
             overview.put("todayActiveUsers", operationLogMapper.selectActiveUsersBetween(startOfDay, endOfDay));
-            overview.put("highFrequencyAlerts", operationLogMapper.selectHighFrequencyAlertCount());
+            int highFrequencyThreshold = getPositiveAuditConfig(
+                    "HIGH_FREQ_THRESHOLD",
+                    DEFAULT_HIGH_FREQ_THRESHOLD
+            );
+            overview.put("highFrequencyAlerts", operationLogMapper.countHighFrequencyAlerts(
+                    tenantId,
+                    LocalDateTime.now().minusMinutes(5),
+                    highFrequencyThreshold
+            ));
 
             // 获取过去7天的每日统计数据
             int daysForStats = 7;
@@ -296,7 +310,7 @@ public class SysAuditServiceImpl implements SysAuditService {
             LocalDateTime highFrequencyStartTime = now.minusMinutes(5);
             LocalDateTime failedLoginStartTime = now.minusHours(1);
 
-            int highFreqCount = nvl(operationLogMapper.countHighFrequencyUsers(
+            int highFreqCount = nvl(operationLogMapper.countHighFrequencyAlerts(
                     tenantId,
                     highFrequencyStartTime,
                     highFreqThreshold

@@ -5,6 +5,8 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import cn.flying.common.annotation.OperationLog;
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import cn.flying.config.RateLimitClientIpProperties;
 import cn.flying.dao.dto.SysOperationLog;
 import cn.flying.security.TrustedClientIpResolver;
@@ -29,6 +31,7 @@ import java.util.List;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -356,6 +359,66 @@ class OperationLogAspectTest {
     }
 
     /**
+     * Verifies that safe business detail becomes the readable reason while path identifiers stay masked.
+     */
+    @Test
+    @DisplayName("Should preserve safe GeneralException detail in a masked failure audit")
+    void shouldPreserveSafeGeneralExceptionDetailInMaskedFailureAudit() throws Throwable {
+        String rawFileId = "sensitive-file-id";
+        String reason = "管理员状态接口不能绕过上传校验将文件提升为成功状态";
+        SysOperationLogService operationLogService = mock(SysOperationLogService.class);
+        OperationLogAspect aspect = new OperationLogAspect(operationLogService, newResolver(""));
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "PUT",
+                "/api/v1/admin/files/" + rawFileId + "/status"
+        );
+        request.setServletPath("/api/v1/admin/files/" + rawFileId + "/status");
+        request.setRemoteAddr("198.51.100.31");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+
+        ProceedingJoinPoint joinPoint = failingAuditedJoinPoint(
+                new GeneralException(ResultEnum.PARAM_IS_INVALID, reason)
+        );
+
+        assertThatThrownBy(() -> aspect.doAround(joinPoint))
+                .isInstanceOf(GeneralException.class);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(SysOperationLog.class);
+        verify(operationLogService).saveOperationLog(captor.capture());
+        assertThat(captor.getValue().getStatus()).isEqualTo(1);
+        assertThat(captor.getValue().getErrorMsg()).isEqualTo(reason);
+        assertThat(captor.getValue().getErrorMsg()).doesNotContain("GeneralException");
+        assertThat(captor.getValue().getRequestUrl())
+                .isEqualTo("/api/v1/admin/files/***/status")
+                .doesNotContain(rawFileId);
+    }
+
+    /**
+     * Verifies the explicit-message and result-enum fallbacks around the business-detail branch.
+     */
+    @Test
+    @DisplayName("Should resolve GeneralException message sources in priority order")
+    void shouldResolveGeneralExceptionMessageSourcesInPriorityOrder() {
+        OperationLogAspect aspect = newAspect("");
+
+        String explicit = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "resolveFailureMessage",
+                null,
+                new GeneralException("explicit business reason")
+        );
+        String resultEnum = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "resolveFailureMessage",
+                null,
+                new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED)
+        );
+
+        assertThat(explicit).isEqualTo("explicit business reason");
+        assertThat(resultEnum).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED.getMessage());
+    }
+
+    /**
      * 验证无 HTTP 请求上下文时仍执行目标方法且不会尝试持久化操作日志。
      */
     @Test
@@ -423,6 +486,22 @@ class OperationLogAspectTest {
         when(joinPoint.getSignature()).thenReturn(signature);
         when(joinPoint.getArgs()).thenReturn(new Object[]{token});
         when(joinPoint.proceed()).thenReturn(response);
+        when(signature.getMethod()).thenReturn(method);
+        when(signature.getDeclaringTypeName()).thenReturn(AuditedFixture.class.getName());
+        when(signature.getName()).thenReturn(method.getName());
+        return joinPoint;
+    }
+
+    /**
+     * Build an audited join point that throws the supplied business exception.
+     */
+    private ProceedingJoinPoint failingAuditedJoinPoint(Exception exception) throws Throwable {
+        ProceedingJoinPoint joinPoint = mock(ProceedingJoinPoint.class);
+        MethodSignature signature = mock(MethodSignature.class);
+        Method method = AuditedFixture.class.getDeclaredMethod("execute");
+        when(joinPoint.getSignature()).thenReturn(signature);
+        when(joinPoint.getArgs()).thenReturn(new Object[0]);
+        when(joinPoint.proceed()).thenThrow(exception);
         when(signature.getMethod()).thenReturn(method);
         when(signature.getDeclaringTypeName()).thenReturn(AuditedFixture.class.getName());
         when(signature.getName()).thenReturn(method.getName());

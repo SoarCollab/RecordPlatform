@@ -1,6 +1,7 @@
 package cn.flying.aspect;
 
 import cn.flying.common.annotation.OperationLog;
+import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.JsonConverter;
@@ -291,8 +292,32 @@ public class OperationLogAspect {
      * @return 失败原因；成功时返回 null
      */
     private String resolveFailureMessage(Object result, Exception exception) {
+        if (exception instanceof GeneralException generalException) {
+            if (generalException.getMessage() != null && !generalException.getMessage().isBlank()) {
+                return generalException.getMessage();
+            }
+            if (generalException.getData() != null) {
+                Object data = generalException.getData();
+                if (data instanceof CharSequence || data instanceof Number || data instanceof Enum<?>) {
+                    String text = data.toString();
+                    if (!text.isBlank()) {
+                        return text;
+                    }
+                } else {
+                    String serialized = SensitiveDataMasker.maskAndSerialize(data);
+                    if (serialized != null && !serialized.isBlank()) {
+                        return serialized;
+                    }
+                }
+            }
+            if (generalException.getResultEnum() != null
+                    && generalException.getResultEnum().getMessage() != null
+                    && !generalException.getResultEnum().getMessage().isBlank()) {
+                return generalException.getResultEnum().getMessage();
+            }
+        }
         if (exception != null) {
-            return exception.getMessage() != null
+            return exception.getMessage() != null && !exception.getMessage().isBlank()
                     ? exception.getMessage()
                     : exception.getClass().getSimpleName();
         }

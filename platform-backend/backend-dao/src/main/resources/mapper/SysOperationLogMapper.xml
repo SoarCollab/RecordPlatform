@@ -1,32 +1,37 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="cn.flying.dao.mapper.SysOperationLogMapper">
-    <!-- 查询高频操作记录 -->
+    <!-- Select current-tenant high-frequency groups using the shared window and threshold contract. -->
     <select id="selectHighFrequencyOperations" resultType="cn.flying.dao.vo.audit.HighFrequencyOperationVO">
         SELECT
             user_id as userId,
             username,
             request_ip as requestIp,
-            operation_count as operationCount,
-            start_time as startTime,
-            end_time as endTime,
-            time_span_seconds as timeSpanSeconds
-        FROM v_high_frequency_operations
-        ORDER BY operation_count DESC
-        LIMIT 100 -- Limit results for performance
+            COUNT(*) as operationCount,
+            MIN(operation_time) as startTime,
+            MAX(operation_time) as endTime,
+            TIMESTAMPDIFF(SECOND, MIN(operation_time), MAX(operation_time)) as timeSpanSeconds
+        FROM sys_operation_log
+        WHERE tenant_id = #{tenantId}
+          AND operation_time &gt;= #{startTime}
+          AND user_id IS NOT NULL AND user_id != '' AND user_id != 'system'
+        GROUP BY user_id, username, request_ip
+        HAVING COUNT(*) &gt; #{threshold}
+        ORDER BY operationCount DESC
+        LIMIT 100
     </select>
 
-    <select id="countHighFrequencyUsers" resultType="java.lang.Integer">
+    <select id="countHighFrequencyAlerts" resultType="java.lang.Integer">
         SELECT COUNT(*)
         FROM (
-            SELECT user_id
+            SELECT user_id, username, request_ip
             FROM sys_operation_log
             WHERE tenant_id = #{tenantId}
               AND operation_time >= #{startTime}
               AND user_id IS NOT NULL AND user_id != '' AND user_id != 'system'
-            GROUP BY user_id
+            GROUP BY user_id, username, request_ip
             HAVING COUNT(*) > #{threshold}
-        ) AS high_freq_users
+        ) AS high_freq_alerts
     </select>
 
     <select id="countFailedLoginUsers" resultType="java.lang.Integer">
@@ -198,10 +203,6 @@
         SELECT COUNT(DISTINCT user_id) FROM sys_operation_log
         WHERE operation_time >= #{startTime} AND operation_time &lt; #{endTime}
           AND user_id IS NOT NULL AND user_id != '' AND user_id != 'system'
-    </select>
-
-    <select id="selectHighFrequencyAlertCount" resultType="java.lang.Long">
-        SELECT COUNT(*) FROM v_high_frequency_operations
     </select>
 
     <select id="selectDailyStats" resultType="java.util.Map">
