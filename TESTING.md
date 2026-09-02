@@ -2,19 +2,19 @@
 
 本项目采用"单元测试优先 + 少量高价值集成测试"的策略，目标是在 CI 中尽早发现回归，同时保持本地开发的执行成本足够低。
 
-## 当前测试文件快照（332 files）
+## 当前测试文件快照（336 files）
 
-> 2026-08-31 按 canonical source tree 中的 `*Test.java` / `*IT.java` / `*.test.ts` / `*.spec.ts` / `test_*.py` / `*_test.py` 统计。该数字是文件快照，不等同 test case 数；以下长表只说明代表性覆盖。`tools/docs/check_consistency.py --check-evidence` 会从 exact tree 重新计算并核对本表。
+> 2026-09-02 按 canonical source tree 中的 `*Test.java` / `*IT.java` / `*.test.ts` / `*.spec.ts` / `test_*.py` / `*_test.py` 统计。该数字是文件快照，不等同 test case 数；以下长表只说明代表性覆盖。`tools/docs/check_consistency.py --check-evidence` 会从 exact tree 重新计算并核对本表。
 
 | Component | Test files |
 | --- | ---: |
 | `platform-backend/backend-common` | 13 |
 | `platform-backend/backend-api` | 1 |
 | `platform-backend/backend-service` | 96 |
-| `platform-backend/backend-web` | 107 |
-| `platform-backend` | 217 |
+| `platform-backend/backend-web` | 108 |
+| `platform-backend` | 218 |
 | `platform-storage` | 28 |
-| `platform-frontend` | 43 |
+| `platform-frontend` | 46 |
 | `platform-verifier` | 15 |
 | `platform-fisco` | 14 |
 | `platform-api` | 3 |
@@ -22,7 +22,7 @@
 | `tools/contracts` | 4 |
 | `tools/docs` | 1 |
 | `tools` | 12 |
-| `total` | 332 |
+| `total` | 336 |
 
 ### 后端单元测试（backend-common，代表性测试类）
 
@@ -147,6 +147,7 @@
 | BaseIntegrationTest | 集成测试基类 |
 | BaseControllerIntegrationTest | 控制器集成测试基类 |
 | OpenApiContractExportTest | OpenAPI 契约导出与稳定性校验 |
+| AuditHighFrequencyTenantIsolationIT | 高频告警列表、KPI 与异常检测的租户/阈值一致性 |
 
 ### 前端测试（platform-frontend，代表性测试文件）
 
@@ -201,6 +202,9 @@
 |----------|----------|
 | route-loaders.test.ts | 路由数据加载器 |
 | app-layout-load.test.ts | 应用布局加载逻辑 |
+| AuditDashboard.render.test.ts | 高频告警聚焦与精确身份、IP、时间窗钻取 |
+| chartLifecycle.test.ts | ECharts 同步初始化、单次重试、resize 与销毁 |
+| charts.render.test.ts | 三类审计图表挂载后生成 canvas |
 
 ### 测试工具类
 

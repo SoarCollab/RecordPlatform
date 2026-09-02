@@ -27,10 +27,12 @@
   /** 外部传入的筛选条件（从仪表盘钻取） */
   interface Props {
     externalFilters?: {
+      userId?: string;
       username?: string;
       module?: string;
       operationType?: string;
       status?: string;
+      requestIp?: string;
       startTime?: string;
       endTime?: string;
       onlySensitive?: boolean;
@@ -47,9 +49,11 @@
   let total = $state(0);
 
   let filterUsername = $state("");
+  let filterUserId = $state("");
   let filterModule = $state("");
   let filterOperationType = $state("");
   let filterStatus = $state("");
+  let filterRequestIp = $state("");
   let filterStartTime = $state("");
   let filterEndTime = $state("");
   let onlySensitive = $state(false);
@@ -69,10 +73,12 @@
   /** 应用外部筛选并加载 */
   function applyExternalFilters() {
     if (!externalFilters) return;
+    filterUserId = externalFilters.userId ?? "";
     filterUsername = externalFilters.username ?? "";
     filterModule = externalFilters.module ?? "";
     filterOperationType = externalFilters.operationType ?? "";
     filterStatus = externalFilters.status ?? "";
+    filterRequestIp = externalFilters.requestIp ?? "";
     filterStartTime = externalFilters.startTime ?? "";
     filterEndTime = externalFilters.endTime ?? "";
     onlySensitive = externalFilters.onlySensitive ?? false;
@@ -102,10 +108,12 @@
         pageNum: page,
         pageSize,
       };
+      if (filterUserId) params.userId = filterUserId;
       if (filterUsername) params.username = filterUsername;
       if (filterModule) params.module = filterModule;
       if (filterOperationType) params.operationType = filterOperationType;
       if (filterStatus !== "") params.status = Number(filterStatus);
+      if (filterRequestIp) params.requestIp = filterRequestIp;
       if (filterStartTime) params.startTime = filterStartTime;
       if (filterEndTime) params.endTime = filterEndTime;
 
@@ -128,10 +136,12 @@
   }
 
   function clearFilters() {
+    filterUserId = "";
     filterUsername = "";
     filterModule = "";
     filterOperationType = "";
     filterStatus = "";
+    filterRequestIp = "";
     filterStartTime = "";
     filterEndTime = "";
     onlySensitive = false;
@@ -153,7 +163,7 @@
     try {
       selectedLogDetail = await getAuditLog(String(log.id));
     } catch (err) {
-      console.error('getAuditLog detail failed:', err);
+      console.error("getAuditLog detail failed:", err);
       selectedLogDetail = null;
     } finally {
       loadingLogDetail = false;
@@ -194,10 +204,24 @@
 <Card.Root>
   <Card.Header class="pb-4">
     <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <!-- 用户 ID -->
+      <Input
+        placeholder="用户 ID"
+        bind:value={filterUserId}
+        onkeydown={(e) => e.key === "Enter" && handleSearch()}
+      />
+
       <!-- 用户名 -->
       <Input
         placeholder="用户名"
         bind:value={filterUsername}
+        onkeydown={(e) => e.key === "Enter" && handleSearch()}
+      />
+
+      <!-- 请求 IP -->
+      <Input
+        placeholder="请求 IP"
+        bind:value={filterRequestIp}
         onkeydown={(e) => e.key === "Enter" && handleSearch()}
       />
 

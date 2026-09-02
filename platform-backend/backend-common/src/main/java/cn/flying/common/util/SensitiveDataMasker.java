@@ -60,6 +60,8 @@ public final class SensitiveDataMasker {
             "passwd",
             "pwd",
             "secret",
+            "secrettoken",
+            "secret_token",
             "token",
             "accesstoken",
             "access_token",

@@ -167,6 +167,29 @@ jobs:
                   )
           PY
 
+      - name: Require Audit High-Frequency Tenant Isolation IT Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          report = Path(
+              "platform-backend/backend-web/target/failsafe-reports/"
+              "TEST-cn.flying.service.AuditHighFrequencyTenantIsolationIT.xml"
+          )
+          if not report.is_file():
+              sys.exit(f"Missing required Failsafe report: {report}")
+
+          suite = ET.parse(report).getroot()
+          for name, expected in {"tests": 1, "skipped": 0, "failures": 0, "errors": 0}.items():
+              actual = int(suite.attrib.get(name, "-1"))
+              if actual != expected:
+                  sys.exit(
+                      f"AuditHighFrequencyTenantIsolationIT {name}={actual}; expected {expected}"
+                  )
+          PY
+
       - name: Require Vault Transit Key Wrapping IT Execution
         run: |
           python3 - <<'PY'

@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
   import * as echarts from "echarts";
   import type { UserTimeDistributionVO } from "$api/types";
+  import { chartLifecycle } from "./chartLifecycle";
 
   interface Props {
     data: UserTimeDistributionVO[];
@@ -11,29 +11,27 @@
 
   let { data, title = "操作时间热力图", loading = false }: Props = $props();
 
-  let chart: echarts.ECharts | null = null;
-  let resizeObserver: ResizeObserver | null = null;
-
   const days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
   const hours = Array.from({ length: 24 }, (_, i) => `${i}:00`);
 
-  function updateChart() {
-    if (!chart) return;
-
-    if (!data.length) {
+  function updateChart(
+    chart: echarts.ECharts,
+    chartData: UserTimeDistributionVO[],
+  ) {
+    if (!chartData.length) {
       chart.clear();
       return;
     }
 
     const heatmapData: Array<[number, number, number]> = [];
-    const maxValue = data.reduce(
+    const maxValue = chartData.reduce(
       (max, item) => Math.max(max, item.operationCount),
       0,
     );
 
     for (let day = 0; day < 7; day++) {
       for (let hour = 0; hour < 24; hour++) {
-        const item = data.find(
+        const item = chartData.find(
           (d) => d.dayOfWeek === day && d.hourOfDay === hour,
         );
         heatmapData.push([hour, day, item?.operationCount ?? 0]);
@@ -122,44 +120,12 @@
     });
   }
 
-  function initAction(node: HTMLDivElement) {
-    resizeObserver = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-      const { width, height } = entry.contentRect;
-      if (width === 0 || height === 0) return;
-
-      if (!chart) {
-        chart = echarts.init(node, undefined, { renderer: "canvas" });
-        updateChart();
-      } else {
-        chart.resize();
-      }
-    });
-    resizeObserver.observe(node);
-
-    return {
-      destroy() {
-        resizeObserver?.disconnect();
-        resizeObserver = null;
-        chart?.dispose();
-        chart = null;
-      },
-    };
+  function initAction(
+    node: HTMLDivElement,
+    chartData: UserTimeDistributionVO[],
+  ) {
+    return chartLifecycle(node, chartData, updateChart);
   }
-
-  $effect(() => {
-    if (data && chart) {
-      updateChart();
-    }
-  });
-
-  onDestroy(() => {
-    resizeObserver?.disconnect();
-    resizeObserver = null;
-    chart?.dispose();
-    chart = null;
-  });
 </script>
 
 <div class="bg-card/50 rounded-xl border p-4">
@@ -177,6 +143,6 @@
       暂无时间分布数据
     </div>
   {:else}
-    <div use:initAction class="mt-2 h-[260px] w-full"></div>
+    <div use:initAction={data} class="mt-2 h-[260px] w-full"></div>
   {/if}
 </div>

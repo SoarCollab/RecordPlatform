@@ -20,19 +20,23 @@ import java.util.Map;
 public interface SysOperationLogMapper extends BaseMapper<SysOperationLog> {
 
     /**
-     * 查询高频操作记录 (v_high_frequency_operations)
+     * Select high-frequency operation groups above the threshold for one tenant and time window.
      */
-    List<HighFrequencyOperationVO> selectHighFrequencyOperations();
+    List<HighFrequencyOperationVO> selectHighFrequencyOperations(
+            @Param("tenantId") Long tenantId,
+            @Param("startTime") LocalDateTime startTime,
+            @Param("threshold") int threshold
+    );
 
     /**
-     * 查询指定租户在时间窗口内超过阈值的高频用户数。
+     * Count high-frequency operation groups above the threshold for one tenant and time window.
      *
-     * @param tenantId 租户ID
-     * @param startTime 起始时间
-     * @param threshold 高频阈值
-     * @return 高频用户数
+     * @param tenantId tenant ID
+     * @param startTime inclusive window start
+     * @param threshold high-frequency threshold
+     * @return high-frequency alert count
      */
-    Integer countHighFrequencyUsers(
+    Integer countHighFrequencyAlerts(
             @Param("tenantId") Long tenantId,
             @Param("startTime") LocalDateTime startTime,
             @Param("threshold") int threshold
@@ -159,11 +163,6 @@ public interface SysOperationLogMapper extends BaseMapper<SysOperationLog> {
      * 查询指定时间范围内的活跃用户数 (sys_operation_log)
      */
     Long selectActiveUsersBetween(@Param("startTime") LocalDateTime startTime, @Param("endTime") LocalDateTime endTime);
-
-    /**
-     * 查询高频操作告警数量 (v_high_frequency_operations)
-     */
-    Long selectHighFrequencyAlertCount();
 
     /**
      * 查询过去N天的每日操作统计 (sys_operation_log)

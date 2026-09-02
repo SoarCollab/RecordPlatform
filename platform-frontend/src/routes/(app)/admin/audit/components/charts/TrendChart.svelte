@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
   import * as echarts from "echarts";
+  import { chartLifecycle } from "./chartLifecycle";
 
   interface Props {
     data: Array<{ date: string; count: number }>;
@@ -16,14 +16,14 @@
     onDateClick,
   }: Props = $props();
 
-  let chart: echarts.ECharts | null = null;
-  let resizeObserver: ResizeObserver | null = null;
+  type ChartState = {
+    data: Array<{ date: string; count: number }>;
+    onDateClick?: (date: string) => void;
+  };
 
-  function updateChart() {
-    if (!chart || !data.length) return;
-
-    const dates = data.map((d) => d.date);
-    const counts = data.map((d) => d.count);
+  function updateChart(chart: echarts.ECharts, chartData: ChartState["data"]) {
+    const dates = chartData.map((d) => d.date);
+    const counts = chartData.map((d) => d.count);
 
     chart.setOption({
       tooltip: {
@@ -87,49 +87,21 @@
     });
   }
 
-  function initAction(node: HTMLDivElement) {
-    resizeObserver = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-      const { width, height } = entry.contentRect;
-      if (width === 0 || height === 0) return;
-
-      if (!chart) {
-        chart = echarts.init(node, undefined, { renderer: "canvas" });
+  function initAction(node: HTMLDivElement, state: ChartState) {
+    return chartLifecycle(
+      node,
+      state,
+      (chart, current) => updateChart(chart, current.data),
+      (chart, getState) => {
         chart.on("click", (params) => {
-          if (params.name && onDateClick) {
-            onDateClick(params.name as string);
+          const current = getState();
+          if (params.name && current.onDateClick) {
+            current.onDateClick(params.name as string);
           }
         });
-        updateChart();
-      } else {
-        chart.resize();
-      }
-    });
-    resizeObserver.observe(node);
-
-    return {
-      destroy() {
-        resizeObserver?.disconnect();
-        resizeObserver = null;
-        chart?.dispose();
-        chart = null;
       },
-    };
+    );
   }
-
-  $effect(() => {
-    if (data && chart) {
-      updateChart();
-    }
-  });
-
-  onDestroy(() => {
-    resizeObserver?.disconnect();
-    resizeObserver = null;
-    chart?.dispose();
-    chart = null;
-  });
 </script>
 
 <div class="bg-card/50 rounded-xl border p-4">
@@ -147,6 +119,9 @@
       暂无趋势数据
     </div>
   {:else}
-    <div use:initAction class="mt-2 h-[200px] w-full"></div>
+    <div
+      use:initAction={{ data, onDateClick }}
+      class="mt-2 h-[200px] w-full"
+    ></div>
   {/if}
 </div>

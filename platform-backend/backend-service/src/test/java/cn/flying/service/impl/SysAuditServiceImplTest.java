@@ -117,22 +117,38 @@ class SysAuditServiceImplTest {
             HighFrequencyOperationVO operation = new HighFrequencyOperationVO();
             operation.setUserId("user1");
             operation.setUsername("testuser");
-            operation.setOperationCount(100);
-            when(operationLogMapper.selectHighFrequencyOperations()).thenReturn(List.of(operation));
+            operation.setOperationCount(101);
+            when(operationLogMapper.selectAuditConfigByKey("HIGH_FREQ_THRESHOLD"))
+                    .thenReturn(auditConfig("100"));
+            when(operationLogMapper.selectHighFrequencyOperations(
+                    eq(7L), any(LocalDateTime.class), eq(100)))
+                    .thenReturn(List.of(operation));
 
-            List<HighFrequencyOperationVO> result = sysAuditService.getHighFrequencyOperations();
+            List<HighFrequencyOperationVO> result;
+            try (MockedStatic<TenantContext> tenantContextMock = mockStatic(TenantContext.class)) {
+                tenantContextMock.when(TenantContext::requireTenantId).thenReturn(7L);
+                result = sysAuditService.getHighFrequencyOperations();
+            }
 
             assertThat(result).hasSize(1);
             assertThat(result.get(0).getUserId()).isEqualTo("user1");
-            assertThat(result.get(0).getOperationCount()).isEqualTo(100);
+            assertThat(result.get(0).getOperationCount()).isEqualTo(101);
+            verify(operationLogMapper).selectHighFrequencyOperations(
+                    eq(7L), any(LocalDateTime.class), eq(100));
         }
 
         @Test
         @DisplayName("should return empty list when no high frequency operations")
         void shouldReturnEmptyListWhenNoOperations() {
-            when(operationLogMapper.selectHighFrequencyOperations()).thenReturn(List.of());
+            when(operationLogMapper.selectHighFrequencyOperations(
+                    eq(7L), any(LocalDateTime.class), eq(100)))
+                    .thenReturn(List.of());
 
-            List<HighFrequencyOperationVO> result = sysAuditService.getHighFrequencyOperations();
+            List<HighFrequencyOperationVO> result;
+            try (MockedStatic<TenantContext> tenantContextMock = mockStatic(TenantContext.class)) {
+                tenantContextMock.when(TenantContext::requireTenantId).thenReturn(7L);
+                result = sysAuditService.getHighFrequencyOperations();
+            }
 
             assertThat(result).isEmpty();
         }
@@ -308,8 +324,11 @@ class SysAuditServiceImplTest {
             when(operationLogMapper.selectErrorOperationsBetween(any(), any())).thenReturn(2L);
             when(operationLogMapper.selectSensitiveOperationsCountBetween(any(), any())).thenReturn(5L);
             when(operationLogMapper.selectActiveUsersBetween(any(), any())).thenReturn(20L);
-            when(operationLogMapper.selectHighFrequencyAlertCount()).thenReturn(3L);
+            when(operationLogMapper.countHighFrequencyAlerts(
+                    eq(7L), any(LocalDateTime.class), eq(100))).thenReturn(3);
             when(operationLogMapper.selectDailyStats(anyInt())).thenReturn(List.of());
+            when(operationLogMapper.selectAuditConfigByKey("HIGH_FREQ_THRESHOLD"))
+                    .thenReturn(auditConfig("100"));
             AuditConfigVO auditEnabledConfig = new AuditConfigVO();
             auditEnabledConfig.setConfigValue("true");
             when(operationLogMapper.selectAuditConfigByKey("AUDIT_ENABLED")).thenReturn(auditEnabledConfig);
@@ -317,11 +336,16 @@ class SysAuditServiceImplTest {
             retentionConfig.setConfigValue("180");
             when(operationLogMapper.selectAuditConfigByKey("LOG_RETENTION_DAYS")).thenReturn(retentionConfig);
 
-            Map<String, Object> result = sysAuditService.getAuditOverview();
+            Map<String, Object> result;
+            try (MockedStatic<TenantContext> tenantContextMock = mockStatic(TenantContext.class)) {
+                tenantContextMock.when(TenantContext::requireTenantId).thenReturn(7L);
+                result = sysAuditService.getAuditOverview();
+            }
 
             assertThat(result).containsKey("totalOperations");
             assertThat(result.get("totalOperations")).isEqualTo(1000L);
             assertThat(result).containsKey("todayOperations");
+            assertThat(result.get("highFrequencyAlerts")).isEqualTo(3);
             assertThat(result).containsKey("auditEnabled");
         }
 
@@ -330,7 +354,11 @@ class SysAuditServiceImplTest {
         void shouldHandleOverviewErrorsGracefully() {
             when(operationLogMapper.selectTotalOperations()).thenThrow(new RuntimeException("DB error"));
 
-            Map<String, Object> result = sysAuditService.getAuditOverview();
+            Map<String, Object> result;
+            try (MockedStatic<TenantContext> tenantContextMock = mockStatic(TenantContext.class)) {
+                tenantContextMock.when(TenantContext::requireTenantId).thenReturn(7L);
+                result = sysAuditService.getAuditOverview();
+            }
 
             assertThat(result).containsKey("error");
         }
@@ -343,7 +371,7 @@ class SysAuditServiceImplTest {
         @Test
         @DisplayName("should return tenant scoped anomaly check results")
         void shouldReturnTenantScopedAnomalyCheckResults() {
-            when(operationLogMapper.countHighFrequencyUsers(eq(7L), any(LocalDateTime.class), eq(100))).thenReturn(1);
+            when(operationLogMapper.countHighFrequencyAlerts(eq(7L), any(LocalDateTime.class), eq(100))).thenReturn(1);
             when(operationLogMapper.countFailedLoginUsers(eq(7L), any(LocalDateTime.class), eq(5))).thenReturn(0);
             when(operationLogMapper.selectErrorRatePercent(eq(7L), any(LocalDateTime.class))).thenReturn(12.5D);
 
@@ -358,7 +386,7 @@ class SysAuditServiceImplTest {
             assertThat(result).containsKey("success");
             assertThat(result.get("success")).isEqualTo(true);
             assertThat(result.get("anomalyDetails").toString()).contains("\"tenantId\":7");
-            verify(operationLogMapper).countHighFrequencyUsers(eq(7L), any(LocalDateTime.class), eq(100));
+            verify(operationLogMapper).countHighFrequencyAlerts(eq(7L), any(LocalDateTime.class), eq(100));
             verify(operationLogMapper).countFailedLoginUsers(eq(7L), any(LocalDateTime.class), eq(5));
             verify(operationLogMapper).selectErrorRatePercent(eq(7L), any(LocalDateTime.class));
         }
@@ -366,7 +394,7 @@ class SysAuditServiceImplTest {
         @Test
         @DisplayName("should handle anomaly check failure")
         void shouldHandleAnomalyCheckFailure() {
-            when(operationLogMapper.countHighFrequencyUsers(eq(7L), any(LocalDateTime.class), anyInt()))
+            when(operationLogMapper.countHighFrequencyAlerts(eq(7L), any(LocalDateTime.class), anyInt()))
                     .thenThrow(new RuntimeException("Query error"));
 
             Map<String, Object> result;
@@ -455,5 +483,14 @@ class SysAuditServiceImplTest {
         log.setStatus(1);
         log.setOperationTime(LocalDateTime.now());
         return log;
+    }
+
+    /**
+     * Build an audit configuration fixture.
+     */
+    private AuditConfigVO auditConfig(String value) {
+        AuditConfigVO config = new AuditConfigVO();
+        config.setConfigValue(value);
+        return config;
     }
 }

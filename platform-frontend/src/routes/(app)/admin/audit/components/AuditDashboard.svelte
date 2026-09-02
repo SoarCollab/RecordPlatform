@@ -21,10 +21,12 @@
 
   /** 钻取筛选参数 */
   export type DrillDownFilter = {
+    userId?: string;
     username?: string;
     module?: string;
     operationType?: string;
     status?: string;
+    requestIp?: string;
     startTime?: string;
     endTime?: string;
     onlySensitive?: boolean;
@@ -43,6 +45,7 @@
   let timeDistribution = $state<UserTimeDistributionVO[]>([]);
   let refreshInterval: ReturnType<typeof setInterval> | null = null;
   let lastRefresh = $state<Date | null>(null);
+  let highFrequencySection: HTMLElement | null = null;
 
   function asNumber(value: unknown): number | null {
     if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -120,7 +123,12 @@
   }
 
   function drillHighFrequencyAlerts() {
-    onDrillDown?.({ ...getTodayRange() });
+    if (highFreq.length === 0) return;
+    highFrequencySection?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+    highFrequencySection?.focus({ preventScroll: true });
   }
 
   function drillActiveUsers() {
@@ -144,7 +152,13 @@
   // --- 表格钻取 ---
 
   function handleHighFreqRowClick(item: HighFrequencyOperationVO) {
-    onDrillDown?.({ username: item.username, ...getTodayRange() });
+    onDrillDown?.({
+      userId: item.userId,
+      username: item.username,
+      requestIp: item.requestIp,
+      startTime: item.startTime,
+      endTime: item.endTime,
+    });
   }
 
   function handleErrorRowClick(row: ErrorOperationStatsVO) {
@@ -286,7 +300,12 @@
   <!-- 表格区域 -->
   <div class="grid gap-4 lg:grid-cols-2">
     <!-- 高频告警 -->
-    <div class="bg-card/50 rounded-xl border p-4">
+    <section
+      id="high-frequency-alerts"
+      bind:this={highFrequencySection}
+      tabindex="-1"
+      class="bg-card/50 rounded-xl border p-4 outline-none focus-visible:ring-2"
+    >
       <div class="mb-3 flex items-center justify-between">
         <p class="text-sm font-medium">高频操作告警</p>
         {#if highFreq.length > 0}
@@ -336,7 +355,7 @@
           </Table.Root>
         </div>
       {/if}
-    </div>
+    </section>
 
     <!-- 错误统计 -->
     <div class="bg-card/50 rounded-xl border p-4">

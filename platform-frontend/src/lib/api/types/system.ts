@@ -72,6 +72,7 @@ export interface OperationLogVO {
  * 审计日志查询参数
  */
 export interface AuditLogQueryParams {
+  userId?: string;
   username?: string;
   operationType?: string;
   module?: string;

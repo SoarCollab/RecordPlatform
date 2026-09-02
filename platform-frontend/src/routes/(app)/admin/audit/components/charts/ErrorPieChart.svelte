@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
   import * as echarts from "echarts";
   import type { ErrorOperationStatsVO } from "$api/types";
+  import { chartLifecycle } from "./chartLifecycle";
 
   interface Props {
     data: ErrorOperationStatsVO[];
@@ -17,9 +17,6 @@
     onItemClick,
   }: Props = $props();
 
-  let chart: echarts.ECharts | null = null;
-  let resizeObserver: ResizeObserver | null = null;
-
   const colors = [
     "#ef4444",
     "#f97316",
@@ -29,15 +26,21 @@
     "#8b5cf6",
   ];
 
-  function updateChart() {
-    if (!chart) return;
+  type ChartState = {
+    data: ErrorOperationStatsVO[];
+    onItemClick?: (item: ErrorOperationStatsVO) => void;
+  };
 
-    if (!data.length) {
+  function updateChart(
+    chart: echarts.ECharts,
+    chartData: ErrorOperationStatsVO[],
+  ) {
+    if (!chartData.length) {
       chart.clear();
       return;
     }
 
-    const pieData = data.slice(0, 6).map((item, idx) => ({
+    const pieData = chartData.slice(0, 6).map((item, idx) => ({
       name: item.module + " - " + item.operationType,
       value: item.errorCount,
       itemStyle: { color: colors[idx % colors.length] },
@@ -89,49 +92,22 @@
     });
   }
 
-  function initAction(node: HTMLDivElement) {
-    resizeObserver = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-      const { width, height } = entry.contentRect;
-      if (width === 0 || height === 0) return;
-
-      if (!chart) {
-        chart = echarts.init(node, undefined, { renderer: "canvas" });
+  function initAction(node: HTMLDivElement, state: ChartState) {
+    return chartLifecycle(
+      node,
+      state,
+      (chart, current) => updateChart(chart, current.data),
+      (chart, getState) => {
         chart.on("click", (params) => {
-          if (params.dataIndex !== undefined && onItemClick) {
-            onItemClick(data[params.dataIndex]);
+          const current = getState();
+          if (params.dataIndex !== undefined && current.onItemClick) {
+            const item = current.data[params.dataIndex];
+            if (item) current.onItemClick(item);
           }
         });
-        updateChart();
-      } else {
-        chart.resize();
-      }
-    });
-    resizeObserver.observe(node);
-
-    return {
-      destroy() {
-        resizeObserver?.disconnect();
-        resizeObserver = null;
-        chart?.dispose();
-        chart = null;
       },
-    };
+    );
   }
-
-  $effect(() => {
-    if (data && chart) {
-      updateChart();
-    }
-  });
-
-  onDestroy(() => {
-    resizeObserver?.disconnect();
-    resizeObserver = null;
-    chart?.dispose();
-    chart = null;
-  });
 </script>
 
 <div class="bg-card/50 rounded-xl border p-4">
@@ -149,6 +125,9 @@
       暂无错误数据
     </div>
   {:else}
-    <div use:initAction class="mt-2 h-[200px] w-full"></div>
+    <div
+      use:initAction={{ data, onItemClick }}
+      class="mt-2 h-[200px] w-full"
+    ></div>
   {/if}
 </div>
