@@ -3,6 +3,8 @@ package cn.flying.dao.mapper;
 import cn.flying.dao.entity.SysPermission;
 import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -16,6 +18,52 @@ import java.util.Set;
  */
 @Mapper
 public interface SysPermissionMapper extends BaseMapper<SysPermission> {
+
+    /**
+     * Select active permission definitions visible to the current tenant.
+     */
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("""
+        SELECT id, tenant_id, code, name, module, action, description, status, create_time, update_time
+        FROM sys_permission
+        WHERE status = 1
+          AND (tenant_id = 0 OR tenant_id = #{tenantId})
+        ORDER BY module, code
+        """)
+    List<SysPermission> selectVisibleActivePermissions(@Param("tenantId") Long tenantId);
+
+    /**
+     * Select a page of permission definitions visible to the current tenant.
+     */
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("""
+        <script>
+        SELECT id, tenant_id, code, name, module, action, description, status, create_time, update_time
+        FROM sys_permission
+        WHERE (tenant_id = 0 OR tenant_id = #{tenantId})
+        <if test="module != null and module != ''">
+          AND module = #{module}
+        </if>
+        ORDER BY module, code
+        </script>
+        """)
+    IPage<SysPermission> selectVisiblePermissionPage(
+            Page<SysPermission> page,
+            @Param("tenantId") Long tenantId,
+            @Param("module") String module);
+
+    /**
+     * Select distinct permission modules visible to the current tenant.
+     */
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("""
+        SELECT module
+        FROM sys_permission
+        WHERE (tenant_id = 0 OR tenant_id = #{tenantId})
+        GROUP BY module
+        ORDER BY module
+        """)
+    List<String> selectVisibleModules(@Param("tenantId") Long tenantId);
 
     /**
      * 根据角色获取权限码列表
