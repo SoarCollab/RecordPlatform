@@ -344,12 +344,13 @@ class PermissionServiceImplTest {
             SysPermission global = createPermission(1L, PERM_FILE_READ, "file");
             global.setTenantId(0L);
             SysPermission tenant = createPermission(2L, PERM_FILE_WRITE, "file");
-            when(permissionMapper.selectList(any())).thenReturn(List.of(global, tenant));
+            when(permissionMapper.selectVisibleActivePermissions(TENANT_ID)).thenReturn(List.of(global, tenant));
 
             List<SysPermission> result = permissionService.getPermissionTree(TENANT_ID);
 
             assertEquals(List.of(global, tenant), result);
-            verify(permissionMapper).selectList(any());
+            verify(permissionMapper).selectVisibleActivePermissions(TENANT_ID);
+            verify(permissionMapper, never()).selectList(any());
         }
 
         /**
@@ -361,12 +362,13 @@ class PermissionServiceImplTest {
             Page<SysPermission> page = new Page<>(1, 10);
             Page<SysPermission> expected = new Page<>(1, 10);
             expected.setRecords(List.of(createPermission(1L, PERM_FILE_READ, "file")));
-            when(permissionMapper.selectPage(eq(page), any())).thenReturn(expected);
+            when(permissionMapper.selectVisiblePermissionPage(page, TENANT_ID, "file")).thenReturn(expected);
 
             IPage<SysPermission> result = permissionService.listPermissions(TENANT_ID, "file", page);
 
             assertSame(expected, result);
-            verify(permissionMapper).selectPage(eq(page), any());
+            verify(permissionMapper).selectVisiblePermissionPage(page, TENANT_ID, "file");
+            verify(permissionMapper, never()).selectPage(any(), any());
         }
 
         /**
@@ -375,13 +377,13 @@ class PermissionServiceImplTest {
         @Test
         @DisplayName("should list distinct permission modules")
         void listModules_mapsPermissionModules() {
-            SysPermission file = createPermission(1L, PERM_FILE_READ, "file");
-            SysPermission admin = createPermission(2L, PERM_ADMIN_ALL, "admin");
-            when(permissionMapper.selectList(any())).thenReturn(List.of(file, admin));
+            when(permissionMapper.selectVisibleModules(TENANT_ID)).thenReturn(List.of("admin", "file"));
 
             List<String> result = permissionService.listModules(TENANT_ID);
 
-            assertEquals(List.of("file", "admin"), result);
+            assertEquals(List.of("admin", "file"), result);
+            verify(permissionMapper).selectVisibleModules(TENANT_ID);
+            verify(permissionMapper, never()).selectList(any());
         }
 
         /**

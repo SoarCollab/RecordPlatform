@@ -207,35 +207,17 @@ public class PermissionServiceImpl implements PermissionService {
 
     @Override
     public List<SysPermission> getPermissionTree(Long tenantId) {
-        LambdaQueryWrapper<SysPermission> wrapper = new LambdaQueryWrapper<>();
-        wrapper.and(w -> w.eq(SysPermission::getTenantId, 0L).or().eq(SysPermission::getTenantId, tenantId));
-        wrapper.eq(SysPermission::getStatus, 1);
-        wrapper.orderByAsc(SysPermission::getModule, SysPermission::getCode);
-        return permissionMapper.selectList(wrapper);
+        return permissionMapper.selectVisibleActivePermissions(tenantId);
     }
 
     @Override
     public IPage<SysPermission> listPermissions(Long tenantId, String module, Page<SysPermission> page) {
-        LambdaQueryWrapper<SysPermission> wrapper = new LambdaQueryWrapper<>();
-        wrapper.and(w -> w.eq(SysPermission::getTenantId, 0L).or().eq(SysPermission::getTenantId, tenantId));
-        if (module != null && !module.isEmpty()) {
-            wrapper.eq(SysPermission::getModule, module);
-        }
-        wrapper.orderByAsc(SysPermission::getModule, SysPermission::getCode);
-        return permissionMapper.selectPage(page, wrapper);
+        return permissionMapper.selectVisiblePermissionPage(page, tenantId, module);
     }
 
     @Override
     public List<String> listModules(Long tenantId) {
-        LambdaQueryWrapper<SysPermission> wrapper = new LambdaQueryWrapper<>();
-        wrapper.and(w -> w.eq(SysPermission::getTenantId, 0L).or().eq(SysPermission::getTenantId, tenantId));
-        wrapper.select(SysPermission::getModule);
-        wrapper.groupBy(SysPermission::getModule);
-
-        List<SysPermission> permissions = permissionMapper.selectList(wrapper);
-        return permissions.stream()
-                .map(SysPermission::getModule)
-                .toList();
+        return permissionMapper.selectVisibleModules(tenantId);
     }
 
     @Override
