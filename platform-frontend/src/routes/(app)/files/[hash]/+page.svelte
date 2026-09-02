@@ -7,6 +7,7 @@
   import { useDownload } from "$stores/download.svelte";
   import { formatFileSize, formatDateTime } from "$utils/format";
   import { getAvatarUrl } from "$utils/avatar";
+  import { isFilePreviewable } from "$utils/file-preview";
   import {
     getFileByHash,
     getTransaction,
@@ -68,22 +69,9 @@
   let isSharingToFriend = $state(false);
   let friendSearchKeyword = $state("");
 
-  // 检查文件类型是否支持预览
-  const canPreview = $derived(file && isPreviewable(file.contentType));
-
-  function isPreviewable(contentType: string): boolean {
-    if (!contentType) return false;
-    return (
-      contentType.startsWith("image/") ||
-      contentType.startsWith("video/") ||
-      contentType.startsWith("audio/") ||
-      contentType.startsWith("text/") ||
-      contentType === "application/pdf" ||
-      contentType === "application/json" ||
-      contentType === "application/xml" ||
-      contentType === "application/javascript"
-    );
-  }
+  const canPreview = $derived(
+    file && isFilePreviewable(file.fileName, file.contentType),
+  );
 
   onMount(() => {
     loadFileDetail();

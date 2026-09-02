@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadPreviewText } from "./file-preview";
+import {
+  classifyFilePreview,
+  isFilePreviewable,
+  loadPreviewText,
+  TEXT_PREVIEW_TRUNCATION_NOTICE,
+} from "./file-preview";
 
 describe("loadPreviewText", () => {
   it.each(["blob:https://example.test/file", "data:text/plain,hello"])(
@@ -50,4 +55,54 @@ describe("loadPreviewText", () => {
       loadPreviewText("blob:https://example.test/file", vi.fn(), nativeFetch),
     ).rejects.toThrow("请求失败 (400)");
   });
+
+  it("decodes only the bounded prefix of native blob content", async () => {
+    const nativeFetch = vi.fn().mockResolvedValue(
+      new Response("0123456789", {
+        status: 200,
+        headers: { "Content-Type": "text/plain" },
+      }),
+    );
+
+    await expect(
+      loadPreviewText(
+        "blob:https://example.test/file",
+        vi.fn(),
+        nativeFetch,
+        4,
+      ),
+    ).resolves.toBe(`0123${TEXT_PREVIEW_TRUNCATION_NOTICE}`);
+  });
+});
+
+describe("classifyFilePreview", () => {
+  it.each([
+    ["photo.JPG", "image/jpeg", "image"],
+    ["paper.pdf", "application/pdf", "pdf"],
+    ["song.mp3", "audio/mpeg", "audio"],
+    ["clip.webm", "video/webm", "video"],
+    ["data.json", "application/json", "text"],
+  ] as const)("classifies %s as %s", (fileName, contentType, expected) => {
+    expect(classifyFilePreview(fileName, contentType)).toBe(expected);
+    expect(isFilePreviewable(fileName, contentType)).toBe(true);
+  });
+
+  it.each(["payload.html", "vector.svg", "script.js", "module.mjs"])(
+    "forces active content %s into escaped text mode",
+    (fileName) => {
+      expect(classifyFilePreview(fileName, "image/svg+xml")).toBe("text");
+    },
+  );
+
+  it.each(["archive.zip", "report.docx", "photo.tiff", "image.heic"])(
+    "keeps metadata-only format %s unsupported inline",
+    (fileName) => {
+      expect(classifyFilePreview(fileName, "application/octet-stream")).toBe(
+        "unsupported",
+      );
+      expect(isFilePreviewable(fileName, "application/octet-stream")).toBe(
+        false,
+      );
+    },
+  );
 });

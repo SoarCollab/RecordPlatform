@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { useNotifications } from "$stores/notifications.svelte";
   import { formatFileSize, formatDateTime } from "$utils/format";
+  import { isFilePreviewable } from "$utils/file-preview";
   import {
     getAllFiles,
     getFileDetail,
@@ -345,18 +346,6 @@
     if (previewUrl) URL.revokeObjectURL(previewUrl);
   });
 
-  function isPreviewable(contentType: string): boolean {
-    return (
-      contentType.startsWith("image/") ||
-      contentType.startsWith("video/") ||
-      contentType.startsWith("audio/") ||
-      contentType === "application/pdf" ||
-      contentType.startsWith("text/") ||
-      contentType === "application/json" ||
-      contentType === "application/xml"
-    );
-  }
-
   function getStatusBadgeVariant(
     status: number,
   ): "default" | "secondary" | "destructive" | "outline" {
@@ -504,7 +493,7 @@
                     </Table.Cell>
                     <Table.Cell class="text-right">
                       <div class="flex justify-end gap-1">
-                        {#if file.status === AdminFileStatus.COMPLETED && isPreviewable(file.contentType)}
+                        {#if file.status === AdminFileStatus.COMPLETED && isFilePreviewable(file.fileName, file.contentType)}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -979,7 +968,7 @@
         <div class="flex items-center justify-between">
           <div class="flex gap-2">
             {#if selectedFile.status === AdminFileStatus.COMPLETED}
-              {#if isPreviewable(selectedFile.contentType)}
+              {#if isFilePreviewable(selectedFile.fileName, selectedFile.contentType)}
                 <Button
                   variant="outline"
                   onclick={() =>

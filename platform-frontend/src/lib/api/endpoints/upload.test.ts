@@ -38,6 +38,14 @@ describe("upload endpoints", () => {
     vi.unstubAllGlobals();
   });
 
+  it("getUploadPolicy 应读取服务器权威上传策略", async () => {
+    const policy = { maxFileSizeBytes: 1024, fileTypes: [] };
+    clientMocks.api.get.mockResolvedValue(policy);
+
+    await expect(uploadApi.getUploadPolicy()).resolves.toEqual(policy);
+    expect(clientMocks.api.get).toHaveBeenCalledWith("/upload-sessions/policy");
+  });
+
   it("startUpload 应使用 URLSearchParams 适配后端 @RequestParam", async () => {
     clientMocks.api.post.mockResolvedValue({
       clientId: "c1",

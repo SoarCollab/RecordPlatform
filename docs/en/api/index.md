@@ -79,6 +79,7 @@ The anonymous public-share surface is limited to the five exact share-related `G
 
 | Method | Endpoint | Description |
 |------|------|------|
+| GET | `/api/v1/upload-sessions/policy` | Get the server-authoritative extension, MIME, preview, and size policy |
 | POST | `/api/v1/upload-sessions` | Start chunked upload |
 | POST | `/api/v1/upload-sessions/direct` | Start direct multipart upload and return presigned URLs |
 | PUT | `/api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}` | Upload chunk |
@@ -90,6 +91,8 @@ The anonymous public-share surface is limited to the five exact share-related `G
 | DELETE | `/api/v1/upload-sessions/{clientId}/direct` | Abort direct multipart upload |
 | GET | `/api/v1/upload-sessions/{clientId}` | Check upload status |
 | GET | `/api/v1/upload-sessions/{clientId}/progress` | Query upload progress |
+
+Every upload requires an allowlisted filename extension. An empty MIME value or `application/octet-stream` may fall back to the extension; any concrete MIME must be compatible with that extension. HTML, SVG, and source files are rendered only as escaped text. Office/OpenDocument files, archives, and formats without stable browser decoders remain download-only.
 
 ### Files and Sharing (`/api/v1/files`)
 

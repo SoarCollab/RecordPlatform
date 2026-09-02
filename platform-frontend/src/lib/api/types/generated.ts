@@ -2809,6 +2809,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/upload-sessions/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取上传策略 */
+        get: operations["getUploadPolicy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/upload-sessions/{clientId}": {
         parameters: {
             query?: never;
@@ -3940,8 +3957,8 @@ export interface components {
             chunkSize: number;
             /** @description 客户端会话 ID */
             clientId?: string;
-            /** @description 文件类型 */
-            contentType: string;
+            /** @description 文件类型；浏览器未提供时可为空 */
+            contentType?: string;
             /** @description 目标文件ID（可选） */
             fileId?: string;
             /** @description 文件名 */
@@ -6497,6 +6514,17 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
+        ResultUploadPolicyVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["UploadPolicyVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
         ResultUserFileStatsVO: {
             /**
              * Format: int32
@@ -7186,6 +7214,42 @@ export interface components {
             avatar?: string;
             /** @description 昵称（预留字段） */
             nickname?: string;
+        };
+        /** @description 上传文件类型策略 */
+        UploadFileTypePolicyVO: {
+            /**
+             * @description 能力分组编码
+             * @example document
+             */
+            category: string;
+            /**
+             * @description 能力分组名称
+             * @example 文档
+             */
+            categoryLabel: string;
+            /**
+             * @description 不含点号的小写文件扩展名
+             * @example pdf
+             */
+            extension: string;
+            /** @description 与扩展名兼容的具体 MIME 别名 */
+            mimeTypes: string[];
+            /**
+             * @description 预览模式
+             * @enum {string}
+             */
+            previewMode: "image" | "video" | "audio" | "pdf" | "text" | "unsupported";
+        };
+        /** @description 上传策略 */
+        UploadPolicyVO: {
+            /** @description 允许的文件类型及预览能力 */
+            fileTypes: components["schemas"]["UploadFileTypePolicyVO"][];
+            /**
+             * Format: int64
+             * @description 单文件最大字节数
+             * @example 4294967296
+             */
+            maxFileSizeBytes: number;
         };
         /** @description 用户文件统计信息 */
         UserFileStatsVO: {
@@ -11288,8 +11352,8 @@ export interface operations {
                 chunkSize: string;
                 /** @description 客户端ID */
                 clientId?: string;
-                /** @description 文件类型 */
-                contentType: string;
+                /** @description 文件类型；浏览器未提供时可为空 */
+                contentType?: string;
                 /** @description 目标文件ID（可选） */
                 fileId?: string;
                 /** @description 文件名 */
@@ -11336,6 +11400,26 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultDirectUploadSessionVO"];
+                };
+            };
+        };
+    };
+    getUploadPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultUploadPolicyVO"];
                 };
             };
         };

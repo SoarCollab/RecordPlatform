@@ -9,10 +9,18 @@ import type {
   DirectUploadSessionVO,
   DirectUploadCompleteRequest,
   DirectUploadCompleteVO,
+  UploadPolicyVO,
 } from "../types";
 
 const BASE = "/upload-sessions";
 const DIRECT_UPLOAD_ETAG_PATTERN = /^[\x21-\x7e]{1,255}$/;
+
+/**
+ * Loads the current server-authoritative upload and preview policy.
+ */
+export async function getUploadPolicy(): Promise<UploadPolicyVO> {
+  return api.get<UploadPolicyVO>(`${BASE}/policy`);
+}
 
 /**
  * 开始上传（初始化或恢复）。

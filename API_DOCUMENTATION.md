@@ -608,6 +608,8 @@ This module exposes two upload paths:
 - Backend-proxied chunk upload with pause/resume support.
 - Direct multipart upload where the frontend uploads chunk bytes to object storage through presigned URLs and the backend only validates metadata, registers the file, persists the chunk manifest, and records attestation.
 
+Clients should first read `GET /api/v1/upload-sessions/policy`. The response is the authoritative list of allowed filename extensions, compatible MIME aliases, preview modes, capability groups, and the maximum file size. Empty MIME values and `application/octet-stream` fall back to the extension; concrete MIME values must match the extension.
+
 ### Upload Flow
 
 1. Call `POST /api/v1/upload-sessions` to initialize upload session
@@ -643,7 +645,7 @@ POST /api/v1/upload-sessions
 | ----------- | ------ | -------- | ------------------------------------------------------------- |
 | fileName    | string | Yes      | File name                                                     |
 | fileSize    | long   | Yes      | File size in bytes                                            |
-| contentType | string | Yes      | MIME type                                                     |
+| contentType | string | No       | MIME type; empty browser values fall back to the extension    |
 | clientId    | string | No       | Client-provided ID (optional, auto-generated if not provided) |
 | chunkSize   | int    | Yes      | Size of each chunk                                            |
 | totalChunks | int    | Yes      | Total number of chunks                                        |
@@ -4031,6 +4033,7 @@ Operational defaults: backfill worker enabled, apply disabled, run lease 300 sec
 - `GET /api/v1/files/shares`
 - `GET /api/v1/files/{id}/provenance`
 - `GET /api/v1/transactions/{transactionHash}`
+- `GET /api/v1/upload-sessions/policy`
 - `POST /api/v1/upload-sessions`
 - `POST /api/v1/upload-sessions/direct`
 - `PUT /api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}`

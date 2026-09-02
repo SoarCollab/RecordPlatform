@@ -534,6 +534,7 @@ class FileUploadServiceTest {
         void shouldCreateDirectUploadSession() {
             TenantContext.setTenantId(77L);
             DirectUploadSessionRequest request = directSessionRequest();
+            request.setContentType("");
             request.getParts().getFirst().setPlainHash("SHA256:" + CHUNK_HASH_0.substring(7));
             request.getParts().getFirst().setCipherHash("SHA256:" + CHUNK_HASH_0.substring(7));
             when(redisStateManager.getState(CLIENT_ID)).thenReturn(null);
@@ -552,6 +553,7 @@ class FileUploadServiceTest {
                     ArgumentCaptor.forClass(CreateDirectMultipartUploadRequest.class);
             verify(fileRemoteClient).createDirectMultipartUpload(storageRequestCaptor.capture());
             assertEquals(CLIENT_ID, storageRequestCaptor.getValue().sessionId());
+            assertEquals("application/octet-stream", storageRequestCaptor.getValue().contentType());
             assertEquals(CHUNK_HASH_0, storageRequestCaptor.getValue().parts().getFirst().objectName());
 
             verify(redisStateManager).saveNewState(
@@ -568,6 +570,23 @@ class FileUploadServiceTest {
             );
             verify(redisStateManager).updateState(argThat(FileUploadState::isDirectUpload));
             verify(quotaService).checkUploadQuota(77L, USER_ID, 1024L);
+        }
+
+        /**
+         * Verifies direct upload rejects a concrete extension and MIME mismatch before storage allocation.
+         */
+        @Test
+        void shouldRejectDirectUploadMimeMismatchBeforeStorage() {
+            DirectUploadSessionRequest request = directSessionRequest();
+            request.setContentType("text/plain");
+
+            GeneralException exception = assertThrows(
+                    GeneralException.class,
+                    () -> fileUploadService.startDirectUpload(USER_ID, request));
+
+            assertEquals(ResultEnum.FILE_ACCEPT_NOT_SUPPORT, exception.getResultEnum());
+            verify(fileRemoteClient, never()).createDirectMultipartUpload(any());
+            verify(redisStateManager, never()).saveNewState(any(), anyString());
         }
 
         /**
@@ -1833,6 +1852,35 @@ class FileUploadServiceTest {
             assertTrue(result.getProcessedChunks().isEmpty());
 
             verify(redisStateManager).saveNewState(any(FileUploadState.class), eq(SUID));
+        }
+
+        /**
+         * Verifies an empty browser MIME falls back to the allowed extension and persists a stable value.
+         */
+        @Test
+        void shouldAcceptEmptyBrowserMimeByExtension() {
+            when(redisStateManager.getSessionIdByFileClientKey(anyLong(), anyString(), anyString()))
+                    .thenReturn(null);
+
+            fileUploadService.startUpload(USER_ID, "notes.md", 1024L, "", null, 1024, 1);
+
+            verify(redisStateManager).saveNewState(
+                    argThat(state -> "application/octet-stream".equals(state.getContentType())),
+                    eq(SUID));
+        }
+
+        /**
+         * Verifies a concrete MIME conflict is rejected before any session is persisted.
+         */
+        @Test
+        void shouldRejectConcreteMimeMismatchBeforeSessionPersistence() {
+            GeneralException exception = assertThrows(
+                    GeneralException.class,
+                    () -> fileUploadService.startUpload(
+                            USER_ID, "report.pdf", 1024L, "text/plain", null, 1024, 1));
+
+            assertEquals(ResultEnum.FILE_ACCEPT_NOT_SUPPORT, exception.getResultEnum());
+            verify(redisStateManager, never()).saveNewState(any(), anyString());
         }
 
         /**

@@ -79,6 +79,7 @@ Authorization: Bearer <token>
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
+| GET | `/api/v1/upload-sessions/policy` | 获取服务端权威的扩展名、MIME、预览能力和大小策略 |
 | POST | `/api/v1/upload-sessions` | 开始分片上传 |
 | POST | `/api/v1/upload-sessions/direct` | 开始对象存储直传并返回预签名 URL |
 | PUT | `/api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}` | 上传分片 |
@@ -90,6 +91,8 @@ Authorization: Bearer <token>
 | DELETE | `/api/v1/upload-sessions/{clientId}/direct` | 中止对象存储直传 |
 | GET | `/api/v1/upload-sessions/{clientId}` | 检查上传状态 |
 | GET | `/api/v1/upload-sessions/{clientId}/progress` | 查询上传进度 |
+
+所有上传都必须具有白名单扩展名。浏览器未提供 MIME 或提供 `application/octet-stream` 时可按扩展名降级；任何具体 MIME 都必须与扩展名兼容。HTML、SVG 和源代码只能作为转义文本预览；Office/OpenDocument、压缩包及缺少稳定浏览器解码器的格式只提供下载。
 
 ### 文件与分享（`/api/v1/files`）
 
