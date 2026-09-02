@@ -413,6 +413,30 @@ class OperationLogAspectTest {
                 null,
                 new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED)
         );
+        String blankExplicit = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "resolveFailureMessage",
+                null,
+                new GeneralException(" ")
+        );
+        String numericData = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "resolveFailureMessage",
+                null,
+                new GeneralException(ResultEnum.PARAM_IS_INVALID, 42)
+        );
+        String enumData = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "resolveFailureMessage",
+                null,
+                new GeneralException(ResultEnum.PARAM_IS_INVALID, Thread.State.RUNNABLE)
+        );
+        String blankData = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "resolveFailureMessage",
+                null,
+                new GeneralException(ResultEnum.PARAM_IS_INVALID, " ")
+        );
         String structuredData = ReflectionTestUtils.invokeMethod(
                 aspect,
                 "resolveFailureMessage",
@@ -434,14 +458,25 @@ class OperationLogAspectTest {
                 null,
                 new IllegalStateException()
         );
+        String blankPlainClass = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "resolveFailureMessage",
+                null,
+                new IllegalStateException(" ")
+        );
 
         assertThat(explicit).isEqualTo("explicit business reason");
         assertThat(resultEnum).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED.getMessage());
+        assertThat(blankExplicit).isEqualTo("GeneralException");
+        assertThat(numericData).isEqualTo("42");
+        assertThat(enumData).isEqualTo("RUNNABLE");
+        assertThat(blankData).isEqualTo(ResultEnum.PARAM_IS_INVALID.getMessage());
         assertThat(structuredData)
                 .contains("safe structured reason")
                 .doesNotContain("raw-secret");
         assertThat(plainMessage).isEqualTo("plain failure");
         assertThat(plainClass).isEqualTo("IllegalStateException");
+        assertThat(blankPlainClass).isEqualTo("IllegalStateException");
     }
 
     /**
