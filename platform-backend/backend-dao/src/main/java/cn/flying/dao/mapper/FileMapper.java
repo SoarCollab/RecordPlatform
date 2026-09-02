@@ -49,6 +49,25 @@ public interface FileMapper extends BaseMapper<File> {
     int physicalDeleteById(@Param("id") Long id, @Param("tenantId") Long tenantId);
 
     /**
+     * Atomically changes a file between the administrator-visible completed and deleted states.
+     *
+     * @param id file ID
+     * @param tenantId tenant ID
+     * @param expectedStatus status observed before the update
+     * @param targetStatus requested target status
+     * @return number of updated rows
+     */
+    @InterceptorIgnore(tenantLine = "true")
+    @Update("UPDATE file SET status = #{targetStatus} " +
+            "WHERE id = #{id} AND tenant_id = #{tenantId} " +
+            "AND status = #{expectedStatus} AND deleted = 0")
+    int updateStatusByAdminWithCas(
+            @Param("id") Long id,
+            @Param("tenantId") Long tenantId,
+            @Param("expectedStatus") int expectedStatus,
+            @Param("targetStatus") int targetStatus);
+
+    /**
      * 统计用户文件数量
      *
      * @param userId 用户ID
