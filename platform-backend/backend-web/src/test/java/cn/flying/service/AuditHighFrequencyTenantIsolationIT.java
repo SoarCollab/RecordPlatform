@@ -1,6 +1,7 @@
 package cn.flying.service;
 
 import cn.flying.common.tenant.TenantContext;
+import cn.flying.common.util.SnowflakeIdGenerator;
 import cn.flying.dao.vo.audit.HighFrequencyOperationVO;
 import cn.flying.test.BaseIntegrationTest;
 import org.junit.jupiter.api.DisplayName;
@@ -31,6 +32,9 @@ class AuditHighFrequencyTenantIsolationIT extends BaseIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private SnowflakeIdGenerator snowflakeIdGenerator;
 
     /**
      * Proves list, overview count, and anomaly detection share one tenant-scoped threshold contract.
@@ -80,9 +84,10 @@ class AuditHighFrequencyTenantIsolationIT extends BaseIntegrationTest {
             jdbcTemplate.update(
                     """
                     INSERT INTO sys_operation_log
-                        (tenant_id, module, operation_type, request_ip, status, user_id, username, operation_time)
-                    VALUES (?, 'f019-audit', 'QUERY', ?, 0, ?, ?, NOW())
+                        (id, tenant_id, module, operation_type, request_ip, status, user_id, username, operation_time)
+                    VALUES (?, ?, 'f019-audit', 'QUERY', ?, 0, ?, ?, NOW())
                     """,
+                    snowflakeIdGenerator.nextId(),
                     tenantId,
                     requestIp,
                     userId,
