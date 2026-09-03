@@ -15,6 +15,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import cn.flying.test.BaseIntegrationTest;
+import cn.flying.service.auth.AuthorizationStateService;
+import org.junit.jupiter.api.BeforeEach;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 
 @AutoConfigureMockMvc
 public abstract class BaseControllerIntegrationTest extends BaseIntegrationTest {
@@ -27,9 +34,26 @@ public abstract class BaseControllerIntegrationTest extends BaseIntegrationTest 
     @Autowired
     protected ObjectMapper objectMapper;
 
+    @MockitoBean
+    protected AuthorizationStateService authorizationStateService;
+
     protected Long testUserId = JwtTestSupport.DEFAULT_USER_ID;
     protected Long testTenantId = JwtTestSupport.DEFAULT_TENANT_ID;
     protected String testToken = JwtTestSupport.generateToken();
+
+    /**
+     * Keeps legacy controller integration tests focused on route/role behavior.
+     * Current-state authorization itself is covered by dedicated filter and Redis integration tests.
+     */
+    @BeforeEach
+    void stubCurrentAuthorizationState() {
+        lenient().when(authorizationStateService.isTokenAuthorized(
+                        anyLong(), anyLong(), anyString(), anyString(), anyLong()))
+                .thenReturn(true);
+        lenient().when(authorizationStateService.isSseIdentityAuthorized(
+                        anyLong(), anyLong(), anyString(), anyLong()))
+                .thenReturn(true);
+    }
 
     protected void setTestUser(Long userId, Long tenantId) {
         this.testUserId = userId;

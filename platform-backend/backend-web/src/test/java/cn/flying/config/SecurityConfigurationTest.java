@@ -1,5 +1,7 @@
 package cn.flying.config;
 
+import cn.flying.test.support.JwtTestSupport;
+import com.auth0.jwt.JWT;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -7,6 +9,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,6 +17,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * SecurityConfiguration 单元测试。
  */
 class SecurityConfigurationTest {
+
+    /** Keeps the shared controller-integration token aligned with mandatory production identity claims. */
+    @Test
+    void shouldGenerateCurrentAuthorizationClaimsForControllerIntegrationTests() {
+        var token = JWT.decode(JwtTestSupport.generateToken());
+
+        assertThat(token.getClaim("scope").asString()).isEqualTo("tenant");
+        assertThat(token.getClaim("authVersion").asLong()).isZero();
+        assertThat(token.getClaim("authorities").asList(String.class)).containsExactly("ROLE_user");
+    }
 
     /**
      * 验证生产 context-path 下的登录请求仍会被识别为登录接口。
