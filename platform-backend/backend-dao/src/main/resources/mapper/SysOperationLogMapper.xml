@@ -65,7 +65,8 @@
         SELECT
         id, user_id as userId, username, request_ip as requestIp, module,
         operation_type as operationType, description, method, request_url as requestUrl,
-        request_param as requestParam, operation_time as operationTime, status
+        request_param as requestParam, operation_time as operationTime, status,
+        error_msg as errorMsg, execution_time as executionTime
         FROM v_sensitive_operations
         <where>
             <if test="userId != null and userId != ''">
@@ -79,6 +80,12 @@
             </if>
             <if test="operationType != null and operationType != ''">
                 AND operation_type = #{operationType}
+            </if>
+            <if test="status != null">
+                AND status = #{status}
+            </if>
+            <if test="requestIp != null and requestIp != ''">
+                AND request_ip = #{requestIp}
             </if>
             <if test="startTime != null and startTime != ''">
                 AND operation_time >= #{startTime}
@@ -107,6 +114,12 @@
             </if>
             <if test="operationType != null and operationType != ''">
                 AND operation_type = #{operationType}
+            </if>
+            <if test="status != null">
+                AND status = #{status}
+            </if>
+            <if test="requestIp != null and requestIp != ''">
+                AND request_ip = #{requestIp}
             </if>
             <if test="startTime != null and startTime != ''">
                 AND operation_time >= #{startTime}
@@ -183,6 +196,13 @@
     <select id="selectOperationsBetween" resultType="java.lang.Long">
         SELECT COUNT(*) FROM sys_operation_log
         WHERE operation_time >= #{startTime} AND operation_time &lt; #{endTime}
+    </select>
+
+    <select id="countOperationsByTypeBetween" resultType="java.lang.Long">
+        SELECT COUNT(*) FROM sys_operation_log
+        WHERE operation_type = #{operationType}
+          AND operation_time >= #{startTime}
+          AND operation_time &lt; #{endTime}
     </select>
 
     <select id="selectTotalErrorOperations" resultType="java.lang.Long">

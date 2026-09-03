@@ -283,6 +283,7 @@
   let previewContentType = $state("");
   let previewFileName = $state("");
   let previewLoading = $state(false);
+  let previewExpanded = $state(false);
 
   // 下载状态
   let downloadingHash = $state<string | null>(null);
@@ -294,6 +295,7 @@
   ) {
     previewLoading = true;
     previewDialogOpen = true;
+    previewExpanded = false;
     previewContentType = contentType;
     previewFileName = fileName;
     previewUrl = "";
@@ -313,6 +315,7 @@
 
   function closePreview() {
     previewDialogOpen = false;
+    previewExpanded = false;
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
       previewUrl = "";
@@ -1204,26 +1207,45 @@
     if (!open) closePreview();
   }}
 >
-  <Dialog.Content class="max-h-[90vh] max-w-4xl overflow-y-auto">
+  <Dialog.Content
+    class={previewExpanded
+      ? "h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-[calc(100vw-2rem)]"
+      : "h-[min(80vh,48rem)] w-[calc(100vw-2rem)] max-w-4xl grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-4xl"}
+    data-preview-expanded={previewExpanded}
+  >
     <Dialog.Header>
       <Dialog.Title>文件预览</Dialog.Title>
       <Dialog.Description>{previewFileName}</Dialog.Description>
     </Dialog.Header>
-    {#if previewLoading}
-      <div class="flex items-center justify-center p-16">
-        <div
-          class="border-primary h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"
-        ></div>
-        <span class="text-muted-foreground ml-3 text-sm">加载中...</span>
-      </div>
-    {:else if previewUrl}
-      <FilePreview
-        url={previewUrl}
-        contentType={previewContentType}
-        fileName={previewFileName}
-      />
-    {/if}
+    <div
+      class="bg-muted/10 min-h-0 min-w-0 overflow-auto rounded-lg"
+      data-testid="file-preview-scroll-region"
+    >
+      {#if previewLoading}
+        <div class="flex min-h-full items-center justify-center p-16">
+          <div
+            class="border-primary h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"
+          ></div>
+          <span class="text-muted-foreground ml-3 text-sm">加载中...</span>
+        </div>
+      {:else if previewUrl}
+        <FilePreview
+          url={previewUrl}
+          contentType={previewContentType}
+          fileName={previewFileName}
+          fillContainer={true}
+          class="min-h-full min-w-full"
+        />
+      {/if}
+    </div>
     <Dialog.Footer>
+      <Button
+        variant="outline"
+        aria-pressed={previewExpanded}
+        onclick={() => (previewExpanded = !previewExpanded)}
+      >
+        {previewExpanded ? "恢复窗口" : "放大查看"}
+      </Button>
       <Button variant="outline" onclick={closePreview}>关闭</Button>
     </Dialog.Footer>
   </Dialog.Content>

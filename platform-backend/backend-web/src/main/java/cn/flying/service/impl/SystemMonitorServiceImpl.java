@@ -48,6 +48,7 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
     private static final String FALLBACK_CHAIN_TYPE = "UNKNOWN";
     private static final String STORAGE_CAPACITY_FALLBACK_MARKER = "MONITOR_STORAGE_CAPACITY_FALLBACK";
     private static final long FILE_ESTIMATE_BYTES = 1024L * 1024L;
+    private static final String DOWNLOAD_OPERATION_TYPE = "下载";
 
     // Health indicators injected by name
     @Resource(name = "database")
@@ -101,8 +102,8 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
             );
 
             // 今日下载次数 (从操作日志统计)
-            Long todayDownloads = operationLogMapper.selectOperationsBetween(
-                    todayStart, LocalDateTime.now()
+            Long todayDownloads = operationLogMapper.countOperationsByTypeBetween(
+                    DOWNLOAD_OPERATION_TYPE, todayStart, LocalDateTime.now()
             );
 
             // 区块链交易数

@@ -93,7 +93,7 @@ class SystemMonitorServiceImplTest {
         void shouldReturnSystemStatsWithAllFields() {
             when(accountMapper.selectCount(any())).thenReturn(100L);
             when(fileMapper.selectCount(any())).thenReturn(500L);
-            when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(50L);
+            when(operationLogMapper.countOperationsByTypeBetween(eq("下载"), any(), any())).thenReturn(2L);
 
             BlockChainMessage chainMessage = new BlockChainMessage(null, 1000L, null, null, null);
             when(fileRemoteClient.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
@@ -103,8 +103,10 @@ class SystemMonitorServiceImplTest {
             assertThat(result).isNotNull();
             assertThat(result.totalUsers()).isEqualTo(100L);
             assertThat(result.totalFiles()).isEqualTo(500L);
-            assertThat(result.todayDownloads()).isEqualTo(50L);
+            assertThat(result.todayDownloads()).isEqualTo(2L);
             assertThat(result.totalTransactions()).isEqualTo(1000L);
+            verify(operationLogMapper).countOperationsByTypeBetween(eq("下载"), any(), any());
+            verify(operationLogMapper, never()).selectOperationsBetween(any(), any());
         }
 
         @Test
@@ -112,7 +114,7 @@ class SystemMonitorServiceImplTest {
         void shouldReturnZeroWhenBlockchainFails() {
             when(accountMapper.selectCount(any())).thenReturn(100L);
             when(fileMapper.selectCount(any())).thenReturn(500L);
-            when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(50L);
+            when(operationLogMapper.countOperationsByTypeBetween(eq("下载"), any(), any())).thenReturn(0L);
             when(fileRemoteClient.getCurrentBlockChainMessage()).thenThrow(new RuntimeException("Chain error"));
 
             SystemStatsVO result = systemMonitorService.getSystemStats();
@@ -126,7 +128,7 @@ class SystemMonitorServiceImplTest {
         void shouldHandleNullBlockchainResponse() {
             when(accountMapper.selectCount(any())).thenReturn(100L);
             when(fileMapper.selectCount(any())).thenReturn(500L);
-            when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(50L);
+            when(operationLogMapper.countOperationsByTypeBetween(eq("下载"), any(), any())).thenReturn(0L);
             when(fileRemoteClient.getCurrentBlockChainMessage()).thenReturn(null);
 
             SystemStatsVO result = systemMonitorService.getSystemStats();
@@ -310,7 +312,7 @@ class SystemMonitorServiceImplTest {
         void shouldAggregateAllMetrics() {
             when(accountMapper.selectCount(any())).thenReturn(100L);
             when(fileMapper.selectCount(any())).thenReturn(500L);
-            when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(50L);
+            when(operationLogMapper.countOperationsByTypeBetween(eq("下载"), any(), any())).thenReturn(50L);
 
             BlockChainMessage chainMessage = new BlockChainMessage(100L, 1000L, null, null, null);
             when(fileRemoteClient.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
@@ -341,7 +343,7 @@ class SystemMonitorServiceImplTest {
 
             when(accountMapper.selectCount(any())).thenReturn(1L);
             when(fileMapper.selectCount(any())).thenReturn(1L);
-            when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(0L);
+            when(operationLogMapper.countOperationsByTypeBetween(eq("下载"), any(), any())).thenReturn(0L);
             when(fileRemoteClient.getCurrentBlockChainMessage()).thenReturn(Result.success(new BlockChainMessage(null, null, null, null, null)));
 
             Health upHealth = Health.up().build();

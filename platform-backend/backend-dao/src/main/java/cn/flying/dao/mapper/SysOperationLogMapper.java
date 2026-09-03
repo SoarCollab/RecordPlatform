@@ -5,6 +5,7 @@ import cn.flying.dao.vo.audit.AuditConfigVO;
 import cn.flying.dao.vo.audit.ErrorOperationStatsVO;
 import cn.flying.dao.vo.audit.HighFrequencyOperationVO;
 import cn.flying.dao.vo.audit.UserTimeDistributionVO;
+import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -72,6 +73,7 @@ public interface SysOperationLogMapper extends BaseMapper<SysOperationLog> {
      * @param cutoffTime 截止时间
      * @return 插入备份表的行数
      */
+    @InterceptorIgnore(tenantLine = "true")
     int insertOperationLogBackup(@Param("tenantId") Long tenantId, @Param("cutoffTime") LocalDateTime cutoffTime);
 
     /**
@@ -81,6 +83,7 @@ public interface SysOperationLogMapper extends BaseMapper<SysOperationLog> {
      * @param cutoffTime 截止时间
      * @return 删除行数
      */
+    @InterceptorIgnore(tenantLine = "true")
     int deleteOperationLogsBefore(@Param("tenantId") Long tenantId, @Param("cutoffTime") LocalDateTime cutoffTime);
 
     /**
@@ -91,6 +94,8 @@ public interface SysOperationLogMapper extends BaseMapper<SysOperationLog> {
             @Param("username") String username,
             @Param("module") String module,
             @Param("operationType") String operationType,
+            @Param("status") Integer status,
+            @Param("requestIp") String requestIp,
             @Param("startTime") String startTime,
             @Param("endTime") String endTime,
             @Param("limit") int limit,
@@ -105,6 +110,8 @@ public interface SysOperationLogMapper extends BaseMapper<SysOperationLog> {
             @Param("username") String username,
             @Param("module") String module,
             @Param("operationType") String operationType,
+            @Param("status") Integer status,
+            @Param("requestIp") String requestIp,
             @Param("startTime") String startTime,
             @Param("endTime") String endTime
     );
@@ -143,6 +150,20 @@ public interface SysOperationLogMapper extends BaseMapper<SysOperationLog> {
      * 查询指定时间范围内的操作日志数 (sys_operation_log)
      */
     Long selectOperationsBetween(@Param("startTime") LocalDateTime startTime, @Param("endTime") LocalDateTime endTime);
+
+    /**
+     * Count one operation type in a half-open time window for the current tenant.
+     *
+     * @param operationType canonical operation type
+     * @param startTime inclusive window start
+     * @param endTime exclusive window end
+     * @return matching operation count
+     */
+    Long countOperationsByTypeBetween(
+            @Param("operationType") String operationType,
+            @Param("startTime") LocalDateTime startTime,
+            @Param("endTime") LocalDateTime endTime
+    );
 
     /**
      * 查询总错误操作日志数 (sys_operation_log where status=1)

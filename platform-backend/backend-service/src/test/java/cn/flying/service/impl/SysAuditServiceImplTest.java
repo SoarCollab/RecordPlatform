@@ -161,12 +161,14 @@ class SysAuditServiceImplTest {
         @Test
         @DisplayName("should return sensitive operations with pagination")
         void shouldReturnSensitiveOperationsWithPagination() {
+            defaultQuery.setStatus(1);
+            defaultQuery.setRequestIp("10.1.0.2");
             SysOperationLog log = createOperationLog(1L);
             when(operationLogMapper.selectSensitiveOperations(
-                    any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+                    any(), any(), any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
                     .thenReturn(List.of(log));
             when(operationLogMapper.countSensitiveOperations(
-                    any(), any(), any(), any(), any(), any()))
+                    any(), any(), any(), any(), any(), any(), any(), any()))
                     .thenReturn(1L);
 
             IPage<SysOperationLog> result = sysAuditService.getSensitiveOperations(defaultQuery);
@@ -174,6 +176,12 @@ class SysAuditServiceImplTest {
             assertThat(result).isNotNull();
             assertThat(result.getRecords()).hasSize(1);
             assertThat(result.getTotal()).isEqualTo(1L);
+            verify(operationLogMapper).selectSensitiveOperations(
+                    isNull(), isNull(), isNull(), isNull(), eq(1), eq("10.1.0.2"),
+                    isNull(), isNull(), eq(10), eq(0));
+            verify(operationLogMapper).countSensitiveOperations(
+                    isNull(), isNull(), isNull(), isNull(), eq(1), eq("10.1.0.2"),
+                    isNull(), isNull());
         }
     }
 

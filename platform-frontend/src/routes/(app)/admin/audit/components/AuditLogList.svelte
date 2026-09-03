@@ -1,7 +1,11 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { formatDateTime } from "$utils/format";
-  import { getAuditLogs, getAuditLog } from "$api/endpoints/system";
+  import {
+    getAuditLogs,
+    getAuditLog,
+    getSensitiveOperations,
+  } from "$api/endpoints/system";
   import type {
     AuditLogVO,
     AuditLogQueryParams,
@@ -14,6 +18,7 @@
   import * as Card from "$components/ui/card";
   import DateTimePicker from "$components/ui/date-picker/date-time-picker.svelte";
   import LogDetailDialog from "./dialogs/LogDetailDialog.svelte";
+  import { mapSensitiveOperation } from "./audit-log-display";
   import { useNotifications } from "$stores/notifications.svelte";
   import {
     AUDIT_MODULES,
@@ -47,6 +52,7 @@
   let page = $state(1);
   let pageSize = $state(20);
   let total = $state(0);
+  let loadSequence = 0;
 
   let filterUsername = $state("");
   let filterUserId = $state("");
@@ -99,6 +105,7 @@
   });
 
   async function loadLogs() {
+    const requestSequence = ++loadSequence;
     loading = true;
     try {
       const params: AuditLogQueryParams & {
@@ -117,16 +124,25 @@
       if (filterStartTime) params.startTime = filterStartTime;
       if (filterEndTime) params.endTime = filterEndTime;
 
-      const result = await getAuditLogs(params);
-      logs = result.records;
-      total = result.total;
+      if (onlySensitive) {
+        const result = await getSensitiveOperations(params);
+        if (requestSequence !== loadSequence) return;
+        logs = result.records.map(mapSensitiveOperation);
+        total = result.total;
+      } else {
+        const result = await getAuditLogs(params);
+        if (requestSequence !== loadSequence) return;
+        logs = result.records;
+        total = result.total;
+      }
     } catch (err) {
+      if (requestSequence !== loadSequence) return;
       notifications.error(
         "加载失败",
         err instanceof Error ? err.message : "请稍后重试",
       );
     } finally {
-      loading = false;
+      if (requestSequence === loadSequence) loading = false;
     }
   }
 
@@ -190,13 +206,6 @@
       }
     }
   }
-
-  /** 显示的日志列表（考虑 onlySensitive 客户端过滤） */
-  const displayLogs = $derived(
-    onlySensitive
-      ? logs.filter((log) => isSensitiveOperation(log.action))
-      : logs,
-  );
 
   const totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
 </script>
@@ -313,7 +322,7 @@
             </Table.Row>
           </Table.Header>
           <Table.Body>
-            {#each displayLogs as log (log.id)}
+            {#each logs as log (log.id)}
               <Table.Row
                 class="hover:bg-muted/40 cursor-pointer"
                 onclick={() => openLogDetail(log)}
@@ -367,7 +376,7 @@
         </Table.Root>
       </div>
 
-      {#if displayLogs.length === 0}
+      {#if logs.length === 0}
         <div class="text-muted-foreground p-6 text-center text-sm">
           {onlySensitive ? "暂无敏感操作日志" : "暂无日志"}
         </div>

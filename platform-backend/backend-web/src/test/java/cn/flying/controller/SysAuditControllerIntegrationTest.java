@@ -17,6 +17,7 @@ import cn.flying.test.support.JwtTestSupport;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
@@ -40,6 +41,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
 
     private static final String BASE_URL = "/api/v1/system/audit";
+    private static final long MAPPER_TEST_TENANT = 929101L;
+    private static final long MAPPER_OTHER_TENANT = 929102L;
 
     @Autowired
     private AccountMapper accountMapper;
@@ -55,6 +58,9 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
 
     @Autowired
     private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private Account adminAccount;
     private Account monitorAccount;
@@ -130,6 +136,22 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
 
     private SysOperationLog createTestLog(Long userId, String username, String module,
                                           String operationType, Integer status) {
+        return createTestLog(
+                testTenantId,
+                userId,
+                username,
+                module,
+                operationType,
+                status,
+                LocalDateTime.now()
+        );
+    }
+
+    /**
+     * Creates one operation-log fixture for the specified tenant and timestamp.
+     */
+    private SysOperationLog createTestLog(Long tenantId, Long userId, String username, String module,
+                                          String operationType, Integer status, LocalDateTime operationTime) {
         SysOperationLog log = new SysOperationLog();
         log.setUserId(String.valueOf(userId));
         log.setUsername(username);
@@ -141,9 +163,9 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
         log.setRequestIp("127.0.0.1");
         log.setStatus(status);
         log.setExecutionTime(100L);
-        log.setOperationTime(LocalDateTime.now());
-        log.setTenantId(testTenantId);
-        TenantContext.runWithTenant(testTenantId, () -> operationLogMapper.insert(log));
+        log.setOperationTime(operationTime);
+        log.setTenantId(tenantId);
+        TenantContext.runWithTenantIsolation(tenantId, () -> operationLogMapper.insert(log));
         return log;
     }
 
@@ -353,14 +375,25 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
         @Test
         @DisplayName("should return sensitive operations")
         void shouldReturnSensitiveOperations() throws Exception {
+            String username = "sensitive-filter-user";
+            createTestLog(testUserId, username, "file", "查询", 0);
+            createTestLog(testUserId, username, "file", "删除", 0);
+            createTestLog(2L, 200L, username, "file", "删除", 0, LocalDateTime.now());
+
             AuditLogQueryVO queryVO = new AuditLogQueryVO();
             queryVO.setPageNum(1);
             queryVO.setPageSize(20);
+            queryVO.setUsername(username);
+            queryVO.setStatus(0);
+            queryVO.setRequestIp("127.0.0.1");
 
             performPost(BASE_URL + "/sensitive/page", queryVO)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
-                    .andExpect(jsonPath("$.data.records").isArray());
+                    .andExpect(jsonPath("$.data.total").value(1))
+                    .andExpect(jsonPath("$.data.records.length()").value(1))
+                    .andExpect(jsonPath("$.data.records[0].operationType").value("删除"))
+                    .andExpect(jsonPath("$.data.records[0].executionTime").value(100));
         }
     }
 
@@ -447,6 +480,46 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
     class BackupLogsTests {
 
         @Test
+        @DisplayName("should bypass tenant rewriting while keeping backup and cleanup tenant scoped")
+        void shouldKeepBackupAndCleanupTenantScoped() {
+            LocalDateTime oldOperationTime = LocalDateTime.now().minusDays(2);
+            LocalDateTime cutoffTime = LocalDateTime.now().minusDays(1);
+            SysOperationLog currentTenantLog = createTestLog(
+                    MAPPER_TEST_TENANT, testUserId, "backup-current", "audit", "备份", 0, oldOperationTime);
+            SysOperationLog otherTenantLog = createTestLog(
+                    MAPPER_OTHER_TENANT, 200L, "backup-other", "audit", "备份", 0, oldOperationTime);
+
+            int backedUp = operationLogMapper.insertOperationLogBackup(MAPPER_TEST_TENANT, cutoffTime);
+            int deleted = operationLogMapper.deleteOperationLogsBefore(MAPPER_TEST_TENANT, cutoffTime);
+
+            assertThat(backedUp).isEqualTo(1);
+            assertThat(deleted).isEqualTo(1);
+            assertThat(countBackupRowsById(currentTenantLog.getId())).isEqualTo(1);
+            assertThat(countBackupRowsById(otherTenantLog.getId())).isZero();
+            assertThat(countOperationRowsById(currentTenantLog.getId())).isZero();
+            assertThat(countOperationRowsById(otherTenantLog.getId())).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("should count only current-tenant downloads in the half-open window")
+        void shouldCountOnlyCurrentTenantDownloads() {
+            LocalDateTime startTime = LocalDateTime.now().minusMinutes(5);
+            LocalDateTime endTime = LocalDateTime.now().plusMinutes(5);
+            createTestLog(MAPPER_TEST_TENANT, testUserId, "download-query", "file", "查询", 0, LocalDateTime.now());
+            createTestLog(MAPPER_TEST_TENANT, testUserId, "download-update", "file", "修改", 0, LocalDateTime.now());
+            createTestLog(MAPPER_TEST_TENANT, testUserId, "download-current-1", "file", "下载", 0, LocalDateTime.now());
+            createTestLog(MAPPER_TEST_TENANT, testUserId, "download-current-2", "file", "下载", 0, LocalDateTime.now());
+            createTestLog(MAPPER_OTHER_TENANT, 200L, "download-other", "file", "下载", 0, LocalDateTime.now());
+
+            Long downloads = TenantContext.callWithTenantIsolation(
+                    MAPPER_TEST_TENANT,
+                    () -> operationLogMapper.countOperationsByTypeBetween("下载", startTime, endTime)
+            );
+
+            assertThat(downloads).isEqualTo(2L);
+        }
+
+        @Test
         @DisplayName("should backup logs with default parameters")
         void shouldBackupLogsWithDefaultParameters() throws Exception {
             performPost(BASE_URL + "/logs/backups?days=180&deleteAfterBackup=false", null)
@@ -461,6 +534,30 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
+    }
+
+    /**
+     * Counts one source-log fixture by ID without applying the application tenant interceptor.
+     */
+    private int countOperationRowsById(Long id) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sys_operation_log WHERE id = ?",
+                Integer.class,
+                id
+        );
+        return count == null ? 0 : count;
+    }
+
+    /**
+     * Counts one backup-log fixture by ID without applying the application tenant interceptor.
+     */
+    private int countBackupRowsById(Long id) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sys_operation_log_backup WHERE id = ?",
+                Integer.class,
+                id
+        );
+        return count == null ? 0 : count;
     }
 
     @Nested
