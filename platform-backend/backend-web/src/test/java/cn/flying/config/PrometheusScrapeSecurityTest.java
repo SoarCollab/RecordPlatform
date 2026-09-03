@@ -13,6 +13,7 @@ import cn.flying.filter.TenantFilter;
 import cn.flying.service.AccountService;
 import cn.flying.service.LoginSecurityService;
 import cn.flying.service.PermissionService;
+import cn.flying.service.auth.AuthorizationStateService;
 import com.auth0.jwt.interfaces.DecodedJWT;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
@@ -110,6 +111,7 @@ class PrometheusScrapeSecurityTest {
             factory.registerSingleton("jwtUtils", mock(JwtUtils.class));
             factory.registerSingleton("loginSecurityService", mock(LoginSecurityService.class));
             factory.registerSingleton("permissionService", mock(PermissionService.class));
+            factory.registerSingleton("authorizationStateService", mock(AuthorizationStateService.class));
         });
         context.register(TestConfiguration.class);
         context.refresh();
@@ -267,6 +269,35 @@ class PrometheusScrapeSecurityTest {
         longRequest.addHeader("X-Tenant-ID", "42");
         assertEquals(200, perform(longRequest).getStatus());
         verify(jwt).resolveJwt(longBearer);
+    }
+
+    /** Proves platform and tenant bearer identities cannot cross route families. */
+    @Test
+    void separatesPlatformAndTenantRouteFamilies() throws Exception {
+        start(false, "not-a-hash");
+        configureJwt("platform_admin", 0L, "platform", 3L);
+        configureJwt("admin", 42L, "tenant", 4L);
+
+        MockHttpServletRequest platformRoute = request("GET", "/api/v1/platform/tenants", "Bearer platform_admin");
+        platformRoute.addHeader("X-Tenant-ID", "0");
+        assertEquals(200, perform(platformRoute).getStatus());
+
+        MockHttpServletRequest platformOnTenant = request("GET", "/api/v1/files", "Bearer platform_admin");
+        platformOnTenant.addHeader("X-Tenant-ID", "0");
+        assertEquals(403, perform(platformOnTenant).getStatus());
+
+        MockHttpServletRequest tenantOnPlatform = request("GET", "/api/v1/platform/tenants", "Bearer admin");
+        tenantOnPlatform.addHeader("X-Tenant-ID", "42");
+        assertEquals(403, perform(tenantOnPlatform).getStatus());
+
+        MockHttpServletRequest tenantRoute = request("GET", "/api/v1/files", "Bearer admin");
+        tenantRoute.addHeader("X-Tenant-ID", "42");
+        assertEquals(200, perform(tenantRoute).getStatus());
+
+        MockHttpServletRequest wrongPlatformHeader = request(
+                "GET", "/api/v1/platform/tenants", "Bearer platform_admin");
+        wrongPlatformHeader.addHeader("X-Tenant-ID", "42");
+        assertEquals(403, perform(wrongPlatformHeader).getStatus());
     }
 
     /** Disable the new feature without changing the prior operator-only endpoint behavior. */
@@ -455,13 +486,22 @@ class PrometheusScrapeSecurityTest {
 
     /** Supply decoded tokens at the JWT boundary while exercising the production role/tenant filter. */
     private void configureJwt(String role) {
+        configureJwt(role, 42L, "tenant", 0L);
+    }
+
+    /** Supplies one exact role/scope/tenant token and an accepting current-state decision. */
+    private void configureJwt(String role, Long tenantId, String scope, Long authVersion) {
         JwtUtils jwt = context.getBean(JwtUtils.class);
         DecodedJWT token = mock(DecodedJWT.class);
         when(jwt.resolveJwt("Bearer " + role)).thenReturn(token);
         when(jwt.toId(token)).thenReturn(7L);
-        when(jwt.toTenantId(token)).thenReturn(42L);
+        when(jwt.toTenantId(token)).thenReturn(tenantId);
         when(jwt.toRole(token)).thenReturn(role);
+        when(jwt.toScope(token)).thenReturn(scope);
+        when(jwt.toAuthVersion(token)).thenReturn(authVersion);
         when(jwt.toUser(token)).thenReturn(User.withUsername("business-" + role).password("unused").roles(role).build());
+        when(context.getBean(AuthorizationStateService.class)
+                .isTokenAuthorized(7L, tenantId, role, scope, authVersion)).thenReturn(true);
     }
 
     /** Supply only application dependencies; the scrape manager must stay private to its filter. */

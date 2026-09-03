@@ -16,6 +16,7 @@ import cn.flying.service.attestation.AttestationBatchProductionRunResult;
 import cn.flying.service.attestation.AttestationBatchProductionService;
 import cn.flying.service.attestation.AttestationCandidateAdmissionResult;
 import cn.flying.service.attestation.AttestationCandidateClaim;
+import cn.flying.service.auth.AuthorizationStateService;
 import cn.flying.test.BaseIntegrationTest;
 import cn.flying.test.support.JwtTestSupport;
 import org.junit.jupiter.api.AfterEach;
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
@@ -37,6 +39,9 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -71,11 +76,17 @@ class AttestationBatchProductionIT extends BaseIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @MockitoBean
+    private AuthorizationStateService authorizationStateService;
+
     /**
      * 启用测试内生产路径，并把阈值限制为单文件/单 batch。
      */
     @BeforeEach
     void setUpProduction() {
+        lenient().when(authorizationStateService.isTokenAuthorized(
+                        anyLong(), anyLong(), anyString(), anyString(), anyLong()))
+                .thenReturn(true);
         TenantContext.setTenantId(TENANT_ID);
         properties.setEnabled(true);
         properties.setMinBatchSize(1);

@@ -36,6 +36,15 @@ public class Account implements BaseData {
     @Schema(description = "角色")
     private String role;
 
+    @Schema(description = "授权状态：1-启用，0-禁用")
+    private Integer status;
+
+    @Schema(description = "账户全会话撤销版本")
+    private Long authVersion;
+
+    @Schema(description = "最后成功登录时间")
+    private Date lastLoginTime;
+
     @Schema(description = "头像Url")
     private String avatar;
 

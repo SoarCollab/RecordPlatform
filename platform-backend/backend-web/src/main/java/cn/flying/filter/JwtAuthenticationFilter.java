@@ -7,6 +7,7 @@ import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.ErrorPayloadFactory;
 import cn.flying.common.util.JwtUtils;
+import cn.flying.service.auth.AuthorizationStateService;
 import com.auth0.jwt.interfaces.DecodedJWT;
 import jakarta.annotation.Resource;
 import jakarta.servlet.FilterChain;
@@ -47,6 +48,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Resource
     JwtUtils utils;
 
+    @Resource
+    AuthorizationStateService authorizationStateService;
+
     /**
      * 解析并校验 JWT，设置安全上下文与租户相关的日志上下文。
      */
@@ -73,10 +77,30 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 Long userId = utils.toId(jwt);
                 String userRole = utils.toRole(jwt);
                 Long jwtTenantId = utils.toTenantId(jwt);
+                String scope = utils.toScope(jwt);
+                Long authVersion = utils.toAuthVersion(jwt);
 
                 // 验证 JWT 中的 tenantId 与请求头一致（防止跨租户攻击）
                 if (!validateTenantMatch(headerTenantId, jwtTenantId, userId, response)) {
                     SecurityContextHolder.clearContext();
+                    return;
+                }
+
+
+                try {
+                    if (!authorizationStateService.isTokenAuthorized(
+                            userId, jwtTenantId, userRole, scope, authVersion)) {
+                        SecurityContextHolder.clearContext();
+                        sendAuthenticationFailure(response, HttpServletResponse.SC_UNAUTHORIZED,
+                                ResultEnum.PERMISSION_TOKEN_INVALID);
+                        return;
+                    }
+                } catch (RuntimeException exception) {
+                    log.error("Authorization state validation unavailable: exceptionType={}",
+                            exception.getClass().getSimpleName());
+                    SecurityContextHolder.clearContext();
+                    sendAuthenticationFailure(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE,
+                            ResultEnum.SERVICE_UNAVAILABLE);
                     return;
                 }
 
@@ -96,6 +120,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 // Store in request attributes
                 request.setAttribute(Const.ATTR_USER_ID, userId);
                 request.setAttribute(Const.ATTR_USER_ROLE, userRole);
+                request.setAttribute(Const.ATTR_AUTH_SCOPE, scope);
+                request.setAttribute(Const.ATTR_AUTH_VERSION, authVersion);
                 // 租户ID已由 TenantFilter 设置，这里不覆盖
 
                 // Set MDC for logging
@@ -119,6 +145,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             MDC.remove(Const.ATTR_TENANT_ID);
             TenantContext.clear();
         }
+    }
+
+    /** Writes a credential-free authentication failure response. */
+    private void sendAuthenticationFailure(
+            HttpServletResponse response,
+            int status,
+            ResultEnum resultEnum) throws IOException {
+        response.setStatus(status);
+        response.setContentType("application/json;charset=utf-8");
+        ErrorPayload payload = ErrorPayloadFactory.of(MDC.get(Const.TRACE_ID), null);
+        PrintWriter writer = response.getWriter();
+        writer.write(Result.error(resultEnum, payload).toJson());
+        writer.flush();
     }
 
     /**

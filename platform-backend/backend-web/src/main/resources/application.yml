@@ -76,6 +76,21 @@ record-platform:
   rpc:
     blockchain-token: ${BLOCKCHAIN_RPC_TOKEN}
 
+# Platform identity is opt-in until V1.21.0 is migrated and bootstrap is complete.
+security:
+  platform-identity:
+    enabled: ${PLATFORM_IDENTITY_ENABLED:false}
+  authorization-state:
+    cache-ttl: ${AUTHORIZATION_STATE_CACHE_TTL:30s}
+
+# One-time local password-file bootstrap. Never place password content in configuration.
+platform:
+  bootstrap:
+    enabled: ${PLATFORM_BOOTSTRAP_ENABLED:false}
+    username: ${PLATFORM_BOOTSTRAP_USERNAME:}
+    email: ${PLATFORM_BOOTSTRAP_EMAIL:}
+    password-file: ${PLATFORM_BOOTSTRAP_PASSWORD_FILE:}
+
 # springdoc-openapi项目配置
 springdoc:
   swagger-ui:

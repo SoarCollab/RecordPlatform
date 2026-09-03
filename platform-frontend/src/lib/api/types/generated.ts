@@ -3046,6 +3046,16 @@ export interface components {
             registerTime?: string;
             /** @description 角色 */
             role?: string;
+            /**
+             * @description 身份作用域：tenant 或 platform
+             * @enum {string}
+             */
+            scope: "tenant" | "platform";
+            /**
+             * Format: int32
+             * @description 授权状态：1-启用，0-禁用
+             */
+            status?: number;
             /** @description 用户名 */
             username?: string;
         };

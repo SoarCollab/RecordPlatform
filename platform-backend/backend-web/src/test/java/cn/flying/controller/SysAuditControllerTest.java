@@ -68,6 +68,9 @@ public class SysAuditControllerTest {
     @MockitoBean
     private cn.flying.common.util.JwtUtils jwtUtils;
 
+    @MockitoBean
+    private cn.flying.service.auth.AuthorizationStateService authorizationStateService;
+
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(

@@ -5,6 +5,7 @@
 export interface AuthorizeVO {
   username: string;
   role: string;
+  scope: "tenant" | "platform";
   token: string;
   expire: string; // ISO datetime
 }
@@ -21,6 +22,9 @@ export interface AccountVO {
   email?: string;
   avatar?: string;
   role: string;
+  scope: "tenant" | "platform";
+  /** 授权状态：1-启用，0-禁用 */
+  status?: number;
   registerTime: string;
   nickname?: string;
   /** 软删除标记：0-正常，1-已禁用 */

@@ -7,6 +7,7 @@ import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JwtUtils;
 import cn.flying.service.sse.SseEmitterManager;
+import cn.flying.service.auth.AuthorizationStateService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.Parameters;
@@ -39,6 +40,8 @@ public class SseController {
 
     private final JwtUtils jwtUtils;
 
+    private final AuthorizationStateService authorizationStateService;
+
     /**
      * 建立 SSE 连接（使用短期令牌）
      * 该端点使用一次性短期令牌进行认证，不使用常规 JWT
@@ -61,18 +64,18 @@ public class SseController {
                     name = "X-Tenant-ID",
                     in = ParameterIn.HEADER,
                     description = "可设置自定义请求头的客户端使用的Redis namespace提示，不作为可信租户身份",
-                    schema = @Schema(type = "integer", format = "int64", minimum = "1")),
+                    schema = @Schema(type = "integer", format = "int64", minimum = "0")),
             @Parameter(
                     name = "x-tenant-id",
                     in = ParameterIn.QUERY,
                     description = "Redis namespace提示；与旧tenantId参数二选一，不作为可信租户身份",
-                    schema = @Schema(type = "integer", format = "int64", minimum = "1")),
+                    schema = @Schema(type = "integer", format = "int64", minimum = "0")),
             @Parameter(
                     name = "tenantId",
                     in = ParameterIn.QUERY,
                     description = "旧客户端兼容的Redis namespace提示；建议改用x-tenant-id",
                     deprecated = true,
-                    schema = @Schema(type = "integer", format = "int64", minimum = "1"))
+                    schema = @Schema(type = "integer", format = "int64", minimum = "0"))
     })
     public ResponseEntity<SseEmitter> connect(
             @RequestParam("token") String sseToken,
@@ -100,6 +103,18 @@ public class SseController {
             return ResponseEntity.status(401).build();
         }
 
+        try {
+            if (!authorizationStateService.isSseIdentityAuthorized(
+                    identity.userId(), identity.tenantId(), identity.role(), identity.authVersion())) {
+                log.warn("SSE 连接失败: 当前授权状态无效");
+                return ResponseEntity.status(401).build();
+            }
+        } catch (RuntimeException exception) {
+            log.error("SSE 连接失败: 授权状态存储不可用, exceptionType={}",
+                    exception.getClass().getSimpleName());
+            return ResponseEntity.status(503).build();
+        }
+
         establishTrustedIdentity(request, identity);
         String connectionId = UUID.randomUUID().toString().replace("-", "");
 
@@ -113,21 +128,22 @@ public class SseController {
     /**
      * 解析并校验 Redis 中的一次性短令牌身份载荷。
      *
-     * @param userInfo 短令牌载荷 [userId, tenantId, role]
+     * @param userInfo 短令牌载荷 [userId, tenantId, role, authVersion]
      * @return 完整且受支持的身份；载荷损坏时返回 null
      */
     private SseIdentity parseSseIdentity(String[] userInfo) {
-        if (userInfo == null || userInfo.length != 3) {
+        if (userInfo == null || userInfo.length != 4) {
             return null;
         }
         try {
             long userId = Long.parseLong(userInfo[0]);
             long tenantId = Long.parseLong(userInfo[1]);
+            long authVersion = Long.parseLong(userInfo[3]);
             UserRole role = UserRole.getRole(userInfo[2]);
-            if (userId <= 0 || tenantId <= 0 || role == UserRole.ROLE_NOOP) {
+            if (userId <= 0 || tenantId < 0 || authVersion < 0 || !role.isTenantRole()) {
                 return null;
             }
-            return new SseIdentity(userId, tenantId, role.getRole());
+            return new SseIdentity(userId, tenantId, role.getRole(), authVersion);
         } catch (NumberFormatException e) {
             return null;
         }
@@ -144,6 +160,7 @@ public class SseController {
         request.setAttribute(Const.ATTR_TENANT_ID, identity.tenantId());
         request.setAttribute(Const.ATTR_USER_ID, identity.userId());
         request.setAttribute(Const.ATTR_USER_ROLE, identity.role());
+        request.setAttribute(Const.ATTR_AUTH_VERSION, identity.authVersion());
         MDC.put(Const.ATTR_TENANT_ID, identity.tenantId().toString());
         MDC.put(Const.ATTR_USER_ID, identity.userId().toString());
         MDC.put(Const.ATTR_USER_ROLE, identity.role());
@@ -152,7 +169,7 @@ public class SseController {
     /**
      * 短令牌中经校验的 SSE 身份。
      */
-    private record SseIdentity(Long userId, Long tenantId, String role) {
+    private record SseIdentity(Long userId, Long tenantId, String role, Long authVersion) {
     }
 
     @OperationLog(module = "实时推送", operationType = "删除", description = "断开SSE连接")

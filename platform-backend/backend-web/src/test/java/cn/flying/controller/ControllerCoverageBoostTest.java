@@ -133,6 +133,10 @@ class ControllerCoverageBoostTest {
     private PermissionService permissionService;
     @Mock
     private cn.flying.common.util.JwtUtils jwtUtils;
+    @Mock
+    private cn.flying.service.auth.AuthorizationStateService authorizationStateService;
+    @Mock
+    private com.auth0.jwt.interfaces.DecodedJWT decodedJwt;
 
     private AuthorizeController authorizeController;
     private AccountController accountController;
@@ -159,7 +163,7 @@ class ControllerCoverageBoostTest {
 
         ControllerUtils controllerUtils = new ControllerUtils();
 
-        authorizeController = new AuthorizeController(accountService, controllerUtils, jwtUtils);
+        authorizeController = new AuthorizeController(accountService, controllerUtils, jwtUtils, authorizationStateService);
         accountController = new AccountController(accountService, controllerUtils);
         messageController = new MessageController(messageService);
         conversationController = new ConversationController(conversationService, messageService);
@@ -213,6 +217,13 @@ class ControllerCoverageBoostTest {
 
         MockHttpServletRequest refreshRequest = new MockHttpServletRequest();
         refreshRequest.addHeader("Authorization", "Bearer old-token");
+        when(jwtUtils.resolveJwt("Bearer old-token")).thenReturn(decodedJwt).thenReturn(null);
+        when(jwtUtils.toId(decodedJwt)).thenReturn(1L);
+        when(jwtUtils.toTenantId(decodedJwt)).thenReturn(2L);
+        when(jwtUtils.toRole(decodedJwt)).thenReturn("user");
+        when(jwtUtils.toScope(decodedJwt)).thenReturn("tenant");
+        when(jwtUtils.toAuthVersion(decodedJwt)).thenReturn(0L);
+        when(authorizationStateService.isTokenAuthorized(1L, 2L, "user", "tenant", 0L)).thenReturn(true);
         when(jwtUtils.refreshJwt("Bearer old-token")).thenReturn("new-token").thenReturn(null);
         when(jwtUtils.expireTime()).thenReturn(new Date(1700000000000L));
         Result<RefreshTokenVO> refreshSuccess = authorizeController.refreshAccessToken(refreshRequest);
@@ -225,7 +236,8 @@ class ControllerCoverageBoostTest {
         sseRequest.setAttribute(Const.ATTR_USER_ID, 1L);
         sseRequest.setAttribute(Const.ATTR_TENANT_ID, 2L);
         sseRequest.setAttribute(Const.ATTR_USER_ROLE, "user");
-        when(jwtUtils.createSseToken(1L, 2L, "user")).thenReturn("sse-token");
+        sseRequest.setAttribute(Const.ATTR_AUTH_VERSION, 0L);
+        when(jwtUtils.createSseToken(1L, 2L, "user", 0L)).thenReturn("sse-token");
         Result<SseTokenVO> sseResult = authorizeController.issueSseToken(sseRequest);
         assertEquals(ResultEnum.SUCCESS.getCode(), sseResult.getCode());
         assertEquals("sse-token", sseResult.getData().getSseToken());
@@ -252,6 +264,33 @@ class ControllerCoverageBoostTest {
         when(accountService.changePassword(eq(1L), any(ChangePasswordVO.class))).thenReturn(null);
         Result<String> changePasswordRest = accountController.updatePassword(1L, new ChangePasswordVO());
         assertEquals(ResultEnum.SUCCESS.getCode(), changePasswordRest.getCode());
+    }
+
+    /** Covers refresh failure-closed decisions for stale state and unavailable dependencies. */
+    @Test
+    void shouldFailClosedForInvalidRefreshAuthorizationState() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer old-token");
+        when(jwtUtils.resolveJwt("Bearer old-token")).thenReturn(decodedJwt);
+        when(jwtUtils.toId(decodedJwt)).thenReturn(1L);
+        when(jwtUtils.toTenantId(decodedJwt)).thenReturn(2L);
+        when(jwtUtils.toRole(decodedJwt)).thenReturn("user");
+        when(jwtUtils.toScope(decodedJwt)).thenReturn("tenant");
+        when(jwtUtils.toAuthVersion(decodedJwt)).thenReturn(0L);
+        when(authorizationStateService.isTokenAuthorized(1L, 2L, "user", "tenant", 0L))
+                .thenReturn(false)
+                .thenThrow(new IllegalStateException("redis unavailable"))
+                .thenReturn(true);
+        when(jwtUtils.refreshJwt("Bearer old-token"))
+                .thenThrow(new IllegalStateException("redis unavailable"));
+
+        Result<RefreshTokenVO> stale = authorizeController.refreshAccessToken(request);
+        Result<RefreshTokenVO> stateUnavailable = authorizeController.refreshAccessToken(request);
+        Result<RefreshTokenVO> refreshUnavailable = authorizeController.refreshAccessToken(request);
+
+        assertEquals(ResultEnum.PERMISSION_TOKEN_EXPIRED.getCode(), stale.getCode());
+        assertEquals(ResultEnum.SERVICE_UNAVAILABLE.getCode(), stateUnavailable.getCode());
+        assertEquals(ResultEnum.SERVICE_UNAVAILABLE.getCode(), refreshUnavailable.getCode());
     }
 
     /**

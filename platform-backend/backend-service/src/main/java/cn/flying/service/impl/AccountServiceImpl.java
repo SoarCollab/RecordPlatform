@@ -7,8 +7,10 @@ import cn.flying.common.util.FlowUtils;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.mapper.AccountMapper;
+import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.dao.vo.auth.*;
 import cn.flying.service.AccountService;
+import cn.flying.service.auth.AccountSessionRevocationService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +22,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.util.Collection;
@@ -52,6 +55,17 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
     private final StringRedisTemplate stringRedisTemplate;
     private final PasswordEncoder passwordEncoder;
     private final FlowUtils flow;
+    private final AccountSessionRevocationService accountSessionRevocationService;
+    private final TenantMapper tenantMapper;
+
+    /**
+     * Enforces the platform-account tenant invariant at the service provisioning boundary.
+     */
+    @Override
+    public boolean save(Account account) {
+        validateAccountIdentity(account);
+        return super.save(account);
+    }
 
     /**
      * 从数据库中通过用户名或邮箱查找用户详细信息
@@ -209,13 +223,20 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
      * @return 操作结果，null表示正常，否则为错误原因
      */
     @Override
+    @Transactional
     public String resetEmailAccountPassword(EmailResetVO info) {
         String verify = resetConfirm(new ConfirmResetVO(info.getEmail(), info.getCode()));
         if(verify != null) return verify;
         String email = info.getEmail();
+        Account account = findAccountByNameOrEmail(email);
+        if (account == null) {
+            return "更新失败，请联系管理员";
+        }
         String password = passwordEncoder.encode(info.getPassword());
-        boolean update = this.update().eq("email", email).set("password", password).update();
+        boolean update = baseMapper.updatePasswordAndIncrementAuthVersion(
+                account.getTenantId(), account.getId(), password) == 1;
         if(update) {
+            accountSessionRevocationService.invalidateAfterVersionChange(account.getTenantId(), account.getId());
             this.deleteEmailVerifyCode(email);
         }
         return update ? null : "更新失败，请联系管理员";
@@ -267,6 +288,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
      * @return 操作结果，null表示正常，否则为错误原因
      */
     @Override
+    @Transactional
     public String changePassword(Long userId, ChangePasswordVO changePasswordVO) {
         Account account = this.query().eq("id", userId).one();
         if (account == null) {
@@ -275,10 +297,66 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
         if (!passwordEncoder.matches(changePasswordVO.getPassword(), account.getPassword())) {
             return "原密码错误，请重新输入";
         }
-        boolean success = this.update().eq("id", userId)
-                .set("password", passwordEncoder.encode(changePasswordVO.getNew_password()))
-                .update();
+        boolean success = this.baseMapper.updatePasswordAndIncrementAuthVersion(
+                account.getTenantId(),
+                userId,
+                passwordEncoder.encode(changePasswordVO.getNew_password())) == 1;
+        if (success) {
+            accountSessionRevocationService.invalidateAfterVersionChange(account.getTenantId(), userId);
+        }
         return success ? null : "更新失败，请联系管理员";
+    }
+
+    /**
+     * Creates an active platform administrator only in system tenant zero.
+     */
+    @Override
+    @Transactional
+    public Account createPlatformAdministrator(String username, String email, String passwordHash) {
+        if (!Objects.equals(tenantMapper.lockSystemTenantForPlatformBootstrap(), 0L)) {
+            throw new IllegalStateException("System tenant is unavailable for platform administrator bootstrap");
+        }
+        if (baseMapper.countPlatformAdministrators() != 0) {
+            throw new IllegalStateException("Platform administrator bootstrap requires an empty platform administrator set");
+        }
+        Account account = new Account();
+        account.setId(IdUtils.nextUserId());
+        account.setTenantId(0L);
+        account.setUsername(username);
+        account.setEmail(email);
+        account.setPassword(passwordHash);
+        account.setRole(UserRole.ROLE_PLATFORM_ADMIN.getRole());
+        account.setStatus(1);
+        account.setAuthVersion(0L);
+        account.setRegisterTime(new java.util.Date());
+        account.setUpdateTime(new java.util.Date());
+        account.setDeleted(0);
+        if (!save(account)) {
+            throw new IllegalStateException("Platform administrator bootstrap failed");
+        }
+        return account;
+    }
+
+    /** Records the last successful login without changing token authorization state. */
+    @Override
+    public void recordSuccessfulLogin(Account account) {
+        if (account == null || baseMapper.updateLastLoginTime(account.getTenantId(), account.getId()) != 1) {
+            throw new IllegalStateException("Login state update failed");
+        }
+    }
+
+    /** Validates closed-set account role and platform tenant binding before persistence. */
+    private void validateAccountIdentity(Account account) {
+        if (account == null) {
+            throw new IllegalArgumentException("Account is required");
+        }
+        UserRole role = UserRole.getRole(account.getRole());
+        if (role == UserRole.ROLE_NOOP) {
+            throw new IllegalArgumentException("Unsupported account role");
+        }
+        if (role == UserRole.ROLE_PLATFORM_ADMIN && !Objects.equals(account.getTenantId(), 0L)) {
+            throw new IllegalArgumentException("Platform administrator must belong to system tenant zero");
+        }
     }
 
     /**

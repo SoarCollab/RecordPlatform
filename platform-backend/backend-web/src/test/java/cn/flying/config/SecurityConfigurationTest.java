@@ -1,19 +1,47 @@
 package cn.flying.config;
 
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.util.JwtUtils;
+import cn.flying.dao.dto.Account;
+import cn.flying.service.AccountService;
+import cn.flying.service.LoginSecurityService;
+import cn.flying.service.auth.AuthorizationStateService;
+import cn.flying.test.support.JwtTestSupport;
+import com.auth0.jwt.JWT;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.User;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Date;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * SecurityConfiguration 单元测试。
  */
 class SecurityConfigurationTest {
+
+    /** Keeps the shared controller-integration token aligned with mandatory production identity claims. */
+    @Test
+    void shouldGenerateCurrentAuthorizationClaimsForControllerIntegrationTests() {
+        var token = JWT.decode(JwtTestSupport.generateToken());
+
+        assertThat(token.getClaim("scope").asString()).isEqualTo("tenant");
+        assertThat(token.getClaim("authVersion").asLong()).isZero();
+        assertThat(token.getClaim("authorities").asList(String.class)).containsExactly("ROLE_user");
+    }
 
     /**
      * 验证生产 context-path 下的登录请求仍会被识别为登录接口。
@@ -146,5 +174,94 @@ class SecurityConfigurationTest {
         assertTrue(applicationYaml.contains("trusted-proxies: ${RATE_LIMIT_TRUSTED_PROXY_CIDRS:}"));
         assertFalse(applicationYaml.contains("forward-headers-strategy: native"));
         assertFalse(applicationYaml.contains("forward-headers-strategy: framework"));
+    }
+
+    /** Keeps platform identity and its password-file bootstrap explicitly disabled by default. */
+    @Test
+    void shouldDefaultPlatformIdentityAndBootstrapToDisabled() throws Exception {
+        String applicationYaml = Files.readString(Path.of("src/main/resources/application.yml"));
+
+        assertTrue(applicationYaml.contains("enabled: ${PLATFORM_IDENTITY_ENABLED:false}"));
+        assertTrue(applicationYaml.contains("enabled: ${PLATFORM_BOOTSTRAP_ENABLED:false}"));
+        assertTrue(applicationYaml.contains("password-file: ${PLATFORM_BOOTSTRAP_PASSWORD_FILE:}"));
+        assertFalse(applicationYaml.contains("platform-admin-password"));
+    }
+
+    /** Places the platform route family before the tenant catch-all and keeps both role sets disjoint. */
+    @Test
+    void shouldSeparatePlatformAndTenantRouteFamilies() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/cn/flying/config/SecurityConfiguration.java"));
+        int platformMatcher = source.indexOf(".requestMatchers(\"/api/v1/platform/**\")");
+        int tenantCatchAll = source.indexOf(".anyRequest().hasAnyRole(");
+
+        assertTrue(platformMatcher > 0);
+        assertTrue(tenantCatchAll > platformMatcher);
+        String tenantRule = source.substring(tenantCatchAll, source.indexOf(")\n                )", tenantCatchAll));
+        assertFalse(tenantRule.contains("ROLE_PLATFORM_ADMIN"));
+    }
+
+    /** Login fails closed when current authorization state is stale or unavailable. */
+    @Test
+    void shouldFailClosedBeforeIssuingLoginToken() throws Exception {
+        SecurityConfiguration configuration = new SecurityConfiguration();
+        AccountService accountService = mock(AccountService.class);
+        AuthorizationStateService authorizationStateService = mock(AuthorizationStateService.class);
+        LoginSecurityService loginSecurityService = mock(LoginSecurityService.class);
+        JwtUtils jwtUtils = mock(JwtUtils.class);
+        ReflectionTestUtils.setField(configuration, "service", accountService);
+        ReflectionTestUtils.setField(configuration, "authorizationStateService", authorizationStateService);
+        ReflectionTestUtils.setField(configuration, "loginSecurityService", loginSecurityService);
+        ReflectionTestUtils.setField(configuration, "utils", jwtUtils);
+        Account account = new Account();
+        account.setId(1L);
+        account.setTenantId(1L);
+        account.setUsername("operator");
+        account.setRole("user");
+        account.setAuthVersion(0L);
+        when(accountService.findAccountByNameOrEmail("operator")).thenReturn(account);
+        when(authorizationStateService.isLoginAuthorized(account))
+                .thenReturn(false)
+                .thenThrow(new IllegalStateException("redis unavailable"))
+                .thenReturn(true, true);
+        when(jwtUtils.createJwt(any(), eq("operator"), eq(1L), eq(1L), eq(0L)))
+                .thenReturn(null, "jwt-token");
+        when(jwtUtils.expireTime()).thenReturn(new Date(1700000000000L));
+        Authentication authentication = mock(Authentication.class);
+        when(authentication.getPrincipal()).thenReturn(User.withUsername("operator")
+                .password("unused")
+                .roles("user")
+                .build());
+
+        MockHttpServletResponse staleResponse = invokeLoginSuccess(configuration, authentication);
+        MockHttpServletResponse unavailableResponse = invokeLoginSuccess(configuration, authentication);
+        MockHttpServletResponse rateLimitedResponse = invokeLoginSuccess(configuration, authentication);
+        MockHttpServletResponse successResponse = invokeLoginSuccess(configuration, authentication);
+
+        assertThat(staleResponse.getContentAsString()).contains("\"code\":" + ResultEnum.USER_LOGIN_ERROR.getCode());
+        assertThat(unavailableResponse.getContentAsString())
+                .contains("\"code\":" + ResultEnum.SERVICE_UNAVAILABLE.getCode());
+        assertThat(rateLimitedResponse.getContentAsString())
+                .contains("\"code\":" + ResultEnum.PERMISSION_LIMIT.getCode());
+        assertThat(successResponse.getContentAsString())
+                .contains("\"code\":" + ResultEnum.SUCCESS.getCode())
+                .contains("\"token\":\"jwt-token\"")
+                .contains("\"scope\":\"tenant\"");
+        verify(accountService).recordSuccessfulLogin(account);
+    }
+
+    /** Invokes the private login-success handler with a writable mock servlet response. */
+    private MockHttpServletResponse invokeLoginSuccess(
+            SecurityConfiguration configuration,
+            Authentication authentication) throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        ReflectionTestUtils.invokeMethod(
+                configuration,
+                "handleLoginSuccess",
+                "operator",
+                authentication,
+                response.getWriter(),
+                request);
+        return response;
     }
 }

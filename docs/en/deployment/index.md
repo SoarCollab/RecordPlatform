@@ -9,6 +9,7 @@ Deployment and operations guide for RecordPlatform.
 - [Production](production.md) - Production environment setup
 - [Monitoring](monitoring) - Metrics, alerts, and health checks
 - [Container releases](container-release) - Public GHCR packages and anonymous pull verification
+- [Platform administrator bootstrap](platform-administrator-bootstrap) - One-time local password-file provisioning and recovery boundary
 
 ## Deployment Options
 

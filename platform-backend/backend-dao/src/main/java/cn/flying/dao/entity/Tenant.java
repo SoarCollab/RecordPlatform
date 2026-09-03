@@ -29,6 +29,14 @@ public class Tenant {
 
     private Integer status;
 
+    private Long version;
+
+    private String disabledReason;
+
+    private Date disabledAt;
+
+    private Long disabledBy;
+
     @TableLogic
     @Schema(description = "逻辑删除标记 0=正常 1=已删除")
     private Integer deleted;

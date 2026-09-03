@@ -6,6 +6,7 @@ import com.auth0.jwt.algorithms.Algorithm;
 import com.auth0.jwt.exceptions.JWTVerificationException;
 import com.auth0.jwt.interfaces.Claim;
 import com.auth0.jwt.interfaces.DecodedJWT;
+import cn.flying.common.constant.UserRole;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -174,11 +175,18 @@ public class JwtUtils {
     }
 
     /**
-     * 根据UserDetails生成对应的Jwt令牌
-     * @param user 用户信息
-     * @return 令牌
+     * Creates a JWT containing the immutable identity scope and current account authorization version.
+     *
+     * @param user current authenticated principal
+     * @param username canonical username
+     * @param userId account identifier
+     * @param tenantId identity tenant identifier
+     * @param authVersion current account-wide session version
+     * @return signed JWT, or null when issuance is rate limited
      */
-    public String createJwt(UserDetails user, String username, Long userId, Long tenantId) {
+    public String createJwt(UserDetails user, String username, Long userId, Long tenantId, Long authVersion) {
+        String role = roleFromAuthorities(user);
+        String scope = requireScope(role, tenantId, authVersion);
         if(this.frequencyCheck(userId)) {
             Date expire = this.expireTime();
             return JWT.create()
@@ -188,9 +196,9 @@ public class JwtUtils {
                     .withClaim("id", userId)
                     .withClaim("tenantId", tenantId)
                     .withClaim("name", username)
-                    .withClaim("authorities", user.getAuthorities()
-                            .stream()
-                            .map(GrantedAuthority::getAuthority).toList())
+                    .withClaim("scope", scope)
+                    .withClaim("authVersion", authVersion)
+                    .withClaim("authorities", java.util.List.of("ROLE_" + role))
                     .withExpiresAt(expire)
                     .withIssuedAt(new Date())
                     .sign(algorithm);
@@ -211,13 +219,16 @@ public class JwtUtils {
         }
         try {
             DecodedJWT verify = verifier.verify(token);
+            Map<String, Claim> claims = verify.getClaims();
+            if (!hasRequiredIdentityClaims(verify, claims)) {
+                return null;
+            }
             if(this.isInvalidToken(verify.getId())) {
                 return null;
             }
-            Map<String, Claim> claims = verify.getClaims();
             return new Date().after(claims.get("exp").asDate()) ? null : verify;
-        } catch (JWTVerificationException e) {
-            log.debug("JWT verification failed: {}", e.getMessage());
+        } catch (RuntimeException e) {
+            log.debug("JWT verification failed: exceptionType={}", e.getClass().getSimpleName());
             return null;
         }
     }
@@ -252,21 +263,7 @@ public class JwtUtils {
      * @return 用户角色（如 "admin", "monitor", "user"）
      */
     public String toRole(DecodedJWT jwt) {
-        Map<String, Claim> claims = jwt.getClaims();
-        Claim authoritiesClaim = claims.get("authorities");
-        if (authoritiesClaim == null || authoritiesClaim.isNull()) {
-            return null;
-        }
-        java.util.List<String> authorities = authoritiesClaim.asList(String.class);
-        if (authorities == null || authorities.isEmpty()) {
-            return null;
-        }
-        // 提取第一个角色，并去除 "ROLE_" 前缀以匹配 UserRole 枚举
-        String role = authorities.get(0);
-        if (role != null && role.startsWith("ROLE_")) {
-            return role.substring(5); // 去除 "ROLE_" 前缀
-        }
-        return role;
+        return toRoleFromClaims(jwt.getClaims());
     }
 
     /**
@@ -278,6 +275,28 @@ public class JwtUtils {
         Map<String, Claim> claims = jwt.getClaims();
         Claim tenantClaim = claims.get("tenantId");
         return tenantClaim == null ? null : tenantClaim.asLong();
+    }
+
+    /**
+     * Extracts the closed-set identity scope from a verified JWT.
+     *
+     * @param jwt verified JWT
+     * @return tenant or platform, otherwise null
+     */
+    public String toScope(DecodedJWT jwt) {
+        Claim claim = jwt.getClaims().get("scope");
+        return claim == null ? null : claim.asString();
+    }
+
+    /**
+     * Extracts the account-wide authorization version from a verified JWT.
+     *
+     * @param jwt verified JWT
+     * @return authorization version, otherwise null
+     */
+    public Long toAuthVersion(DecodedJWT jwt) {
+        Claim claim = jwt.getClaims().get("authVersion");
+        return claim == null ? null : claim.asLong();
     }
 
     /**
@@ -297,6 +316,8 @@ public class JwtUtils {
         Long tenantId = claims.get("tenantId") != null ? claims.get("tenantId").asLong() : null;
         String username = claims.get("name").asString();
         String[] authorities = claims.get("authorities").asArray(String.class);
+        String scope = claims.get("scope").asString();
+        Long authVersion = claims.get("authVersion").asLong();
 
         // 频率检测
         if (!this.frequencyCheck(userId)) {
@@ -316,6 +337,8 @@ public class JwtUtils {
                 .withClaim("id", userId)
                 .withClaim("tenantId", tenantId)
                 .withClaim("name", username)
+                .withClaim("scope", scope)
+                .withClaim("authVersion", authVersion)
                 .withClaim("authorities", java.util.Arrays.asList(authorities))
                 .withExpiresAt(expire)
                 .withIssuedAt(new Date())
@@ -323,6 +346,78 @@ public class JwtUtils {
 
         log.info("Token refreshed for user: {}", userId);
         return newToken;
+    }
+
+    /**
+     * Resolves the single role authority used by the platform identity model.
+     */
+    private String roleFromAuthorities(UserDetails user) {
+        java.util.List<String> roles = user.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .filter(authority -> authority != null && authority.startsWith("ROLE_"))
+                .map(authority -> authority.substring(5))
+                .distinct()
+                .toList();
+        if (roles.size() != 1 || UserRole.getRole(roles.getFirst()) == UserRole.ROLE_NOOP) {
+            throw new IllegalArgumentException("Exactly one supported role authority is required");
+        }
+        return roles.getFirst();
+    }
+
+    /**
+     * Validates role, tenant and version before writing identity claims.
+     */
+    private String requireScope(String role, Long tenantId, Long authVersion) {
+        UserRole userRole = UserRole.getRole(role);
+        String scope = userRole.scope();
+        if (scope == null || tenantId == null || tenantId < 0 || authVersion == null || authVersion < 0) {
+            throw new IllegalArgumentException("Invalid authorization identity");
+        }
+        if (userRole == UserRole.ROLE_PLATFORM_ADMIN && tenantId != 0L) {
+            throw new IllegalArgumentException("Invalid authorization identity");
+        }
+        return scope;
+    }
+
+    /**
+     * Rejects pre-rollout or malformed identity tokens before authorization state lookup.
+     */
+    private boolean hasRequiredIdentityClaims(DecodedJWT jwt, Map<String, Claim> claims) {
+        try {
+            Long id = claims.get("id").asLong();
+            Long tenantId = claims.get("tenantId").asLong();
+            Long authVersion = claims.get("authVersion").asLong();
+            String name = claims.get("name").asString();
+            String scope = claims.get("scope").asString();
+            String role = toRoleFromClaims(claims);
+            UserRole userRole = UserRole.getRole(role);
+            return StringUtils.hasText(jwt.getId())
+                    && StringUtils.hasText(name)
+                    && claims.get("exp").asDate() != null
+                    && id != null && id > 0
+                    && tenantId != null && tenantId >= 0
+                    && authVersion != null && authVersion >= 0
+                    && scope != null && scope.equals(userRole.scope())
+                    && (userRole != UserRole.ROLE_PLATFORM_ADMIN || tenantId == 0L);
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    /**
+     * Extracts the first role authority from raw claims without trusting arbitrary authorities.
+     */
+    private String toRoleFromClaims(Map<String, Claim> claims) {
+        Claim authoritiesClaim = claims.get("authorities");
+        if (authoritiesClaim == null || authoritiesClaim.isNull()) {
+            return null;
+        }
+        java.util.List<String> authorities = authoritiesClaim.asList(String.class);
+        if (authorities == null || authorities.size() != 1) {
+            return null;
+        }
+        String authority = authorities.get(0);
+        return authority != null && authority.startsWith("ROLE_") ? authority.substring(5) : null;
     }
 
     /**
@@ -393,15 +488,24 @@ public class JwtUtils {
      * @param userId   用户ID
      * @param tenantId 租户ID
      * @param role     用户角色
+     * @param authVersion 签发 JWT 中已经验证的账户授权版本
      * @return SSE 短期令牌
      */
-    public String createSseToken(Long userId, Long tenantId, String role) {
+    public String createSseToken(Long userId, Long tenantId, String role, Long authVersion) {
+        UserRole userRole = UserRole.getRole(role);
+        if (userId == null || userId <= 0 || tenantId == null || tenantId < 0
+                || !userRole.isTenantRole() || authVersion == null || authVersion < 0) {
+            throw new IllegalArgumentException("Invalid SSE authorization identity");
+        }
         String token = UUID.randomUUID().toString().replace("-", "");
-        String key = TenantKeyUtils.tenantKey(Const.SSE_TOKEN_PREFIX + token);
+        String key = TenantKeyUtils.tenantKey(Const.SSE_TOKEN_PREFIX + token, tenantId);
+        String userIndexKey = TenantKeyUtils.tenantKey(Const.SSE_TOKEN_USER_INDEX_PREFIX + userId, tenantId);
 
-        // 存储用户信息到 Redis，格式：userId:tenantId:role
-        String value = userId + ":" + tenantId + ":" + role;
+        // 存储用户信息到 Redis，格式：userId:tenantId:role:authVersion
+        String value = userId + ":" + tenantId + ":" + role + ":" + authVersion;
         template.opsForValue().set(key, value, Const.SSE_TOKEN_TTL, TimeUnit.SECONDS);
+        template.opsForSet().add(userIndexKey, key);
+        template.expire(userIndexKey, Const.SSE_TOKEN_TTL, TimeUnit.SECONDS);
 
         log.debug("SSE token created: userId={}, tenantId={}", userId, tenantId);
         return token;
@@ -412,7 +516,7 @@ public class JwtUtils {
      * 验证成功后立即删除令牌，防止重放攻击
      *
      * @param token SSE 令牌
-     * @return 用户信息数组 [userId, tenantId, role]，验证失败返回 null
+     * @return 用户信息数组 [userId, tenantId, role, authVersion]，验证失败返回 null
      */
     public String[] validateAndConsumeSseToken(String token) {
         if (token == null || token.isEmpty()) {
@@ -429,12 +533,43 @@ public class JwtUtils {
         }
 
         String[] parts = value.split(":", -1);
-        if (parts.length != 3) {
+        if (parts.length != 4) {
             log.warn("Invalid SSE token payload format");
+            return null;
+        }
+
+        try {
+            Long userId = Long.parseLong(parts[0]);
+            Long tenantId = Long.parseLong(parts[1]);
+            Long authVersion = Long.parseLong(parts[3]);
+            if (userId <= 0 || tenantId < 0 || authVersion < 0
+                    || !UserRole.getRole(parts[2]).isTenantRole()) {
+                log.warn("Invalid SSE token payload identity");
+                return null;
+            }
+            String userIndexKey = TenantKeyUtils.tenantKey(Const.SSE_TOKEN_USER_INDEX_PREFIX + userId, tenantId);
+            template.opsForSet().remove(userIndexKey, key);
+        } catch (NumberFormatException exception) {
+            log.warn("Invalid SSE token payload identity");
             return null;
         }
 
         log.debug("SSE token consumed");
         return parts;
+    }
+
+    /**
+     * Deletes every outstanding SSE short token tracked for one account.
+     *
+     * @param tenantId account tenant
+     * @param userId account identifier
+     */
+    public void invalidateUserSseTokens(Long tenantId, Long userId) {
+        String indexKey = TenantKeyUtils.tenantKey(Const.SSE_TOKEN_USER_INDEX_PREFIX + userId, tenantId);
+        java.util.Set<String> tokenKeys = template.opsForSet().members(indexKey);
+        if (tokenKeys != null && !tokenKeys.isEmpty()) {
+            template.delete(tokenKeys);
+        }
+        template.delete(indexKey);
     }
 }

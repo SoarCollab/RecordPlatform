@@ -2,6 +2,7 @@ package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
+import cn.flying.common.constant.UserRole;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.ControllerUtils;
 import cn.flying.dao.dto.Account;
@@ -48,7 +49,9 @@ public class AccountController {
     @OperationLog(module = "用户模块", operationType = "查询", description = "获取用户信息")
     public Result<AccountVO> getAccountInfo(@RequestAttribute(Const.ATTR_USER_ID) Long userId) {
         Account account = accountService.findAccountById(userId);
-        return Result.success(account.asViewObject(AccountVO.class));
+        AccountVO view = account.asViewObject(AccountVO.class);
+        view.setScope(UserRole.getRole(account.getRole()).scope());
+        return Result.success(view);
     }
 
     /**
@@ -65,7 +68,9 @@ public class AccountController {
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @RequestBody @Valid UpdateUserVO vo) {
         Account account = accountService.updateUserInfo(userId, vo);
-        return Result.success(account.asViewObject(AccountVO.class));
+        AccountVO view = account.asViewObject(AccountVO.class);
+        view.setScope(UserRole.getRole(account.getRole()).scope());
+        return Result.success(view);
     }
 
     /**

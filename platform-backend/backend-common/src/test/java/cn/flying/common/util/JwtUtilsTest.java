@@ -1,5 +1,7 @@
 package cn.flying.common.util;
 
+import com.auth0.jwt.JWT;
+import com.auth0.jwt.algorithms.Algorithm;
 import com.auth0.jwt.interfaces.DecodedJWT;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -12,6 +14,7 @@ import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.SetOperations;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -19,6 +22,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Date;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.*;
@@ -34,6 +38,9 @@ class JwtUtilsTest {
 
     @Mock
     private ValueOperations<String, String> valueOperations;
+
+    @Mock
+    private SetOperations<String, String> setOperations;
 
     @Mock
     private FlowUtils flowUtils;
@@ -71,6 +78,9 @@ class JwtUtilsTest {
         tenantKeyUtilsMock = mockStatic(TenantKeyUtils.class);
         tenantKeyUtilsMock.when(() -> TenantKeyUtils.tenantKey(anyString()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        tenantKeyUtilsMock.when(() -> TenantKeyUtils.tenantKey(anyString(), anyLong()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(redisTemplate.opsForSet()).thenReturn(setOperations);
     }
 
     @AfterEach
@@ -155,7 +165,7 @@ class JwtUtilsTest {
             when(flowUtils.limitOnceUpgradeCheck(anyString(), anyInt(), anyInt(), anyInt()))
                     .thenReturn(true);
 
-            String token = jwtUtils.createJwt(user, "testuser", 123L, 1L);
+            String token = jwtUtils.createJwt(user, "testuser", 123L, 1L, 0L);
 
             assertThat(token).isNotNull();
             assertThat(token).isNotEmpty();
@@ -174,7 +184,7 @@ class JwtUtilsTest {
             when(flowUtils.limitOnceUpgradeCheck(anyString(), anyInt(), anyInt(), anyInt()))
                     .thenReturn(false);
 
-            String token = jwtUtils.createJwt(user, "testuser", 123L, 1L);
+            String token = jwtUtils.createJwt(user, "testuser", 123L, 1L, 0L);
 
             assertThat(token).isNull();
         }
@@ -191,13 +201,93 @@ class JwtUtilsTest {
                     .thenReturn(true);
             when(redisTemplate.hasKey(anyString())).thenReturn(false);
 
-            String token = jwtUtils.createJwt(user, "testuser", 456L, 789L);
+            String token = jwtUtils.createJwt(user, "testuser", 456L, 789L, 0L);
             DecodedJWT jwt = jwtUtils.resolveJwt("Bearer " + token);
 
             assertThat(jwt).isNotNull();
             assertThat(jwtUtils.toId(jwt)).isEqualTo(456L);
             assertThat(jwtUtils.toTenantId(jwt)).isEqualTo(789L);
             assertThat(jwt.getClaim("name").asString()).isEqualTo("testuser");
+            assertThat(jwtUtils.toScope(jwt)).isEqualTo("tenant");
+            assertThat(jwtUtils.toAuthVersion(jwt)).isZero();
+        }
+
+        @Test
+        @DisplayName("should issue platform scope only for a tenant-zero platform administrator")
+        void createJwt_issuesBoundPlatformIdentity() {
+            UserDetails user = User.withUsername("operator")
+                    .password("password")
+                    .authorities(new SimpleGrantedAuthority("ROLE_platform_admin"))
+                    .build();
+            when(flowUtils.limitOnceUpgradeCheck(anyString(), anyInt(), anyInt(), anyInt())).thenReturn(true);
+            when(redisTemplate.hasKey(anyString())).thenReturn(false);
+
+            String token = jwtUtils.createJwt(user, "operator", 900L, 0L, 7L);
+            DecodedJWT jwt = jwtUtils.resolveJwt("Bearer " + token);
+
+            assertThat(jwt).isNotNull();
+            assertThat(jwtUtils.toScope(jwt)).isEqualTo("platform");
+            assertThat(jwtUtils.toAuthVersion(jwt)).isEqualTo(7L);
+            assertThat(jwtUtils.toTenantId(jwt)).isZero();
+            assertThat(jwtUtils.toRole(jwt)).isEqualTo("platform_admin");
+        }
+
+        @Test
+        @DisplayName("should reject a platform administrator bound to a business tenant")
+        void createJwt_rejectsPlatformIdentityOutsideSystemTenant() {
+            UserDetails user = User.withUsername("operator")
+                    .password("password")
+                    .authorities(new SimpleGrantedAuthority("ROLE_platform_admin"))
+                    .build();
+
+            assertThatThrownBy(() -> jwtUtils.createJwt(user, "operator", 900L, 42L, 0L))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Invalid authorization identity");
+            verifyNoInteractions(flowUtils);
+        }
+
+        @Test
+        @DisplayName("should reject a missing tenant identity")
+        void createJwt_rejectsMissingTenantIdentity() {
+            UserDetails user = User.withUsername("operator")
+                    .password("password")
+                    .authorities(new SimpleGrantedAuthority("ROLE_user"))
+                    .build();
+
+            assertThatThrownBy(() -> jwtUtils.createJwt(user, "operator", 900L, null, 0L))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Invalid authorization identity");
+            verifyNoInteractions(flowUtils);
+        }
+
+        @Test
+        @DisplayName("should reject principals with more than one role authority")
+        void createJwt_rejectsMultipleRoleAuthorities() {
+            UserDetails user = User.withUsername("operator")
+                    .password("password")
+                    .authorities(
+                            new SimpleGrantedAuthority("ROLE_admin"),
+                            new SimpleGrantedAuthority("ROLE_user"))
+                    .build();
+
+            assertThatThrownBy(() -> jwtUtils.createJwt(user, "operator", 900L, 42L, 0L))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Exactly one supported role authority is required");
+            verifyNoInteractions(flowUtils);
+        }
+
+        @Test
+        @DisplayName("should reject principals with an unsupported role authority")
+        void createJwt_rejectsUnsupportedRoleAuthority() {
+            UserDetails user = User.withUsername("operator")
+                    .password("password")
+                    .authorities(new SimpleGrantedAuthority("ROLE_root"))
+                    .build();
+
+            assertThatThrownBy(() -> jwtUtils.createJwt(user, "operator", 900L, 42L, 0L))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Exactly one supported role authority is required");
+            verifyNoInteractions(flowUtils);
         }
     }
 
@@ -214,7 +304,7 @@ class JwtUtilsTest {
             when(flowUtils.limitOnceUpgradeCheck(anyString(), anyInt(), anyInt(), anyInt()))
                     .thenReturn(true);
 
-            return jwtUtils.createJwt(user, "testuser", 123L, 1L);
+            return jwtUtils.createJwt(user, "testuser", 123L, 1L, 0L);
         }
 
         @Test
@@ -273,6 +363,45 @@ class JwtUtilsTest {
 
             assertThat(jwt).isNull();
         }
+
+        @Test
+        @DisplayName("should reject a signed token without a JWT identifier before Redis lookup")
+        void resolveJwt_rejectsMissingJwtIdBeforeBlacklistLookup() {
+            String token = signedIdentityToken(null, "testuser");
+
+            assertThat(jwtUtils.resolveJwt("Bearer " + token)).isNull();
+
+            verify(redisTemplate, never()).hasKey(anyString());
+        }
+
+        @Test
+        @DisplayName("should reject a signed token with a blank account name before Redis lookup")
+        void resolveJwt_rejectsBlankNameBeforeBlacklistLookup() {
+            String token = signedIdentityToken("token-id", " ");
+
+            assertThat(jwtUtils.resolveJwt("Bearer " + token)).isNull();
+
+            verify(redisTemplate, never()).hasKey(anyString());
+        }
+
+        /** Signs a structurally controlled token to exercise required-claim rejection. */
+        private String signedIdentityToken(String jwtId, String name) {
+            Algorithm algorithm = (Algorithm) ReflectionTestUtils.getField(jwtUtils, "algorithm");
+            var builder = JWT.create()
+                    .withIssuer("record-platform")
+                    .withAudience("record-platform-api")
+                    .withClaim("id", 123L)
+                    .withClaim("tenantId", 1L)
+                    .withClaim("name", name)
+                    .withClaim("scope", "tenant")
+                    .withClaim("authVersion", 0L)
+                    .withClaim("authorities", List.of("ROLE_user"))
+                    .withExpiresAt(new Date(System.currentTimeMillis() + 60_000));
+            if (jwtId != null) {
+                builder.withJWTId(jwtId);
+            }
+            return builder.sign(algorithm);
+        }
     }
 
     @Nested
@@ -292,7 +421,7 @@ class JwtUtilsTest {
             when(redisTemplate.hasKey(anyString())).thenReturn(false);
             when(redisTemplate.opsForValue()).thenReturn(valueOperations);
 
-            String token = jwtUtils.createJwt(user, "testuser", 123L, 1L);
+            String token = jwtUtils.createJwt(user, "testuser", 123L, 1L, 0L);
             boolean result = jwtUtils.invalidateJwt("Bearer " + token);
 
             assertThat(result).isTrue();
@@ -319,7 +448,7 @@ class JwtUtilsTest {
                     .thenReturn(true);
             when(redisTemplate.hasKey(anyString())).thenReturn(true);
 
-            String token = jwtUtils.createJwt(user, "testuser", 123L, 1L);
+            String token = jwtUtils.createJwt(user, "testuser", 123L, 1L, 0L);
             boolean result = jwtUtils.invalidateJwt("Bearer " + token);
 
             assertThat(result).isFalse();
@@ -333,16 +462,14 @@ class JwtUtilsTest {
         private DecodedJWT createAndResolveToken() {
             UserDetails user = User.withUsername("testuser")
                     .password("password")
-                    .authorities(
-                            new SimpleGrantedAuthority("ROLE_admin"),
-                            new SimpleGrantedAuthority("ROLE_user"))
+                    .authorities(new SimpleGrantedAuthority("ROLE_admin"))
                     .build();
 
             when(flowUtils.limitOnceUpgradeCheck(anyString(), anyInt(), anyInt(), anyInt()))
                     .thenReturn(true);
             when(redisTemplate.hasKey(anyString())).thenReturn(false);
 
-            String token = jwtUtils.createJwt(user, "testuser", 123L, 456L);
+            String token = jwtUtils.createJwt(user, "testuser", 123L, 456L, 0L);
             return jwtUtils.resolveJwt("Bearer " + token);
         }
 
@@ -356,7 +483,7 @@ class JwtUtilsTest {
             assertThat(user.getUsername()).isEqualTo("testuser");
             assertThat(user.getAuthorities())
                     .extracting(auth -> auth.getAuthority())
-                    .contains("ROLE_admin", "ROLE_user");
+                    .containsExactly("ROLE_admin");
         }
 
         @Test
@@ -388,6 +515,18 @@ class JwtUtilsTest {
 
             assertThat(role).isEqualTo("admin");
         }
+
+        @Test
+        @DisplayName("should return null for absent optional identity claims")
+        void extraction_returnsNullForAbsentIdentityClaims() {
+            String token = JWT.create().sign(Algorithm.HMAC512(TEST_KEY));
+            DecodedJWT jwt = JWT.decode(token);
+
+            assertThat(jwtUtils.toTenantId(jwt)).isNull();
+            assertThat(jwtUtils.toScope(jwt)).isNull();
+            assertThat(jwtUtils.toAuthVersion(jwt)).isNull();
+            assertThat(jwtUtils.toRole(jwt)).isNull();
+        }
     }
 
     @Nested
@@ -407,7 +546,7 @@ class JwtUtilsTest {
             when(redisTemplate.hasKey(anyString())).thenReturn(false);
             when(redisTemplate.opsForValue()).thenReturn(valueOperations);
 
-            String originalToken = jwtUtils.createJwt(user, "testuser", 123L, 1L);
+            String originalToken = jwtUtils.createJwt(user, "testuser", 123L, 1L, 0L);
             String refreshedToken = jwtUtils.refreshJwt("Bearer " + originalToken);
 
             assertThat(refreshedToken).isNotNull();
@@ -437,7 +576,7 @@ class JwtUtilsTest {
                     .thenReturn(false);
             when(redisTemplate.hasKey(anyString())).thenReturn(false);
 
-            String originalToken = jwtUtils.createJwt(user, "testuser", 123L, 1L);
+            String originalToken = jwtUtils.createJwt(user, "testuser", 123L, 1L, 0L);
             String refreshedToken = jwtUtils.refreshJwt("Bearer " + originalToken);
 
             assertThat(refreshedToken).isNull();
@@ -453,13 +592,13 @@ class JwtUtilsTest {
         void createSseToken_createsToken() {
             when(redisTemplate.opsForValue()).thenReturn(valueOperations);
 
-            String token = jwtUtils.createSseToken(123L, 456L, "user");
+            String token = jwtUtils.createSseToken(123L, 456L, "user", 7L);
 
             assertThat(token).isNotNull();
             assertThat(token).hasSize(32); // UUID without dashes
             verify(valueOperations).set(
                     contains("sse:token:"),
-                    eq("123:456:user"),
+                    eq("123:456:user:7"),
                     eq(Const.SSE_TOKEN_TTL),
                     eq(TimeUnit.SECONDS));
         }
@@ -468,15 +607,16 @@ class JwtUtilsTest {
         @DisplayName("should validate and consume SSE token")
         void validateAndConsumeSseToken_validatesToken() {
             when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-            when(valueOperations.getAndDelete(anyString())).thenReturn("123:456:admin");
+            when(valueOperations.getAndDelete(anyString())).thenReturn("123:456:admin:7");
 
             String[] result = jwtUtils.validateAndConsumeSseToken("test-token");
 
             assertThat(result).isNotNull();
-            assertThat(result).hasSize(3);
+            assertThat(result).hasSize(4);
             assertThat(result[0]).isEqualTo("123");
             assertThat(result[1]).isEqualTo("456");
             assertThat(result[2]).isEqualTo("admin");
+            assertThat(result[3]).isEqualTo("7");
         }
 
         @Test
@@ -517,6 +657,76 @@ class JwtUtilsTest {
             assertThat(result).isNull();
         }
 
+        @Test
+        @DisplayName("should reject legacy payloads without an authorization version")
+        void validateAndConsumeSseToken_rejectsLegacyPayload() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+            when(valueOperations.getAndDelete(anyString())).thenReturn("123:456:user");
+
+            assertThat(jwtUtils.validateAndConsumeSseToken("legacy-token")).isNull();
+        }
+
+        /** Rejects malformed numeric and unsupported-role identities after one-time consumption. */
+        @Test
+        @DisplayName("should reject malformed SSE identities")
+        void validateAndConsumeSseToken_rejectsMalformedIdentity() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+            when(valueOperations.getAndDelete(anyString())).thenReturn(
+                    "bad:456:user:7",
+                    "0:456:user:7",
+                    "123:-1:user:7",
+                    "123:456:platform_admin:7",
+                    "123:456:user:-1");
+
+            assertThat(jwtUtils.validateAndConsumeSseToken("bad-number")).isNull();
+            assertThat(jwtUtils.validateAndConsumeSseToken("bad-user")).isNull();
+            assertThat(jwtUtils.validateAndConsumeSseToken("bad-tenant")).isNull();
+            assertThat(jwtUtils.validateAndConsumeSseToken("bad-role")).isNull();
+            assertThat(jwtUtils.validateAndConsumeSseToken("bad-version")).isNull();
+        }
+
+        /** Rejects invalid short-token inputs before writing Redis state. */
+        @Test
+        @DisplayName("should reject invalid SSE token issuance identities")
+        void createSseToken_rejectsInvalidIdentity() {
+            assertThatThrownBy(() -> jwtUtils.createSseToken(null, 456L, "user", 0L))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> jwtUtils.createSseToken(0L, 456L, "user", 0L))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> jwtUtils.createSseToken(123L, -1L, "user", 0L))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> jwtUtils.createSseToken(123L, 456L, "platform_admin", 0L))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> jwtUtils.createSseToken(123L, 456L, "user", -1L))
+                    .isInstanceOf(IllegalArgumentException.class);
+
+            verify(redisTemplate, never()).opsForValue();
+        }
+
+        /** Deletes all indexed one-time tokens before deleting the per-account index. */
+        @Test
+        @DisplayName("should invalidate every outstanding SSE token")
+        void invalidateUserSseTokens_deletesIndexedTokens() {
+            when(setOperations.members(anyString())).thenReturn(java.util.Set.of("token-key-a", "token-key-b"));
+
+            jwtUtils.invalidateUserSseTokens(456L, 123L);
+
+            verify(redisTemplate).delete(java.util.Set.of("token-key-a", "token-key-b"));
+            verify(redisTemplate).delete(Const.SSE_TOKEN_USER_INDEX_PREFIX + 123L);
+        }
+
+        /** Empty indexes still get removed without issuing a bulk delete. */
+        @Test
+        @DisplayName("should remove an empty SSE token index")
+        void invalidateUserSseTokens_removesEmptyIndex() {
+            when(setOperations.members(anyString())).thenReturn(null);
+
+            jwtUtils.invalidateUserSseTokens(456L, 123L);
+
+            verify(redisTemplate, never()).delete(any(java.util.Collection.class));
+            verify(redisTemplate).delete(Const.SSE_TOKEN_USER_INDEX_PREFIX + 123L);
+        }
+
         /**
          * 验证创建、未命中和损坏载荷日志都不会包含一次性短令牌原文。
          */
@@ -535,7 +745,7 @@ class JwtUtilsTest {
             jwtLogger.addAppender(appender);
             List<String> sensitiveTokens = new java.util.ArrayList<>();
             try {
-                sensitiveTokens.add(jwtUtils.createSseToken(123L, 456L, "user"));
+                sensitiveTokens.add(jwtUtils.createSseToken(123L, 456L, "user", 7L));
                 sensitiveTokens.add("missing-sensitive-sse-token");
                 sensitiveTokens.add("malformed-sensitive-sse-token");
                 assertThat(jwtUtils.validateAndConsumeSseToken(sensitiveTokens.get(1))).isNull();

@@ -14,6 +14,9 @@ import java.util.UUID;
  */
 public class JwtTestSupport {
 
+    private static final String TENANT_SCOPE = "tenant";
+    private static final long DEFAULT_AUTH_VERSION = 0L;
+
     private static final String TEST_JWT_KEY = "ci-integration-jwt-key-32chars-xK9mN2pL5qR8vW3y";
     private static final String ISSUER = "record-platform";
     private static final String AUDIENCE = "record-platform-api";
@@ -57,6 +60,8 @@ public class JwtTestSupport {
                 .withClaim("id", userId)
                 .withClaim("tenantId", tenantId)
                 .withClaim("name", username)
+                .withClaim("scope", TENANT_SCOPE)
+                .withClaim("authVersion", DEFAULT_AUTH_VERSION)
                 .withClaim("authorities", authorities)
                 .withExpiresAt(expire)
                 .withIssuedAt(now)
@@ -74,6 +79,8 @@ public class JwtTestSupport {
                 .withClaim("id", userId)
                 .withClaim("tenantId", DEFAULT_TENANT_ID)
                 .withClaim("name", DEFAULT_USERNAME)
+                .withClaim("scope", TENANT_SCOPE)
+                .withClaim("authVersion", DEFAULT_AUTH_VERSION)
                 .withClaim("authorities", Arrays.asList("ROLE_" + DEFAULT_ROLE))
                 .withExpiresAt(expiredAt)
                 .withIssuedAt(new Date(now.getTime() - 3600000))
@@ -90,6 +97,8 @@ public class JwtTestSupport {
                 .withAudience(AUDIENCE)
                 .withClaim("id", userId)
                 .withClaim("name", username)
+                .withClaim("scope", TENANT_SCOPE)
+                .withClaim("authVersion", DEFAULT_AUTH_VERSION)
                 .withClaim("authorities", Arrays.asList("ROLE_" + role))
                 .withExpiresAt(expire)
                 .withIssuedAt(now)

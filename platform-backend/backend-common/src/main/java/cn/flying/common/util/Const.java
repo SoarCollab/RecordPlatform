@@ -31,6 +31,8 @@ public final class Const {
     public final static String ATTR_SSE_TENANT_HINT = "sseTenantHint";
     public final static String ATTR_REQ_ID = "reqId";
     public final static String ATTR_LOGIN_USERNAME = "loginUsername";
+    public final static String ATTR_AUTH_SCOPE = "authScope";
+    public final static String ATTR_AUTH_VERSION = "authVersion";
     //分布式追踪
     public final static String TRACE_ID = "traceId";
     //消息队列
@@ -48,5 +50,10 @@ public final class Const {
 
     //SSE短期令牌
     public final static String SSE_TOKEN_PREFIX = "sse:token:";
+    public final static String SSE_TOKEN_USER_INDEX_PREFIX = "sse:token:user:";
     public final static long SSE_TOKEN_TTL = 30;  // 30秒有效期
+
+    // Current authorization state cache
+    public final static String AUTH_ACCOUNT_STATE_PREFIX = "auth:account:";
+    public final static String AUTH_TENANT_STATE_PREFIX = "auth:tenant:";
 }

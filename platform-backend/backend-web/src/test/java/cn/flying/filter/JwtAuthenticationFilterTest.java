@@ -4,6 +4,7 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JwtUtils;
+import cn.flying.service.auth.AuthorizationStateService;
 import com.auth0.jwt.interfaces.Claim;
 import com.auth0.jwt.interfaces.DecodedJWT;
 import jakarta.servlet.FilterChain;
@@ -48,6 +49,9 @@ class JwtAuthenticationFilterTest {
 
     @Mock
     private DecodedJWT decodedJWT;
+
+    @Mock
+    private AuthorizationStateService authorizationStateService;
 
     @InjectMocks
     private JwtAuthenticationFilter filter;
@@ -104,6 +108,10 @@ class JwtAuthenticationFilterTest {
             when(jwtUtils.toId(decodedJWT)).thenReturn(123L);
             when(jwtUtils.toRole(decodedJWT)).thenReturn("user");
             when(jwtUtils.toTenantId(decodedJWT)).thenReturn(1L);
+            when(jwtUtils.toScope(decodedJWT)).thenReturn("tenant");
+            when(jwtUtils.toAuthVersion(decodedJWT)).thenReturn(0L);
+            when(authorizationStateService.isTokenAuthorized(123L, 1L, "user", "tenant", 0L))
+                    .thenReturn(true);
 
             UserDetails userDetails = User.builder()
                     .username("testuser")
@@ -221,6 +229,10 @@ class JwtAuthenticationFilterTest {
             request.setAttribute(Const.ATTR_TENANT_ID, 1L);
             when(jwtUtils.toTenantId(decodedJWT)).thenReturn(1L);
             when(jwtUtils.toRole(decodedJWT)).thenReturn("user");
+            when(jwtUtils.toScope(decodedJWT)).thenReturn("tenant");
+            when(jwtUtils.toAuthVersion(decodedJWT)).thenReturn(0L);
+            when(authorizationStateService.isTokenAuthorized(123L, 1L, "user", "tenant", 0L))
+                    .thenReturn(true);
 
             UserDetails userDetails = User.builder()
                     .username("testuser")
@@ -250,22 +262,55 @@ class JwtAuthenticationFilterTest {
         }
 
         @Test
-        @DisplayName("should allow when neither JWT nor header has tenant (public endpoint)")
-        void shouldAllowWhenNeitherHasTenant() throws ServletException, IOException {
+        @DisplayName("should reject a protected identity token with no tenant claim")
+        void shouldRejectWhenJwtHasNoTenant() throws ServletException, IOException {
             // No header tenant ID set (public endpoint scenario)
             when(jwtUtils.toTenantId(decodedJWT)).thenReturn(null);
             when(jwtUtils.toRole(decodedJWT)).thenReturn("user");
 
-            UserDetails userDetails = User.builder()
-                    .username("testuser")
-                    .password("******")
-                    .authorities("ROLE_user")
-                    .build();
-            when(jwtUtils.toUser(decodedJWT)).thenReturn(userDetails);
+            filter.doFilterInternal(request, response, filterChain);
+
+            assertEquals(401, response.getStatus());
+            verify(filterChain, never()).doFilter(request, response);
+        }
+
+        /** Rejects a stale authVersion with the same non-enumerating token response. */
+        @Test
+        void shouldRejectStaleAuthorizationState() throws ServletException, IOException {
+            request.setAttribute(Const.ATTR_TENANT_ID, 1L);
+            when(jwtUtils.toTenantId(decodedJWT)).thenReturn(1L);
+            when(jwtUtils.toRole(decodedJWT)).thenReturn("user");
+            when(jwtUtils.toScope(decodedJWT)).thenReturn("tenant");
+            when(jwtUtils.toAuthVersion(decodedJWT)).thenReturn(3L);
+            when(authorizationStateService.isTokenAuthorized(123L, 1L, "user", "tenant", 3L))
+                    .thenReturn(false);
 
             filter.doFilterInternal(request, response, filterChain);
 
-            verify(filterChain).doFilter(request, response);
+            assertEquals(401, response.getStatus());
+            assertTrue(response.getContentAsString().contains(
+                    String.valueOf(ResultEnum.PERMISSION_TOKEN_INVALID.getCode())));
+            verify(filterChain, never()).doFilter(request, response);
+        }
+
+        /** Dependency failure returns a fixed unavailable response without leaking state details. */
+        @Test
+        void shouldFailClosedWhenAuthorizationStoreIsUnavailable() throws ServletException, IOException {
+            request.setAttribute(Const.ATTR_TENANT_ID, 1L);
+            when(jwtUtils.toTenantId(decodedJWT)).thenReturn(1L);
+            when(jwtUtils.toRole(decodedJWT)).thenReturn("user");
+            when(jwtUtils.toScope(decodedJWT)).thenReturn("tenant");
+            when(jwtUtils.toAuthVersion(decodedJWT)).thenReturn(3L);
+            when(authorizationStateService.isTokenAuthorized(123L, 1L, "user", "tenant", 3L))
+                    .thenThrow(new IllegalStateException("redis://secret-host/account/123"));
+
+            filter.doFilterInternal(request, response, filterChain);
+
+            assertEquals(503, response.getStatus());
+            assertTrue(response.getContentAsString().contains(
+                    String.valueOf(ResultEnum.SERVICE_UNAVAILABLE.getCode())));
+            assertFalse(response.getContentAsString().contains("secret-host"));
+            verify(filterChain, never()).doFilter(request, response);
         }
     }
 
@@ -311,6 +356,10 @@ class JwtAuthenticationFilterTest {
             when(jwtUtils.toId(decodedJWT)).thenReturn(123L);
             when(jwtUtils.toRole(decodedJWT)).thenReturn("user");
             when(jwtUtils.toTenantId(decodedJWT)).thenReturn(1L);
+            when(jwtUtils.toScope(decodedJWT)).thenReturn("tenant");
+            when(jwtUtils.toAuthVersion(decodedJWT)).thenReturn(0L);
+            when(authorizationStateService.isTokenAuthorized(123L, 1L, "user", "tenant", 0L))
+                    .thenReturn(true);
 
             UserDetails userDetails = User.builder()
                     .username("testuser")
