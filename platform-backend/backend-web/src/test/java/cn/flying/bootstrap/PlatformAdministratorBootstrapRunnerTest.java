@@ -76,6 +76,47 @@ class PlatformAdministratorBootstrapRunnerTest {
                 .hasMessage("Platform administrator bootstrap configuration is incomplete");
     }
 
+    /** Refuses malformed identity metadata before reading the password file. */
+    @Test
+    void rejectsInvalidIdentityConfiguration() {
+        PlatformAdministratorBootstrapRunner runner = new PlatformAdministratorBootstrapRunner(
+                accountService, passwordEncoder);
+        ReflectionTestUtils.setField(runner, "username", "platform-operator");
+        ReflectionTestUtils.setField(runner, "email", "invalid-email");
+        ReflectionTestUtils.setField(runner, "passwordFile", "unused");
+
+        assertThatThrownBy(() -> runner.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Platform administrator bootstrap identity is invalid");
+    }
+
+    /** Refuses empty and unavailable secret files without exposing their content. */
+    @Test
+    void rejectsInvalidPasswordFiles() throws Exception {
+        Path emptyFile = tempDir.resolve("empty-password");
+        Files.createFile(emptyFile);
+        restrictIfPosix(emptyFile);
+
+        assertThatThrownBy(() -> runner(emptyFile).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Platform administrator bootstrap password file is invalid");
+        assertThatThrownBy(() -> runner(tempDir.resolve("missing-password")).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Platform administrator bootstrap password file is invalid");
+    }
+
+    /** Refuses a readable secret that does not meet the deterministic password policy. */
+    @Test
+    void rejectsWeakPassword() throws Exception {
+        Path passwordFile = tempDir.resolve("weak-password");
+        Files.writeString(passwordFile, "only-lowercase");
+        restrictIfPosix(passwordFile);
+
+        assertThatThrownBy(() -> runner(passwordFile).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Platform administrator bootstrap password does not meet policy");
+    }
+
     /** Creates a configured runner without embedding password content in configuration. */
     private PlatformAdministratorBootstrapRunner runner(Path passwordFile) {
         PlatformAdministratorBootstrapRunner runner = new PlatformAdministratorBootstrapRunner(

@@ -129,6 +129,60 @@ class AccountServiceImplTest {
                     exception.getMessage());
             verify(accountMapper, never()).insert(any(Account.class));
         }
+
+        /** Fails closed when system tenant zero cannot be locked for bootstrap. */
+        @Test
+        void rejectsUnavailableSystemTenant() {
+            when(tenantMapper.lockSystemTenantForPlatformBootstrap()).thenReturn(null);
+
+            IllegalStateException exception = assertThrows(IllegalStateException.class,
+                    () -> accountService.createPlatformAdministrator(USERNAME, EMAIL, ENCODED_PASSWORD));
+
+            assertEquals("System tenant is unavailable for platform administrator bootstrap", exception.getMessage());
+            verify(accountMapper, never()).countPlatformAdministrators();
+        }
+
+        /** Reports a deterministic failure when persistence rejects the new platform identity. */
+        @Test
+        void rejectsFailedPlatformAdministratorInsert() {
+            when(tenantMapper.lockSystemTenantForPlatformBootstrap()).thenReturn(0L);
+            when(accountMapper.countPlatformAdministrators()).thenReturn(0L);
+            when(accountMapper.insert(any(Account.class))).thenReturn(0);
+
+            try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                idUtilsMock.when(IdUtils::nextUserId).thenReturn(USER_ID);
+                IllegalStateException exception = assertThrows(IllegalStateException.class,
+                        () -> accountService.createPlatformAdministrator(USERNAME, EMAIL, ENCODED_PASSWORD));
+                assertEquals("Platform administrator bootstrap failed", exception.getMessage());
+            }
+        }
+
+        /** Persists successful-login metadata and rejects absent or stale account rows. */
+        @Test
+        void recordsOnlyExistingSuccessfulLogin() {
+            Account account = createAccount();
+            when(accountMapper.updateLastLoginTime(1L, USER_ID)).thenReturn(1, 0);
+
+            assertDoesNotThrow(() -> accountService.recordSuccessfulLogin(account));
+            assertThrows(IllegalStateException.class, () -> accountService.recordSuccessfulLogin(account));
+            assertThrows(IllegalStateException.class, () -> accountService.recordSuccessfulLogin(null));
+        }
+
+        /** Rejects unsupported identities before any account persistence occurs. */
+        @Test
+        void rejectsInvalidAccountIdentity() {
+            Account unsupported = createAccount();
+            unsupported.setRole("owner");
+            Account misplacedPlatform = createAccount();
+            misplacedPlatform.setRole(UserRole.ROLE_PLATFORM_ADMIN.getRole());
+            misplacedPlatform.setTenantId(1L);
+
+            assertThrows(IllegalArgumentException.class, () -> accountService.save(null));
+            assertThrows(IllegalArgumentException.class, () -> accountService.save(unsupported));
+            assertThrows(IllegalArgumentException.class, () -> accountService.save(misplacedPlatform));
+            verify(accountMapper, never()).insert(unsupported);
+            verify(accountMapper, never()).insert(misplacedPlatform);
+        }
     }
 
     @AfterEach

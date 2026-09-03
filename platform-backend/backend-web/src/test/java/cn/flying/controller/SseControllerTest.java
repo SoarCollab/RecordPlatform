@@ -168,4 +168,36 @@ class SseControllerTest {
         assertThat(MDC.get(Const.ATTR_USER_ID)).isNull();
         assertThat(MDC.get(Const.ATTR_USER_ROLE)).isNull();
     }
+
+    /** Rejects a consumed short token when the account or tenant is no longer authorized. */
+    @Test
+    @DisplayName("connect should reject stale current authorization state")
+    void connectShouldRejectStaleAuthorizationState() {
+        when(jwtUtils.validateAndConsumeSseToken("stale-token"))
+                .thenReturn(new String[]{"100", "1", "user", "7"});
+        when(authorizationStateService.isSseIdentityAuthorized(100L, 1L, "user", 7L))
+                .thenReturn(false);
+
+        ResponseEntity<SseEmitter> response = controller.connect(
+                "stale-token", 1L, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode().value()).isEqualTo(401);
+        verify(sseEmitterManager, never()).createConnection(anyLong(), anyLong(), anyString());
+    }
+
+    /** Returns service unavailable when current authorization storage cannot be checked. */
+    @Test
+    @DisplayName("connect should fail closed when authorization state is unavailable")
+    void connectShouldFailClosedWhenAuthorizationStateUnavailable() {
+        when(jwtUtils.validateAndConsumeSseToken("state-failure-token"))
+                .thenReturn(new String[]{"100", "1", "user", "7"});
+        when(authorizationStateService.isSseIdentityAuthorized(100L, 1L, "user", 7L))
+                .thenThrow(new IllegalStateException("redis unavailable"));
+
+        ResponseEntity<SseEmitter> response = controller.connect(
+                "state-failure-token", 1L, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode().value()).isEqualTo(503);
+        verify(sseEmitterManager, never()).createConnection(anyLong(), anyLong(), anyString());
+    }
 }

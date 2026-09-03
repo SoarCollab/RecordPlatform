@@ -112,6 +112,20 @@ class SseEmitterManagerTest {
             assertTrue(manager.isOnline(TENANT_1, USER_1));
             assertEquals(1, manager.getUserConnectionCount(TENANT_1, USER_1));
         }
+
+        /** Closes every live connection owned by one account and tolerates absent targets. */
+        @Test
+        void shouldCloseAllUserConnections() {
+            manager.closeUserConnections(TENANT_1, USER_1);
+            manager.createConnection(TENANT_1, USER_1, "conn-1");
+            manager.createConnection(TENANT_1, USER_1, "conn-2");
+            manager.closeUserConnections(TENANT_1, USER_2);
+
+            manager.closeUserConnections(TENANT_1, USER_1);
+
+            assertFalse(manager.isOnline(TENANT_1, USER_1));
+            assertEquals(0, manager.getUserConnectionCount(TENANT_1, USER_1));
+        }
     }
 
     @Nested
@@ -152,6 +166,20 @@ class SseEmitterManagerTest {
 
             assertNotNull(users);
             assertTrue(users.isEmpty());
+        }
+
+        /** Closing one tenant removes all its users without affecting another tenant. */
+        @Test
+        void shouldCloseOnlyTargetTenantConnections() {
+            manager.closeTenantConnections(999L);
+            manager.createConnection(TENANT_1, USER_1, "conn-1");
+            manager.createConnection(TENANT_1, USER_2, "conn-2");
+            manager.createConnection(TENANT_2, USER_1, "conn-3");
+
+            manager.closeTenantConnections(TENANT_1);
+
+            assertEquals(0, manager.getOnlineCount(TENANT_1));
+            assertTrue(manager.isOnline(TENANT_2, USER_1));
         }
     }
 

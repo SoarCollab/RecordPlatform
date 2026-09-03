@@ -247,6 +247,20 @@ class JwtUtilsTest {
         }
 
         @Test
+        @DisplayName("should reject a missing tenant identity")
+        void createJwt_rejectsMissingTenantIdentity() {
+            UserDetails user = User.withUsername("operator")
+                    .password("password")
+                    .authorities(new SimpleGrantedAuthority("ROLE_user"))
+                    .build();
+
+            assertThatThrownBy(() -> jwtUtils.createJwt(user, "operator", 900L, null, 0L))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Invalid authorization identity");
+            verifyNoInteractions(flowUtils);
+        }
+
+        @Test
         @DisplayName("should reject principals with more than one role authority")
         void createJwt_rejectsMultipleRoleAuthorities() {
             UserDetails user = User.withUsername("operator")
@@ -501,6 +515,18 @@ class JwtUtilsTest {
 
             assertThat(role).isEqualTo("admin");
         }
+
+        @Test
+        @DisplayName("should return null for absent optional identity claims")
+        void extraction_returnsNullForAbsentIdentityClaims() {
+            String token = JWT.create().sign(Algorithm.HMAC512(TEST_KEY));
+            DecodedJWT jwt = JWT.decode(token);
+
+            assertThat(jwtUtils.toTenantId(jwt)).isNull();
+            assertThat(jwtUtils.toScope(jwt)).isNull();
+            assertThat(jwtUtils.toAuthVersion(jwt)).isNull();
+            assertThat(jwtUtils.toRole(jwt)).isNull();
+        }
     }
 
     @Nested
@@ -638,6 +664,67 @@ class JwtUtilsTest {
             when(valueOperations.getAndDelete(anyString())).thenReturn("123:456:user");
 
             assertThat(jwtUtils.validateAndConsumeSseToken("legacy-token")).isNull();
+        }
+
+        /** Rejects malformed numeric and unsupported-role identities after one-time consumption. */
+        @Test
+        @DisplayName("should reject malformed SSE identities")
+        void validateAndConsumeSseToken_rejectsMalformedIdentity() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+            when(valueOperations.getAndDelete(anyString())).thenReturn(
+                    "bad:456:user:7",
+                    "0:456:user:7",
+                    "123:-1:user:7",
+                    "123:456:platform_admin:7",
+                    "123:456:user:-1");
+
+            assertThat(jwtUtils.validateAndConsumeSseToken("bad-number")).isNull();
+            assertThat(jwtUtils.validateAndConsumeSseToken("bad-user")).isNull();
+            assertThat(jwtUtils.validateAndConsumeSseToken("bad-tenant")).isNull();
+            assertThat(jwtUtils.validateAndConsumeSseToken("bad-role")).isNull();
+            assertThat(jwtUtils.validateAndConsumeSseToken("bad-version")).isNull();
+        }
+
+        /** Rejects invalid short-token inputs before writing Redis state. */
+        @Test
+        @DisplayName("should reject invalid SSE token issuance identities")
+        void createSseToken_rejectsInvalidIdentity() {
+            assertThatThrownBy(() -> jwtUtils.createSseToken(null, 456L, "user", 0L))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> jwtUtils.createSseToken(0L, 456L, "user", 0L))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> jwtUtils.createSseToken(123L, -1L, "user", 0L))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> jwtUtils.createSseToken(123L, 456L, "platform_admin", 0L))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> jwtUtils.createSseToken(123L, 456L, "user", -1L))
+                    .isInstanceOf(IllegalArgumentException.class);
+
+            verify(redisTemplate, never()).opsForValue();
+        }
+
+        /** Deletes all indexed one-time tokens before deleting the per-account index. */
+        @Test
+        @DisplayName("should invalidate every outstanding SSE token")
+        void invalidateUserSseTokens_deletesIndexedTokens() {
+            when(setOperations.members(anyString())).thenReturn(java.util.Set.of("token-key-a", "token-key-b"));
+
+            jwtUtils.invalidateUserSseTokens(456L, 123L);
+
+            verify(redisTemplate).delete(java.util.Set.of("token-key-a", "token-key-b"));
+            verify(redisTemplate).delete(Const.SSE_TOKEN_USER_INDEX_PREFIX + 123L);
+        }
+
+        /** Empty indexes still get removed without issuing a bulk delete. */
+        @Test
+        @DisplayName("should remove an empty SSE token index")
+        void invalidateUserSseTokens_removesEmptyIndex() {
+            when(setOperations.members(anyString())).thenReturn(null);
+
+            jwtUtils.invalidateUserSseTokens(456L, 123L);
+
+            verify(redisTemplate, never()).delete(any(java.util.Collection.class));
+            verify(redisTemplate).delete(Const.SSE_TOKEN_USER_INDEX_PREFIX + 123L);
         }
 
         /**

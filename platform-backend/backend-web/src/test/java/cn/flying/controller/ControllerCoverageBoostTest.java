@@ -266,6 +266,33 @@ class ControllerCoverageBoostTest {
         assertEquals(ResultEnum.SUCCESS.getCode(), changePasswordRest.getCode());
     }
 
+    /** Covers refresh failure-closed decisions for stale state and unavailable dependencies. */
+    @Test
+    void shouldFailClosedForInvalidRefreshAuthorizationState() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer old-token");
+        when(jwtUtils.resolveJwt("Bearer old-token")).thenReturn(decodedJwt);
+        when(jwtUtils.toId(decodedJwt)).thenReturn(1L);
+        when(jwtUtils.toTenantId(decodedJwt)).thenReturn(2L);
+        when(jwtUtils.toRole(decodedJwt)).thenReturn("user");
+        when(jwtUtils.toScope(decodedJwt)).thenReturn("tenant");
+        when(jwtUtils.toAuthVersion(decodedJwt)).thenReturn(0L);
+        when(authorizationStateService.isTokenAuthorized(1L, 2L, "user", "tenant", 0L))
+                .thenReturn(false)
+                .thenThrow(new IllegalStateException("redis unavailable"))
+                .thenReturn(true);
+        when(jwtUtils.refreshJwt("Bearer old-token"))
+                .thenThrow(new IllegalStateException("redis unavailable"));
+
+        Result<RefreshTokenVO> stale = authorizeController.refreshAccessToken(request);
+        Result<RefreshTokenVO> stateUnavailable = authorizeController.refreshAccessToken(request);
+        Result<RefreshTokenVO> refreshUnavailable = authorizeController.refreshAccessToken(request);
+
+        assertEquals(ResultEnum.PERMISSION_TOKEN_EXPIRED.getCode(), stale.getCode());
+        assertEquals(ResultEnum.SERVICE_UNAVAILABLE.getCode(), stateUnavailable.getCode());
+        assertEquals(ResultEnum.SERVICE_UNAVAILABLE.getCode(), refreshUnavailable.getCode());
+    }
+
     /**
      * 覆盖消息与会话新接口。
      */
