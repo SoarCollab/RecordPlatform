@@ -76,6 +76,7 @@ import cn.flying.service.proof.ProofBundleService;
 import cn.flying.service.proof.signed.SignedProofArchiveService;
 import cn.flying.service.proof.signed.ProofSigningProviderRegistry;
 import cn.flying.service.sse.SseEmitterManager;
+import cn.flying.service.auth.AuthorizationStateService;
 import cn.flying.security.TrustedClientIpResolver;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -144,6 +145,9 @@ class OpenApiContractExportTest {
 
     @MockitoBean
     private AccountService accountService;
+
+    @MockitoBean
+    private AuthorizationStateService authorizationStateService;
 
     @MockitoBean
     private ControllerUtils controllerUtils;
@@ -369,6 +373,14 @@ class OpenApiContractExportTest {
                 "/api/v1/public/proofs/{proofId}/status")).isTrue();
         assertThat(rootNode.path("paths").has(
                 "/api/v1/public/proof-keys/{keyId}/versions/{keyVersion}")).isTrue();
+        JsonNode accountSchema = rootNode.path("components").path("schemas").path("AccountVO");
+        assertThat(accountSchema.path("properties").has("scope")).isTrue();
+        assertThat(accountSchema.path("required")).anySatisfy(value ->
+                assertThat(value.asText()).isEqualTo("scope"));
+        assertThat(accountSchema.path("properties").path("scope").path("enum"))
+                .extracting(JsonNode::asText)
+                .containsExactly("tenant", "platform");
+        assertThat(accountSchema.path("properties").has("status")).isTrue();
         assertPublicOperation(
                 rootNode,
                 "/api/v1/shares/{shareCode}/info",

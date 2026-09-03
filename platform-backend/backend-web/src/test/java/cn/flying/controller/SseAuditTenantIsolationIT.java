@@ -177,7 +177,7 @@ class SseAuditTenantIsolationIT extends BaseControllerIntegrationTest {
     private String createValidToken() {
         String validToken = TenantContext.callWithTenant(
                 TRUSTED_TENANT_ID,
-                () -> jwtUtils.createSseToken(SSE_USER_ID, TRUSTED_TENANT_ID, "user"));
+                () -> jwtUtils.createSseToken(SSE_USER_ID, TRUSTED_TENANT_ID, "user", 0L));
         sseRedisKey(TRUSTED_TENANT_ID, validToken);
         return validToken;
     }

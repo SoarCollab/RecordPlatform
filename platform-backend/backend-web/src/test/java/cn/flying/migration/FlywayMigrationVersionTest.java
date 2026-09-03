@@ -54,10 +54,27 @@ class FlywayMigrationVersionTest {
         assertTrue(migrationFiles.contains("V1.19.0__automated_key_rotation.sql"));
         assertTrue(migrationFiles.contains("V1.20.0__runtime_crypto_agility.sql"));
         assertTrue(migrationFiles.contains("V1.20.1__filter_sensitive_operation_view.sql"));
+        assertTrue(migrationFiles.contains("V1.21.0__platform_identity_tenant_status.sql"));
         assertFalse(migrationFiles.contains("V1.5.0__add_account_nickname.sql"));
         assertFalse(migrationFiles.contains("V1.7.3__integrity_alert.sql"));
 
         validateUniqueMigrationVersions(migrationFiles);
+    }
+
+    /** Verifies V1.21 adds only new identity columns and never re-adds released tenant columns. */
+    @Test
+    void shouldAddPlatformIdentityThroughOneForwardMigration() throws IOException {
+        String sql = Files.readString(resolveMigrationDir().resolve(
+                "V1.21.0__platform_identity_tenant_status.sql"));
+        String normalizedSql = sql.replaceAll("\\s+", " ").trim();
+
+        assertTrue(normalizedSql.contains("ADD COLUMN `status` TINYINT NOT NULL DEFAULT 1"));
+        assertTrue(normalizedSql.contains("ADD COLUMN `auth_version` BIGINT NOT NULL DEFAULT 0"));
+        assertTrue(normalizedSql.contains("ADD COLUMN `version` BIGINT NOT NULL DEFAULT 0"));
+        assertTrue(normalizedSql.contains("CHECK (`role` <> 'platform_admin' OR `tenant_id` = 0)"));
+        assertFalse(normalizedSql.contains("ADD COLUMN `update_time`"));
+        assertFalse(normalizedSql.contains("ADD COLUMN `deleted`"));
+        assertFalse(normalizedSql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
     }
 
     /**

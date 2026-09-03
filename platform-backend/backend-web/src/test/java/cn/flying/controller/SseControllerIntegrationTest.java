@@ -53,7 +53,7 @@ class SseControllerIntegrationTest extends BaseControllerIntegrationTest {
         @DisplayName("GET /connect - Should establish SSE connection with valid token")
         void connect_shouldEstablishConnectionWithValidToken() throws Exception {
             String validSseToken = "valid_sse_token";
-            doReturn(new String[]{"100", "1", "user"})
+            doReturn(new String[]{"100", "1", "user", "0"})
                     .when(jwtUtils).validateAndConsumeSseToken(validSseToken);
 
             mockMvc.perform(get(BASE_URL + "/connect")
@@ -71,7 +71,7 @@ class SseControllerIntegrationTest extends BaseControllerIntegrationTest {
         void connect_shouldIgnoreClientSuppliedConnectionId() throws Exception {
             String validSseToken = "valid_sse_token";
             String connectionId = "custom_connection_123";
-            doReturn(new String[]{"100", "1", "user"})
+            doReturn(new String[]{"100", "1", "user", "0"})
                     .when(jwtUtils).validateAndConsumeSseToken(validSseToken);
 
             mockMvc.perform(get(BASE_URL + "/connect")
@@ -119,7 +119,7 @@ class SseControllerIntegrationTest extends BaseControllerIntegrationTest {
         @DisplayName("GET /connect - Should return 401 for malformed user ID in token")
         void connect_shouldReturn401ForMalformedUserId() throws Exception {
             String malformedToken = "malformed_token";
-            doReturn(new String[]{"invalid_user_id", "1", "user"})
+            doReturn(new String[]{"invalid_user_id", "1", "user", "0"})
                     .when(jwtUtils).validateAndConsumeSseToken(malformedToken);
 
             mockMvc.perform(get(BASE_URL + "/connect")
@@ -133,7 +133,7 @@ class SseControllerIntegrationTest extends BaseControllerIntegrationTest {
         @DisplayName("GET /connect - Should generate connectionId if not provided")
         void connect_shouldGenerateConnectionIdIfNotProvided() throws Exception {
             String validSseToken = "valid_sse_token";
-            doReturn(new String[]{"100", "1", "user"})
+            doReturn(new String[]{"100", "1", "user", "0"})
                     .when(jwtUtils).validateAndConsumeSseToken(validSseToken);
 
             mockMvc.perform(get(BASE_URL + "/connect")
@@ -154,7 +154,7 @@ class SseControllerIntegrationTest extends BaseControllerIntegrationTest {
         @DisplayName("GET /connect - Should reject tenant hint mismatch")
         void connect_shouldRejectTenantHintMismatch() throws Exception {
             String mismatchedToken = "mismatched_token";
-            doReturn(new String[]{"100", "2", "user"})
+            doReturn(new String[]{"100", "2", "user", "0"})
                     .when(jwtUtils).validateAndConsumeSseToken(mismatchedToken);
 
             mockMvc.perform(get(BASE_URL + "/connect")
@@ -252,9 +252,9 @@ class SseControllerIntegrationTest extends BaseControllerIntegrationTest {
         void shouldSupportMultipleConnectionsForSameUser() throws Exception {
             String validSseToken1 = "valid_sse_token_1";
             String validSseToken2 = "valid_sse_token_2";
-            doReturn(new String[]{"100", "1", "user"})
+            doReturn(new String[]{"100", "1", "user", "0"})
                     .when(jwtUtils).validateAndConsumeSseToken(validSseToken1);
-            doReturn(new String[]{"100", "1", "user"})
+            doReturn(new String[]{"100", "1", "user", "0"})
                     .when(jwtUtils).validateAndConsumeSseToken(validSseToken2);
 
             mockMvc.perform(get(BASE_URL + "/connect")

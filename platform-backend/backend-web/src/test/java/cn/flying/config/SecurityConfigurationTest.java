@@ -147,4 +147,28 @@ class SecurityConfigurationTest {
         assertFalse(applicationYaml.contains("forward-headers-strategy: native"));
         assertFalse(applicationYaml.contains("forward-headers-strategy: framework"));
     }
+
+    /** Keeps platform identity and its password-file bootstrap explicitly disabled by default. */
+    @Test
+    void shouldDefaultPlatformIdentityAndBootstrapToDisabled() throws Exception {
+        String applicationYaml = Files.readString(Path.of("src/main/resources/application.yml"));
+
+        assertTrue(applicationYaml.contains("enabled: ${PLATFORM_IDENTITY_ENABLED:false}"));
+        assertTrue(applicationYaml.contains("enabled: ${PLATFORM_BOOTSTRAP_ENABLED:false}"));
+        assertTrue(applicationYaml.contains("password-file: ${PLATFORM_BOOTSTRAP_PASSWORD_FILE:}"));
+        assertFalse(applicationYaml.contains("platform-admin-password"));
+    }
+
+    /** Places the platform route family before the tenant catch-all and keeps both role sets disjoint. */
+    @Test
+    void shouldSeparatePlatformAndTenantRouteFamilies() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/cn/flying/config/SecurityConfiguration.java"));
+        int platformMatcher = source.indexOf(".requestMatchers(\"/api/v1/platform/**\")");
+        int tenantCatchAll = source.indexOf(".anyRequest().hasAnyRole(");
+
+        assertTrue(platformMatcher > 0);
+        assertTrue(tenantCatchAll > platformMatcher);
+        String tenantRule = source.substring(tenantCatchAll, source.indexOf(")\n                )", tenantCatchAll));
+        assertFalse(tenantRule.contains("ROLE_PLATFORM_ADMIN"));
+    }
 }

@@ -26,6 +26,12 @@ public interface AccountService extends IService<Account>, UserDetailsService {
     String modifyEmail(Long userId, ModifyEmailVO modifyEmailVO);
     String changePassword(Long userId, ChangePasswordVO changePasswordVO);
 
+    /** Creates the one allowed bootstrap platform administrator in system tenant zero. */
+    Account createPlatformAdministrator(String username, String email, String passwordHash);
+
+    /** Records a successful login timestamp for operational visibility. */
+    void recordSuccessfulLogin(Account account);
+
     /**
      * 更新用户信息（头像等）
      * @param userId 用户ID

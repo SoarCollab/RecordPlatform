@@ -371,6 +371,44 @@ public class SseEmitterManager {
         }
     }
 
+    /**
+     * Completes and removes every connection for one account after session revocation.
+     *
+     * @param tenantId account tenant
+     * @param userId account identifier
+     */
+    public void closeUserConnections(Long tenantId, Long userId) {
+        Map<Long, UserConnections> tenantEmitters = emittersByTenant.get(tenantId);
+        if (tenantEmitters == null) {
+            return;
+        }
+        UserConnections connections = tenantEmitters.get(userId);
+        if (connections == null) {
+            return;
+        }
+        List<Map.Entry<String, SseEmitter>> snapshot;
+        connections.lock().lock();
+        try {
+            snapshot = new ArrayList<>(connections.map().entrySet());
+        } finally {
+            connections.lock().unlock();
+        }
+        snapshot.forEach(entry -> removeConnection(tenantId, userId, entry.getKey(), entry.getValue(), true));
+    }
+
+    /**
+     * Completes all connections owned by a disabled tenant.
+     *
+     * @param tenantId tenant identifier
+     */
+    public void closeTenantConnections(Long tenantId) {
+        Map<Long, UserConnections> tenantEmitters = emittersByTenant.get(tenantId);
+        if (tenantEmitters == null) {
+            return;
+        }
+        new ArrayList<>(tenantEmitters.keySet()).forEach(userId -> closeUserConnections(tenantId, userId));
+    }
+
     @Scheduled(fixedRate = 30000)
     public void sendHeartbeat() {
         if (emittersByTenant.isEmpty()) return;

@@ -11,6 +11,8 @@ import cn.flying.dao.vo.auth.EmailResetVO;
 import cn.flying.dao.vo.auth.RefreshTokenVO;
 import cn.flying.dao.vo.auth.SseTokenVO;
 import cn.flying.service.AccountService;
+import cn.flying.service.auth.AuthorizationStateService;
+import com.auth0.jwt.interfaces.DecodedJWT;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -43,6 +45,7 @@ public class AuthorizeController {
     private final AccountService accountService;
     private final ControllerUtils utils;
     private final JwtUtils jwtUtils;
+    private final AuthorizationStateService authorizationStateService;
 
     /**
      * 请求邮件验证码（REST 新路径）。
@@ -114,7 +117,28 @@ public class AuthorizeController {
     @Operation(summary = "刷新访问令牌（REST）")
     public Result<RefreshTokenVO> refreshAccessToken(HttpServletRequest request) {
         String headerToken = request.getHeader("Authorization");
-        String newToken = jwtUtils.refreshJwt(headerToken);
+        DecodedJWT decoded = jwtUtils.resolveJwt(headerToken);
+        if (decoded == null) {
+            return Result.error(cn.flying.common.constant.ResultEnum.PERMISSION_TOKEN_EXPIRED, null);
+        }
+        try {
+            if (!authorizationStateService.isTokenAuthorized(
+                    jwtUtils.toId(decoded),
+                    jwtUtils.toTenantId(decoded),
+                    jwtUtils.toRole(decoded),
+                    jwtUtils.toScope(decoded),
+                    jwtUtils.toAuthVersion(decoded))) {
+                return Result.error(cn.flying.common.constant.ResultEnum.PERMISSION_TOKEN_EXPIRED, null);
+            }
+        } catch (RuntimeException exception) {
+            return Result.error(cn.flying.common.constant.ResultEnum.SERVICE_UNAVAILABLE, null);
+        }
+        String newToken;
+        try {
+            newToken = jwtUtils.refreshJwt(headerToken);
+        } catch (RuntimeException exception) {
+            return Result.error(cn.flying.common.constant.ResultEnum.SERVICE_UNAVAILABLE, null);
+        }
         if (newToken == null) {
             return Result.error(cn.flying.common.constant.ResultEnum.PERMISSION_TOKEN_EXPIRED, null);
         }
@@ -134,8 +158,9 @@ public class AuthorizeController {
         Long userId = (Long) request.getAttribute(Const.ATTR_USER_ID);
         Long tenantId = (Long) request.getAttribute(Const.ATTR_TENANT_ID);
         String role = (String) request.getAttribute(Const.ATTR_USER_ROLE);
+        Long authVersion = (Long) request.getAttribute(Const.ATTR_AUTH_VERSION);
 
-        String sseToken = jwtUtils.createSseToken(userId, tenantId, role);
+        String sseToken = jwtUtils.createSseToken(userId, tenantId, role, authVersion);
         return Result.success(new SseTokenVO(sseToken, Const.SSE_TOKEN_TTL));
     }
 

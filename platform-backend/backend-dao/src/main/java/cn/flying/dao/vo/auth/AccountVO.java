@@ -28,6 +28,13 @@ public class AccountVO {
     String email;
     @Schema(description = "角色")
     String role;
+    @Schema(
+            description = "身份作用域：tenant 或 platform",
+            allowableValues = {"tenant", "platform"},
+            requiredMode = Schema.RequiredMode.REQUIRED)
+    String scope;
+    @Schema(description = "授权状态：1-启用，0-禁用")
+    Integer status;
     @Schema(description = "头像Url")
     String avatar;
     @Schema(description = "昵称")
@@ -45,6 +52,8 @@ public class AccountVO {
                 ", username='" + username + '\'' +
                 ", email='" + email + '\'' +
                 ", role='" + role + '\'' +
+                ", scope='" + scope + '\'' +
+                ", status=" + status +
                 ", avatar='" + avatar + '\'' +
                 ", nickname='" + nickname + '\'' +
                 ", registerTime=" + registerTime +

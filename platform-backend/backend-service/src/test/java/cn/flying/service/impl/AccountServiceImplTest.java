@@ -7,6 +7,8 @@ import cn.flying.common.util.FlowUtils;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.mapper.AccountMapper;
+import cn.flying.dao.mapper.TenantMapper;
+import cn.flying.service.auth.AccountSessionRevocationService;
 import cn.flying.dao.vo.auth.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.MockedStatic;
 import org.mockito.Mock;
 import org.mockito.Spy;
@@ -58,6 +61,12 @@ class AccountServiceImplTest {
     @Mock
     private FlowUtils flow;
 
+    @Mock
+    private AccountSessionRevocationService accountSessionRevocationService;
+
+    @Mock
+    private TenantMapper tenantMapper;
+
     @Spy
     @InjectMocks
     private AccountServiceImpl accountService;
@@ -78,6 +87,48 @@ class AccountServiceImplTest {
         ReflectionTestUtils.setField(accountService, "registrationTenantId", REGISTRATION_TENANT_ID);
         ReflectionTestUtils.setField(accountService, "baseMapper", accountMapper);
         lenient().when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
+    }
+
+    @Nested
+    @DisplayName("platform bootstrap")
+    class PlatformBootstrap {
+
+        /** Serializes and creates the first platform administrator in tenant zero. */
+        @Test
+        void createsOnlyFirstPlatformAdministrator() {
+            when(tenantMapper.lockSystemTenantForPlatformBootstrap()).thenReturn(0L);
+            when(accountMapper.countPlatformAdministrators()).thenReturn(0L);
+            when(accountMapper.insert(any(Account.class))).thenReturn(1);
+
+            Account created;
+            try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                idUtilsMock.when(IdUtils::nextUserId).thenReturn(USER_ID);
+                created = accountService.createPlatformAdministrator(USERNAME, EMAIL, ENCODED_PASSWORD);
+            }
+
+            assertEquals(0L, created.getTenantId());
+            assertEquals(UserRole.ROLE_PLATFORM_ADMIN.getRole(), created.getRole());
+            assertEquals(1, created.getStatus());
+            assertEquals(0L, created.getAuthVersion());
+            InOrder order = inOrder(tenantMapper, accountMapper);
+            order.verify(tenantMapper).lockSystemTenantForPlatformBootstrap();
+            order.verify(accountMapper).countPlatformAdministrators();
+            order.verify(accountMapper).insert(any(Account.class));
+        }
+
+        /** Duplicate bootstrap attempts fail after taking the shared system-tenant lock. */
+        @Test
+        void rejectsDuplicatePlatformAdministrator() {
+            when(tenantMapper.lockSystemTenantForPlatformBootstrap()).thenReturn(0L);
+            when(accountMapper.countPlatformAdministrators()).thenReturn(1L);
+
+            IllegalStateException exception = assertThrows(IllegalStateException.class,
+                    () -> accountService.createPlatformAdministrator(USERNAME, EMAIL, ENCODED_PASSWORD));
+
+            assertEquals("Platform administrator bootstrap requires an empty platform administrator set",
+                    exception.getMessage());
+            verify(accountMapper, never()).insert(any(Account.class));
+        }
     }
 
     @AfterEach
@@ -122,6 +173,32 @@ class AccountServiceImplTest {
 
             assertThrows(UsernameNotFoundException.class,
                     () -> accountService.loadUserByUsername("nonexistent"));
+        }
+    }
+
+    @Nested
+    @DisplayName("password reset revocation")
+    class PasswordResetRevocation {
+
+        /** Password reset atomically increments authVersion and clears all account sessions. */
+        @Test
+        void resetsPasswordAndRevokesExistingSessions() {
+            EmailResetVO request = new EmailResetVO();
+            request.setEmail(EMAIL);
+            request.setCode(VERIFY_CODE);
+            request.setPassword("New-Synthetic9!Password");
+            Account account = createAccount();
+            when(valueOperations.get(Const.VERIFY_EMAIL_DATA + EMAIL)).thenReturn(VERIFY_CODE);
+            doReturn(account).when(accountService).findAccountByNameOrEmail(EMAIL);
+            when(passwordEncoder.encode("New-Synthetic9!Password")).thenReturn("new-password-hash");
+            when(accountMapper.updatePasswordAndIncrementAuthVersion(1L, USER_ID, "new-password-hash"))
+                    .thenReturn(1);
+
+            String result = accountService.resetEmailAccountPassword(request);
+
+            assertNull(result);
+            verify(accountSessionRevocationService).invalidateAfterVersionChange(1L, USER_ID);
+            verify(stringRedisTemplate).delete(Const.VERIFY_EMAIL_DATA + EMAIL);
         }
     }
 

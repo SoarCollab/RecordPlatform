@@ -16,6 +16,7 @@ import cn.flying.security.CustomMethodSecurityExpressionHandler;
 import cn.flying.service.AccountService;
 import cn.flying.service.LoginSecurityService;
 import cn.flying.service.PermissionService;
+import cn.flying.service.auth.AuthorizationStateService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
@@ -81,6 +82,9 @@ public class SecurityConfiguration {
     @Resource
     PrometheusScrapeSecurity prometheusScrapeSecurity;
 
+    @Resource
+    AuthorizationStateService authorizationStateService;
+
     /**
      * 针对于 SpringSecurity 6 的新版配置方法
      * @param http 配置器
@@ -118,6 +122,17 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/v1/public/proof-keys/*/versions/*").permitAll()
                         .requestMatchers("/api/v1/images/download/images/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/shares/*/info").permitAll()
+                        // Narrow authentication endpoints shared by tenant and platform identities.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/users/info").hasAnyRole(
+                                UserRole.ROLE_DEFAULT.getRole(),
+                                UserRole.ROLE_ADMINISTER.getRole(),
+                                UserRole.ROLE_MONITOR.getRole(),
+                                UserRole.ROLE_PLATFORM_ADMIN.getRole())
+                        .requestMatchers("/api/v1/auth/tokens/refresh", "/api/v1/auth/logout").hasAnyRole(
+                                UserRole.ROLE_DEFAULT.getRole(),
+                                UserRole.ROLE_ADMINISTER.getRole(),
+                                UserRole.ROLE_MONITOR.getRole(),
+                                UserRole.ROLE_PLATFORM_ADMIN.getRole())
                         // SSE 短期令牌发行需要用户已认证
                         .requestMatchers("/api/v1/auth/tokens/sse").hasAnyRole(
                                 UserRole.ROLE_DEFAULT.getRole(),
@@ -144,6 +159,8 @@ public class SecurityConfiguration {
                         .requestMatchers("/api/v1/system/logs/**", "/api/v1/audit/**").hasAnyRole(
                                 UserRole.ROLE_ADMINISTER.getRole(),
                                 UserRole.ROLE_MONITOR.getRole())
+                        // Platform routes are a separate route family and never accept tenant roles.
+                        .requestMatchers("/api/v1/platform/**").hasRole(UserRole.ROLE_PLATFORM_ADMIN.getRole())
                         // 其他所有请求需要任意角色
                         .anyRequest().hasAnyRole(
                                 UserRole.ROLE_DEFAULT.getRole(),
@@ -293,6 +310,18 @@ public class SecurityConfiguration {
         User user = (User) authentication.getPrincipal();
         Account account = service.findAccountByNameOrEmail(user.getUsername());
 
+        try {
+            if (!authorizationStateService.isLoginAuthorized(account)) {
+                writer.write(Result.error(ResultEnum.USER_LOGIN_ERROR, tracePayload(request, null)).toJson());
+                return;
+            }
+        } catch (RuntimeException exception) {
+            log.error("Login authorization state unavailable: exceptionType={}",
+                    exception.getClass().getSimpleName());
+            writer.write(Result.error(ResultEnum.SERVICE_UNAVAILABLE, tracePayload(request, null)).toJson());
+            return;
+        }
+
         // 清除登录失败记录
         if (username != null && !username.isEmpty()) {
             loginSecurityService.clearLoginFailure(username);
@@ -300,12 +329,15 @@ public class SecurityConfiguration {
 
         // 确保使用Long类型的用户ID
         Long userId = account.getId();
-        String jwt = utils.createJwt(user, account.getUsername(), userId, account.getTenantId());
+        Long authVersion = account.getAuthVersion();
+        String jwt = utils.createJwt(user, account.getUsername(), userId, account.getTenantId(), authVersion);
 
         if(jwt == null) {
             writer.write(Result.error(ResultEnum.PERMISSION_LIMIT, tracePayload(request, null)).toJson());
         } else {
+            service.recordSuccessfulLogin(account);
             AuthorizeVO vo = account.asViewObject(AuthorizeVO.class, o -> o.setToken(jwt));
+            vo.setScope(UserRole.getRole(account.getRole()).scope());
             vo.setExpire(utils.expireTime());
             writer.write(Result.success(vo).toJson());
         }

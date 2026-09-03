@@ -17,6 +17,11 @@ public class AuthorizeVO {
     String username;
     @Schema(description = "角色")
     String role;
+    @Schema(
+            description = "身份作用域：tenant 或 platform",
+            allowableValues = {"tenant", "platform"},
+            requiredMode = Schema.RequiredMode.REQUIRED)
+    String scope;
     @Schema(description = "token")
     String token;
     @Schema(description = "token过期时间")
@@ -27,7 +32,8 @@ public class AuthorizeVO {
         return "AuthorizeVO{" +
                 "username='" + username + '\'' +
                 ", role='" + role + '\'' +
-                ", token='" + token + '\'' +
+                ", scope='" + scope + '\'' +
+                ", token='[REDACTED]'" +
                 ", expire=" + expire +
                 '}';
     }
