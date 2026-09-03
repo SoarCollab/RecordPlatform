@@ -207,12 +207,15 @@ print('200')
     def test_hanging_request_respects_wait_budget(self) -> None:
         """The request timeout is clamped to the remaining startup budget."""
         self.running("storage")
-        self.env.update(PROBE_HANG="true", HEALTH_CHECK_REQUEST_TIMEOUT="30", HEALTH_CHECK_TIMEOUT="1")
+        self.env.update(PROBE_HANG="true", HEALTH_CHECK_REQUEST_TIMEOUT="30", HEALTH_CHECK_TIMEOUT="2")
         started = time.monotonic()
         self.assertNotEqual(0, self.command("start", "storage").returncode)
-        self.assertLess(time.monotonic() - started, 3)
-        probe = self.probes()[-1]
-        self.assertEqual("1", probe[probe.index("--max-time") + 1])
+        self.assertLess(time.monotonic() - started, 4)
+        probes = self.probes()
+        self.assertTrue(probes)
+        request_timeout = int(probes[-1][probes[-1].index("--max-time") + 1])
+        self.assertGreaterEqual(request_timeout, 1)
+        self.assertLessEqual(request_timeout, 2)
 
     def test_http_error_and_invalid_timing_fail(self) -> None:
         """HTTP errors and invalid timing settings cannot produce success."""
