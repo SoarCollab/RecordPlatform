@@ -81,6 +81,8 @@ public class SysAuditServiceImpl implements SysAuditService {
                 escapedUsername,
                 escapedModule,
                 queryVO.getOperationType(),
+                queryVO.getStatus(),
+                queryVO.getRequestIp(),
                 queryVO.getStartTime(),
                 queryVO.getEndTime(),
                 queryVO.getPageSize(),
@@ -93,6 +95,8 @@ public class SysAuditServiceImpl implements SysAuditService {
                 escapedUsername,
                 escapedModule,
                 queryVO.getOperationType(),
+                queryVO.getStatus(),
+                queryVO.getRequestIp(),
                 queryVO.getStartTime(),
                 queryVO.getEndTime()
         );

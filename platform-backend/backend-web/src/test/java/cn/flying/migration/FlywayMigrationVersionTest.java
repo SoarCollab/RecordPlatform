@@ -53,6 +53,7 @@ class FlywayMigrationVersionTest {
         assertTrue(migrationFiles.contains("V1.18.0__key_wrapping_provider_metadata.sql"));
         assertTrue(migrationFiles.contains("V1.19.0__automated_key_rotation.sql"));
         assertTrue(migrationFiles.contains("V1.20.0__runtime_crypto_agility.sql"));
+        assertTrue(migrationFiles.contains("V1.20.1__filter_sensitive_operation_view.sql"));
         assertFalse(migrationFiles.contains("V1.5.0__add_account_nickname.sql"));
         assertFalse(migrationFiles.contains("V1.7.3__integrity_alert.sql"));
 
@@ -126,6 +127,21 @@ class FlywayMigrationVersionTest {
         assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `tenant_crypto_policy_audit`"));
         assertTrue(normalizedSql.contains("FOREIGN KEY (`tenant_id`, `policy_id`) REFERENCES `tenant_crypto_policy` (`tenant_id`, `id`)"));
         assertFalse(normalizedSql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
+    }
+
+    /**
+     * Verifies the forward view repair uses the canonical sensitive-operation set.
+     */
+    @Test
+    @DisplayName("should filter the sensitive operation view through a forward migration")
+    void shouldFilterSensitiveOperationViewThroughForwardMigration() throws IOException {
+        String sql = Files.readString(resolveMigrationDir().resolve(
+                "V1.20.1__filter_sensitive_operation_view.sql"));
+        String normalizedSql = sql.replaceAll("\\s+", " ").trim();
+
+        assertTrue(normalizedSql.contains("CREATE OR REPLACE VIEW `v_sensitive_operations` AS"));
+        assertTrue(normalizedSql.contains("FROM `sys_operation_log` WHERE `operation_type` IN ('删除', '授权', '撤销', '备份', '上报')"));
+        assertFalse(normalizedSql.contains("SELECT *"));
     }
 
     /**

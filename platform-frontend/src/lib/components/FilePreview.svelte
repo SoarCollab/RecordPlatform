@@ -7,9 +7,16 @@
     contentType: string;
     fileName: string;
     class?: string;
+    fillContainer?: boolean;
   }
 
-  let { url, contentType, fileName, class: className = "" }: Props = $props();
+  let {
+    url,
+    contentType,
+    fileName,
+    class: className = "",
+    fillContainer = false,
+  }: Props = $props();
 
   let textContent = $state("");
   let loadingText = $state(false);
@@ -73,7 +80,11 @@
   }
 </script>
 
-<div class="file-preview {className}">
+<div
+  class="file-preview min-h-0 min-w-0 {fillContainer
+    ? 'h-full w-full'
+    : ''} {className}"
+>
   {#if nativePreviewError}
     <div
       class="bg-muted/30 flex flex-col items-center justify-center gap-4 rounded-lg border p-12"
@@ -85,20 +96,32 @@
       >
     </div>
   {:else if previewType === "image"}
-    <div class="bg-muted/30 flex items-center justify-center p-4">
+    <div
+      class="bg-muted/30 flex items-center justify-center p-4 {fillContainer
+        ? 'h-full'
+        : ''}"
+    >
       <img
         src={url}
         alt={fileName}
-        class="max-h-[70vh] max-w-full rounded-lg object-contain shadow-lg"
+        class="max-w-full rounded-lg object-contain shadow-lg {fillContainer
+          ? 'max-h-full'
+          : 'max-h-[70vh]'}"
         onerror={() => (nativePreviewError = true)}
       />
     </div>
   {:else if previewType === "video"}
-    <div class="flex items-center justify-center bg-black p-4">
+    <div
+      class="flex items-center justify-center bg-black p-4 {fillContainer
+        ? 'h-full'
+        : ''}"
+    >
       <video
         src={url}
         controls
-        class="max-h-[70vh] max-w-full rounded-lg"
+        class="max-w-full rounded-lg {fillContainer
+          ? 'max-h-full'
+          : 'max-h-[70vh]'}"
         preload="metadata"
         onerror={() => (nativePreviewError = true)}
       >
@@ -138,7 +161,7 @@
       </audio>
     </div>
   {:else if previewType === "pdf"}
-    <div class="h-[70vh] w-full">
+    <div class="w-full {fillContainer ? 'h-full' : 'h-[70vh]'}">
       <iframe
         src={url}
         title={fileName}
@@ -146,7 +169,11 @@
       ></iframe>
     </div>
   {:else if previewType === "text"}
-    <div class="bg-muted/30 overflow-hidden rounded-lg border">
+    <div
+      class="bg-muted/30 rounded-lg border {fillContainer
+        ? 'min-h-full min-w-full'
+        : 'overflow-hidden'}"
+    >
       {#if loadingText}
         <div class="flex items-center justify-center p-8">
           <div
@@ -159,7 +186,9 @@
         </div>
       {:else}
         <pre
-          class="max-h-[70vh] overflow-auto p-4 text-sm {getLanguageClass(
+          class="p-4 text-sm {fillContainer
+            ? 'min-h-full min-w-max'
+            : 'max-h-[70vh] overflow-auto'} {getLanguageClass(
             contentType,
           )}"><code>{textContent}</code></pre>
       {/if}
@@ -197,8 +226,9 @@
 <style>
   pre {
     margin: 0;
-    white-space: pre-wrap;
-    word-wrap: break-word;
+    white-space: pre;
+    overflow-wrap: normal;
+    word-break: normal;
   }
   code {
     font-family:

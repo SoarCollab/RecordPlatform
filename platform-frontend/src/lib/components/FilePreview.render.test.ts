@@ -78,6 +78,25 @@ describe("FilePreview", () => {
     expect(view.getByRole("link", { name: "下载文件" })).toBeTruthy();
   });
 
+  it("preserves wide text lines inside a horizontally scrollable preview", async () => {
+    const wideLine = "SELECT " + "column_name,".repeat(200);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(wideLine, { status: 200 })),
+    );
+    const view = render(FilePreview, {
+      url: "blob:https://example.test/wide-sql",
+      fileName: "wide.sql",
+      contentType: "text/plain",
+    });
+
+    await waitFor(() => expect(view.getByText(wideLine)).toBeTruthy());
+    const preview = view.container.querySelector("pre");
+    expect(preview).not.toBeNull();
+    expect(preview?.className).toContain("overflow-auto");
+    expect(window.getComputedStyle(preview!).whiteSpace).toBe("pre");
+  });
+
   it("resets a native decode failure and reloads text when the source changes", async () => {
     vi.stubGlobal(
       "fetch",

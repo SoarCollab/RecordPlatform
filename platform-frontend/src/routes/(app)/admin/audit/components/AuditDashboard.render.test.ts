@@ -8,12 +8,21 @@ const apiMocks = vi.hoisted(() => ({
   getUserTimeDistribution: vi.fn(),
   getAuditLogs: vi.fn(),
   getAuditLog: vi.fn(),
+  getSensitiveOperations: vi.fn(),
 }));
 
 vi.mock("$api/endpoints/system", () => apiMocks);
 
 import AuditDashboard from "./AuditDashboard.svelte";
 import AuditLogList from "./AuditLogList.svelte";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
+}
 
 describe("AuditDashboard high-frequency drill", () => {
   const alert = {
@@ -36,6 +45,10 @@ describe("AuditDashboard high-frequency drill", () => {
     apiMocks.getErrorOperationStats.mockResolvedValue([]);
     apiMocks.getUserTimeDistribution.mockResolvedValue([]);
     apiMocks.getAuditLogs.mockResolvedValue({ records: [], total: 0 });
+    apiMocks.getSensitiveOperations.mockResolvedValue({
+      records: [],
+      total: 0,
+    });
     vi.stubGlobal("scrollTo", vi.fn());
     Element.prototype.scrollIntoView = vi.fn();
   });
@@ -105,5 +118,101 @@ describe("AuditDashboard high-frequency drill", () => {
     expect(
       (view.getByPlaceholderText("请求 IP") as HTMLInputElement).value,
     ).toBe(alert.requestIp);
+  });
+
+  it("uses server-side pagination when sensitive mode is selected", async () => {
+    apiMocks.getSensitiveOperations.mockResolvedValue({
+      records: [
+        {
+          id: "ext-sensitive-1",
+          module: "权限管理",
+          operationType: "授权",
+          requestIp: "10.1.0.2",
+          status: 0,
+          userId: "user-1",
+          username: "tester",
+          operationTime: "2026-09-03 09:45:50",
+          executionTime: 9,
+        },
+      ],
+      total: 21,
+    });
+    const view = render(AuditLogList);
+
+    await waitFor(() => expect(apiMocks.getAuditLogs).toHaveBeenCalled());
+    await fireEvent.click(view.getByRole("button", { name: "敏感" }));
+
+    await waitFor(() => {
+      expect(apiMocks.getSensitiveOperations).toHaveBeenCalledWith({
+        pageNum: 1,
+        pageSize: 20,
+      });
+    });
+    expect(view.getAllByText("授权")).toHaveLength(2);
+    expect(view.getByText(/共 21 条/)).toBeTruthy();
+    expect(apiMocks.getAuditLogs).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores an older ordinary-page response after switching to sensitive mode", async () => {
+    const ordinaryRequest = deferred<{
+      records: Array<{
+        id: string;
+        userId: string;
+        username: string;
+        action: string;
+        module: string;
+        ip: string;
+        status: number;
+        duration: number;
+        createTime: string;
+      }>;
+      total: number;
+    }>();
+    apiMocks.getAuditLogs.mockReturnValueOnce(ordinaryRequest.promise);
+    apiMocks.getSensitiveOperations.mockResolvedValueOnce({
+      records: [
+        {
+          id: "ext-sensitive-latest",
+          module: "权限管理",
+          operationType: "删除",
+          requestIp: "10.1.0.2",
+          status: 0,
+          userId: "user-1",
+          username: "sensitive-latest",
+          operationTime: "2026-09-03 09:45:50",
+          executionTime: 9,
+        },
+      ],
+      total: 1,
+    });
+
+    const view = render(AuditLogList);
+    await waitFor(() => expect(apiMocks.getAuditLogs).toHaveBeenCalledOnce());
+    await fireEvent.click(view.getByRole("button", { name: "敏感" }));
+    await waitFor(() =>
+      expect(view.getByText("sensitive-latest")).toBeTruthy(),
+    );
+
+    ordinaryRequest.resolve({
+      records: [
+        {
+          id: "ext-ordinary-stale",
+          userId: "user-2",
+          username: "ordinary-stale",
+          action: "查询",
+          module: "系统审计",
+          ip: "10.1.0.3",
+          status: 0,
+          duration: 3,
+          createTime: "2026-09-03 09:45:49",
+        },
+      ],
+      total: 1,
+    });
+
+    await waitFor(() => {
+      expect(view.queryByText("ordinary-stale")).toBeNull();
+      expect(view.getByText("sensitive-latest")).toBeTruthy();
+    });
   });
 });
