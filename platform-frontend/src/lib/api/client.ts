@@ -438,6 +438,14 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
       return request<T>("DELETE", path, undefined, config);
     },
 
+    deleteWithBody<T>(
+      path: string,
+      body: unknown,
+      config?: RequestConfig,
+    ): Promise<T> {
+      return request<T>("DELETE", path, body, config);
+    },
+
     patch<T>(path: string, body?: unknown, config?: RequestConfig): Promise<T> {
       return request<T>("PATCH", path, body, config);
     },

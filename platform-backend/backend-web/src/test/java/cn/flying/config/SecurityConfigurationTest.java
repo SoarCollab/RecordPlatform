@@ -151,6 +151,20 @@ class SecurityConfigurationTest {
                 ".requestMatchers(\"/api/v1/public/shares/**\").permitAll()"));
     }
 
+    /** Keeps invitation acceptance anonymous only for the exact POST operation. */
+    @Test
+    void shouldPermitOnlyExactPublicInvitationPost() throws Exception {
+        String securityConfiguration = Files.readString(
+                Path.of("src/main/java/cn/flying/config/SecurityConfiguration.java"));
+
+        assertTrue(securityConfiguration.contains(
+                ".requestMatchers(HttpMethod.POST, \"/api/v1/public/invitations/accept\").permitAll()"));
+        assertFalse(securityConfiguration.contains(
+                "\"/api/v1/public/invitations/accept\",\n                                \"/error\""));
+        assertFalse(securityConfiguration.contains(
+                ".requestMatchers(\"/api/v1/public/invitations/**\").permitAll()"));
+    }
+
     /**
      * 验证 Knife4j 默认使用生产模式，避免默认暴露接口文档。
      */

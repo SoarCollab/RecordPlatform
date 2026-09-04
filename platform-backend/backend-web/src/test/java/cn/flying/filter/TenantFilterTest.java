@@ -67,6 +67,55 @@ class TenantFilterTest {
         assertNull(TenantContext.getTenantId());
     }
 
+    /** Public invitation acceptance must ignore spoofed tenant headers and recover ownership from the token digest. */
+    @Test
+    @DisplayName("should ignore tenant headers for public invitation acceptance")
+    void shouldIgnoreTenantHeadersForPublicInvitationAcceptance() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/public/invitations/accept");
+        request.setServletPath("/api/v1/public/invitations/accept");
+        request.addHeader("X-Tenant-ID", "spoofed");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        doAnswer(invocation -> {
+            assertNull(TenantContext.getTenantId());
+            assertNull(request.getAttribute(Const.ATTR_TENANT_ID));
+            return null;
+        }).when(filterChain).doFilter(request, response);
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        verify(filterChain).doFilter(request, response);
+        assertEquals(200, response.getStatus());
+    }
+
+    /** Non-POST invitation operations remain tenant protected. */
+    @Test
+    @DisplayName("should require tenant for non-post invitation operation")
+    void shouldRequireTenantForNonPostInvitationOperation() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/public/invitations/accept");
+        request.setServletPath("/api/v1/public/invitations/accept");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        verify(filterChain, never()).doFilter(request, response);
+        assertEquals(400, response.getStatus());
+    }
+
+    /** Descendants must not inherit the anonymous invitation exception. */
+    @Test
+    @DisplayName("should require tenant for invitation descendants")
+    void shouldRequireTenantForInvitationDescendants() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/api/v1/public/invitations/accept/extra");
+        request.setServletPath("/api/v1/public/invitations/accept/extra");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        verify(filterChain, never()).doFilter(request, response);
+        assertEquals(400, response.getStatus());
+    }
+
     @Test
     @DisplayName("should allow share info endpoint without tenant header")
     void shouldAllowShareEndpointWithoutTenantHeader() throws ServletException, IOException {

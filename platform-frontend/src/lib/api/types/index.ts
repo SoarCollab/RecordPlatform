@@ -19,3 +19,4 @@ export * from "./tickets";
 export * from "./system";
 export * from "./admin";
 export * from "./friends";
+export * from "./tenant-users";

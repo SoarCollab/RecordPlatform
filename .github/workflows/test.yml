@@ -144,6 +144,29 @@ jobs:
                   raise SystemExit(f"CrossTenantHealthIndicatorIT {name}={actual}; expected {expected}")
           PY
 
+      - name: Require Tenant User Management IT Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          report = Path(
+              "platform-backend/backend-web/target/failsafe-reports/"
+              "TEST-cn.flying.service.admin.TenantUserManagementMySqlIT.xml"
+          )
+          if not report.is_file():
+              sys.exit(f"Missing required Failsafe report: {report}")
+
+          suite = ET.parse(report).getroot()
+          for name, expected in {"tests": 5, "skipped": 0, "failures": 0, "errors": 0}.items():
+              actual = int(suite.attrib.get(name, "-1"))
+              if actual != expected:
+                  sys.exit(
+                      f"TenantUserManagementMySqlIT {name}={actual}; expected {expected}"
+                  )
+          PY
+
       - name: Require Permission Tenant Isolation IT Execution
         run: |
           python3 - <<'PY'

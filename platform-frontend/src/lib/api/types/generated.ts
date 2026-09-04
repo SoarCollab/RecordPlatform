@@ -724,6 +724,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 分页查询本租户成员 */
+        get: operations["list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询本租户邀请 */
+        get: operations["invitations"];
+        put?: never;
+        /** 邀请租户成员 */
+        post: operations["invite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/invitations/{invitationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 撤销租户成员邀请 */
+        delete: operations["revokeInvitation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询本租户成员详情 */
+        get: operations["get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{userId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改租户成员角色 */
+        put: operations["changeRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{userId}/sessions/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 强制租户成员退出 */
+        post: operations["revokeSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{userId}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改租户成员状态 */
+        put: operations["changeStatus"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/announcements": {
         parameters: {
             query?: never;
@@ -1901,6 +2021,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/invitations/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 接受租户成员邀请
+         * @description 匿名 POST；忽略调用方租户头，仅由一次性邀请令牌恢复所属租户。
+         */
+        post: operations["accept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/key-grants/consume": {
         parameters: {
             query?: never;
@@ -3019,6 +3159,12 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AcceptTenantInvitationRequest: {
+            nickname?: string;
+            password: string;
+            token: string;
+            username: string;
+        };
         /** @description 用户响应类 */
         AccountVO: {
             /** @description 头像Url */
@@ -3685,6 +3831,15 @@ export interface components {
             /** @description 旧密码 */
             password?: string;
         };
+        ChangeTenantMemberRoleRequest: {
+            reason: string;
+            role: string;
+        };
+        ChangeTenantMemberStatusRequest: {
+            reason: string;
+            /** Format: int32 */
+            status: number;
+        };
         /** @description 组件健康状态 */
         ComponentHealthVO: {
             /** @description 详细信息 */
@@ -3780,6 +3935,13 @@ export interface components {
              * @description 未读消息数
              */
             unreadCount?: number;
+        };
+        CreateTenantInvitationRequest: {
+            email: string;
+            /** Format: int32 */
+            expiresInHours: number;
+            reason: string;
+            role: string;
         };
         /** @description 创建新版本请求 */
         CreateVersionVO: {
@@ -4775,6 +4937,16 @@ export interface components {
             /** Format: int64 */
             current?: number;
             records?: components["schemas"]["SysPermissionVO"][];
+            /** Format: int64 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+        };
+        /** @description 结果数据 */
+        IPageTenantMemberVO: {
+            /** Format: int64 */
+            current?: number;
+            records?: components["schemas"]["TenantMemberVO"][];
             /** Format: int64 */
             size?: number;
             /** Format: int64 */
@@ -5952,6 +6124,17 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
+        ResultIPageTenantMemberVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["IPageTenantMemberVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
         ResultIPageTicketVO: {
             /**
              * Format: int32
@@ -6158,6 +6341,18 @@ export interface components {
             code?: number;
             /** @description 结果数据 */
             data?: components["schemas"]["SysPermissionVO"][];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultListTenantInvitationVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            /** @description 结果数据 */
+            data?: components["schemas"]["TenantInvitationVO"][];
             /** @description 提示信息 */
             message?: string;
         };
@@ -6498,6 +6693,28 @@ export interface components {
              */
             code?: number;
             data?: components["schemas"]["SystemStatsVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultTenantInvitationVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["TenantInvitationVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultTenantMemberVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["TenantMemberVO"];
             /** @description 提示信息 */
             message?: string;
         };
@@ -6940,6 +7157,39 @@ export interface components {
              * @description 总用户数
              */
             totalUsers?: number;
+        };
+        /** @description 租户成员邀请 */
+        TenantInvitationVO: {
+            /** Format: date-time */
+            createTime?: string;
+            email?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+            id?: string;
+            role?: string;
+            status?: string;
+        };
+        TenantMemberReasonRequest: {
+            reason: string;
+        };
+        /** @description 租户成员 */
+        TenantMemberVO: {
+            email?: string;
+            /** @description 成员外部ID */
+            id?: string;
+            /** Format: date-time */
+            lastLoginTime?: string;
+            nickname?: string;
+            /** Format: date-time */
+            registerTime?: string;
+            /** @enum {string} */
+            role?: "user" | "admin" | "monitor";
+            /**
+             * Format: int32
+             * @description 1-启用，0-禁用
+             */
+            status?: number;
+            username?: string;
         };
         /** @description 工单附件信息 */
         TicketAttachmentVO: {
@@ -8464,6 +8714,202 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultString"];
+                };
+            };
+        };
+    };
+    list: {
+        parameters: {
+            query?: {
+                keyword?: string;
+                pageNum?: number;
+                pageSize?: number;
+                role?: string;
+                status?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultIPageTenantMemberVO"];
+                };
+            };
+        };
+    };
+    invitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultListTenantInvitationVO"];
+                };
+            };
+        };
+    };
+    invite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTenantInvitationRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultTenantInvitationVO"];
+                };
+            };
+        };
+    };
+    revokeInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invitationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantMemberReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultString"];
+                };
+            };
+        };
+    };
+    get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultTenantMemberVO"];
+                };
+            };
+        };
+    };
+    changeRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeTenantMemberRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultString"];
+                };
+            };
+        };
+    };
+    revokeSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantMemberReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultString"];
+                };
+            };
+        };
+    };
+    changeStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeTenantMemberStatusRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -10102,6 +10548,30 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultMapStringInteger"];
+                };
+            };
+        };
+    };
+    accept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptTenantInvitationRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultTenantMemberVO"];
                 };
             };
         };
