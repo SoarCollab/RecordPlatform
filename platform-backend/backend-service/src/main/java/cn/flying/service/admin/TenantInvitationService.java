@@ -9,6 +9,7 @@ import cn.flying.dao.dto.Account;
 import cn.flying.dao.entity.AccountInvitation;
 import cn.flying.dao.mapper.AccountInvitationMapper;
 import cn.flying.dao.mapper.AccountMapper;
+import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.dao.vo.admin.AcceptTenantInvitationRequest;
 import cn.flying.dao.vo.admin.CreateTenantInvitationRequest;
 import cn.flying.dao.vo.admin.TenantInvitationVO;
@@ -30,6 +31,7 @@ import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 /** Manages digest-only, tenant-bound member invitations. */
 @Service
@@ -40,6 +42,7 @@ public class TenantInvitationService {
     private static final String PENDING = "PENDING";
     private final AccountInvitationMapper invitationMapper;
     private final AccountMapper accountMapper;
+    private final TenantMapper tenantMapper;
     private final PasswordEncoder passwordEncoder;
     private final TenantInvitationMailSender invitationMailSender;
     private final TenantMemberAuditService auditService;
@@ -53,6 +56,7 @@ public class TenantInvitationService {
         String email = normalizeEmail(request.email());
         String reason = auditService.sanitizeReason(request.reason());
         requireAssignableRole(request.role());
+        lockTenantForInvitationCreation(tenantId);
         if (accountMapper.countByGlobalEmail(email) != 0) {
             throw new GeneralException(ResultEnum.INVITATION_ACCOUNT_CONFLICT);
         }
@@ -187,6 +191,14 @@ public class TenantInvitationService {
     private void requireAssignableRole(String role) {
         if (!UserRole.getRole(role).isTenantRole()) {
             throw new GeneralException(ResultEnum.PARAM_IS_INVALID);
+        }
+    }
+
+    /** Serializes pending-invitation creation before MySQL range scans and insertion. */
+    private void lockTenantForInvitationCreation(Long tenantId) {
+        if (tenantId == null || tenantId < 0
+                || !Objects.equals(tenantMapper.lockTenantForMemberMutation(tenantId), tenantId)) {
+            throw new GeneralException(ResultEnum.TENANT_MEMBER_NOT_FOUND);
         }
     }
 

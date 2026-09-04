@@ -9,6 +9,7 @@ import cn.flying.common.util.SnowflakeIdGenerator;
 import cn.flying.dao.entity.AccountInvitation;
 import cn.flying.dao.mapper.AccountInvitationMapper;
 import cn.flying.dao.mapper.AccountMapper;
+import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.dao.vo.admin.AcceptTenantInvitationRequest;
 import cn.flying.dao.vo.admin.CreateTenantInvitationRequest;
 import org.junit.jupiter.api.AfterEach;
@@ -41,6 +42,7 @@ class TenantInvitationServiceTest {
 
     @Mock private AccountInvitationMapper invitationMapper;
     @Mock private AccountMapper accountMapper;
+    @Mock private TenantMapper tenantMapper;
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private TenantInvitationMailSender invitationMailSender;
     @Mock private TenantMemberAuditService auditService;
@@ -55,9 +57,11 @@ class TenantInvitationServiceTest {
         lenient().when(codec.toExternalUserId(any())).thenReturn("U-member");
         new IdUtils(snowflake, codec);
         service = new TenantInvitationService(
-                invitationMapper, accountMapper, passwordEncoder, invitationMailSender, auditService);
+                invitationMapper, accountMapper, tenantMapper, passwordEncoder, invitationMailSender, auditService);
         ReflectionTestUtils.setField(service, "invitationAcceptUrl", "https://record.test/invitations/accept");
         lenient().when(auditService.sanitizeReason("approved")).thenReturn("approved");
+        lenient().when(tenantMapper.lockTenantForMemberMutation(any())).thenAnswer(
+                invocation -> invocation.getArgument(0));
     }
 
     @AfterEach
@@ -84,6 +88,7 @@ class TenantInvitationServiceTest {
                 .startsWith("https://record.test/invitations/accept#token=")
                 .doesNotContain("?token=");
         verify(invitationMapper).expirePastDueByEmail(eq(0L), eq("user@example.com"), any());
+        verify(tenantMapper).lockTenantForMemberMutation(0L);
     }
 
     @Test
