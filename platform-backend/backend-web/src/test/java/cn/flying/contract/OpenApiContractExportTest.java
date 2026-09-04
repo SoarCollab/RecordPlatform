@@ -26,12 +26,14 @@ import cn.flying.controller.PermissionController;
 import cn.flying.controller.QuotaAdminController;
 import cn.flying.controller.QuotaController;
 import cn.flying.controller.PublicProofController;
+import cn.flying.controller.PublicInvitationController;
 import cn.flying.controller.RolePermissionController;
 import cn.flying.controller.ShareController;
 import cn.flying.controller.ShareRestController;
 import cn.flying.controller.SseController;
 import cn.flying.controller.SysAuditController;
 import cn.flying.controller.SystemController;
+import cn.flying.controller.TenantUserAdminController;
 import cn.flying.controller.TicketController;
 import cn.flying.controller.TransactionController;
 import cn.flying.controller.UploadSessionController;
@@ -77,6 +79,9 @@ import cn.flying.service.proof.signed.SignedProofArchiveService;
 import cn.flying.service.proof.signed.ProofSigningProviderRegistry;
 import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.service.auth.AuthorizationStateService;
+import cn.flying.service.admin.TenantInvitationService;
+import cn.flying.service.admin.TenantMemberCommandService;
+import cn.flying.service.admin.TenantMemberQueryService;
 import cn.flying.security.TrustedClientIpResolver;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -281,6 +286,15 @@ class OpenApiContractExportTest {
     @MockitoBean
     private RedissonClient redissonClient;
 
+    @MockitoBean
+    private TenantInvitationService tenantInvitationService;
+
+    @MockitoBean
+    private TenantMemberCommandService tenantMemberCommandService;
+
+    @MockitoBean
+    private TenantMemberQueryService tenantMemberQueryService;
+
     /**
      * 调用 `/v3/api-docs` 并将结果写入 `target/openapi/openapi.json`。
      *
@@ -414,6 +428,11 @@ class OpenApiContractExportTest {
                 "/api/v1/public/key-grants/consume",
                 "#/components/schemas/DownloadKeyGrantConsumeRequestVO",
                 "#/components/schemas/ResultDownloadKeyMaterialVO");
+        assertAnonymousPostOperation(
+                rootNode,
+                "/api/v1/public/invitations/accept",
+                "#/components/schemas/AcceptTenantInvitationRequest",
+                "#/components/schemas/ResultTenantMemberVO");
         assertProtectedOperation(rootNode, "/api/v1/shares", "post");
         assertProtectedOperation(rootNode, "/api/v1/shares/{shareCode}", "patch");
         assertProtectedOperation(rootNode, "/api/v1/shares/{shareCode}/files/save", "post");
@@ -919,12 +938,14 @@ class OpenApiContractExportTest {
             QuotaAdminController.class,
             QuotaController.class,
             PublicProofController.class,
+            PublicInvitationController.class,
             RolePermissionController.class,
             ShareController.class,
             ShareRestController.class,
             SseController.class,
             SysAuditController.class,
             SystemController.class,
+            TenantUserAdminController.class,
             TicketController.class,
             TransactionController.class,
             UploadSessionController.class

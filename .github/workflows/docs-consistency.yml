@@ -97,7 +97,18 @@ jobs:
         run: pnpm -C docs install --frozen-lockfile
 
       - name: Audit docs production and development dependencies
-        run: corepack pnpm@10.26.1 -C docs audit --audit-level high
+        run: |
+          for attempt in 1 2; do
+            if corepack pnpm@10.26.1 -C docs audit --audit-level high; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              echo "Docs dependency audit failed after $attempt attempts"
+              exit 1
+            fi
+            echo "Docs dependency audit request failed; retrying in 20 seconds"
+            sleep 20
+          done
 
       - name: Build docs
         run: pnpm -C docs docs:build

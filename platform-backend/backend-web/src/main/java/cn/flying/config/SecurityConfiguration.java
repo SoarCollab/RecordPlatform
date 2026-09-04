@@ -112,6 +112,7 @@ public class SecurityConfiguration {
                                 "/api/v1/auth/password-resets",
                                 "/error"
                         ).permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/public/invitations/accept").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/shares/*/files").permitAll()
                         .requestMatchers(HttpMethod.GET,
                                 "/api/v1/public/shares/*/files/*/chunks",
