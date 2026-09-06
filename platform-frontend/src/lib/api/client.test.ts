@@ -1,4 +1,16 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeAll,
+  beforeEach,
+  afterAll,
+  afterEach,
+} from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
+import { transferableAbortController } from "node:util";
 import { ResultCode } from "./types";
 import {
   getToken,
@@ -499,6 +511,22 @@ describe("API Client", () => {
     });
 
     describe("DELETE requests", () => {
+      const server = setupServer();
+
+      beforeAll(() => {
+        // Pair Node's real fetch with its native AbortSignal, not jsdom's realm.
+        vi.stubGlobal(
+          "AbortController",
+          transferableAbortController().constructor,
+        );
+        server.listen({ onUnhandledRequest: "error" });
+      });
+      afterEach(() => server.resetHandlers());
+      afterAll(() => {
+        server.close();
+        vi.unstubAllGlobals();
+      });
+
       it("should make DELETE request", async () => {
         const mockFetch = createMockFetch({});
         const api = createApiClient({
@@ -510,6 +538,90 @@ describe("API Client", () => {
 
         const [, options] = mockFetch.mock.calls[0];
         expect(options.method).toBe("DELETE");
+      });
+
+      it("sends an invitation revocation reason in the JSON body with the current admin identity", async () => {
+        const received = vi.fn();
+        server.use(
+          http.delete(
+            "https://api.test.com/admin/users/invitations/I-invite",
+            async ({ request }) => {
+              received({
+                url: request.url,
+                body: await request.json(),
+                contentType: request.headers.get("Content-Type"),
+                authorization: request.headers.get("Authorization"),
+                tenantId: request.headers.get("X-Tenant-ID"),
+                requestId: request.headers.get("X-Request-ID"),
+              });
+              return HttpResponse.json({
+                code: ResultCode.SUCCESS,
+                message: "success",
+                data: null,
+              });
+            },
+          ),
+        );
+        const api = createApiClient({
+          baseUrl: "https://api.test.com",
+          tenantId: "42",
+          getToken: () => "admin-token",
+        });
+
+        await expect(
+          api.deleteWithBody<void>(
+            "/admin/users/invitations/I-invite",
+            { reason: "Invitation no longer required" },
+            { headers: { "X-Request-ID": "revoke-request" } },
+          ),
+        ).resolves.toBeNull();
+
+        expect(received).toHaveBeenCalledExactlyOnceWith({
+          url: "https://api.test.com/admin/users/invitations/I-invite",
+          body: { reason: "Invitation no longer required" },
+          contentType: "application/json",
+          authorization: "Bearer admin-token",
+          tenantId: "42",
+          requestId: "revoke-request",
+        });
+      });
+
+      it("preserves invitation revocation errors without invalidating the admin session", async () => {
+        const onUnauthorized = vi.fn();
+        const response = vi.fn(() =>
+          HttpResponse.json({
+            code: 20021,
+            message: "邀请无效、已过期或已使用",
+            data: {
+              traceId: "trace-invitation-revoke",
+              detail: "邀请已被接受，无法撤销",
+            },
+          }),
+        );
+        server.use(
+          http.delete(
+            "https://api.test.com/admin/users/invitations/I-invite",
+            response,
+          ),
+        );
+        const api = createApiClient({
+          baseUrl: "https://api.test.com",
+          onUnauthorized,
+        });
+
+        await expect(
+          api.deleteWithBody<void>("/admin/users/invitations/I-invite", {
+            reason: "Invitation no longer required",
+          }),
+        ).rejects.toMatchObject({
+          name: "ApiError",
+          code: 20021,
+          message: "邀请已被接受，无法撤销",
+          traceId: "trace-invitation-revoke",
+          isUnauthorized: false,
+        });
+        expect(response).toHaveBeenCalledTimes(1);
+        expect(onUnauthorized).not.toHaveBeenCalled();
       });
     });
 

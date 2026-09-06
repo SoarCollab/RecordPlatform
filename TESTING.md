@@ -2,19 +2,19 @@
 
 本项目采用"单元测试优先 + 少量高价值集成测试"的策略，目标是在 CI 中尽早发现回归，同时保持本地开发的执行成本足够低。
 
-## 当前测试文件快照（359 files）
+## 当前测试文件快照（364 files）
 
-> 2026-09-04 按 canonical source tree 中的 `*Test.java` / `*IT.java` / `*.test.ts` / `*.spec.ts` / `test_*.py` / `*_test.py` 统计。该数字是文件快照，不等同 test case 数；以下长表只说明代表性覆盖。`tools/docs/check_consistency.py --check-evidence` 会从 exact tree 重新计算并核对本表。
+> 2026-09-06 按 canonical source tree 中的 `*Test.java` / `*IT.java` / `*.test.ts` / `*.spec.ts` / `test_*.py` / `*_test.py` 统计。该数字是文件快照，不等同 test case 数；以下长表只说明代表性覆盖。`tools/docs/check_consistency.py --check-evidence` 会从 exact tree 重新计算并核对本表。
 
 | Component | Test files |
 | --- | ---: |
 | `platform-backend/backend-common` | 13 |
 | `platform-backend/backend-api` | 1 |
-| `platform-backend/backend-service` | 103 |
-| `platform-backend/backend-web` | 115 |
-| `platform-backend` | 232 |
+| `platform-backend/backend-service` | 104 |
+| `platform-backend/backend-web` | 117 |
+| `platform-backend` | 235 |
 | `platform-storage` | 28 |
-| `platform-frontend` | 55 |
+| `platform-frontend` | 57 |
 | `platform-verifier` | 15 |
 | `platform-fisco` | 14 |
 | `platform-api` | 3 |
@@ -22,7 +22,7 @@
 | `tools/contracts` | 4 |
 | `tools/docs` | 1 |
 | `tools` | 12 |
-| `total` | 359 |
+| `total` | 364 |
 
 ### 后端单元测试（backend-common，代表性测试类）
 
@@ -62,6 +62,7 @@
 | PermissionServiceImplTest | 权限分配与校验 |
 | TenantInvitationServiceTest | 邀请摘要、过期、并发冲突与令牌保密边界 |
 | TenantMemberCommandServiceTest | 成员角色/状态、自保护、最后管理员与会话撤销 |
+| TenantMemberQueryServiceTest | 租户分页、筛选、外部用户 ID、隐藏平台账号与响应隐私 |
 | TenantMemberAuditServiceTest | 必填原因、敏感赋值脱敏与结构化错误 |
 | ShareAuditServiceImplTest | 分享审计日志 |
 | SysAuditServiceImplTest | 系统审计服务 |
@@ -119,7 +120,9 @@
 | QuotaControllerTest | 配额查询端点 |
 | IntegrityAlertControllerIT | 完整性告警管理端点（列表、触发、确认、解决） |
 | TenantUserAdminControllerSecurityTest | 固定 admin 角色与 `tenant:user:admin` 双重授权 |
-| TenantUserManagementMySqlIT | 最后管理员、邀请并发、平台账号隐藏与 Redis/SSE 撤销 |
+| TenantUserAdminControllerMvcTest | 全部管理路由的 HTTP 绑定、成功路径、双重权限与错误映射 |
+| PublicInvitationControllerMvcTest | 匿名接受、真实 TenantFilter、输入校验与上下文清理 |
+| TenantUserManagementMySqlIT | 最后管理员、邀请并发、租户生命周期与 RR 快照拒绝、平台账号隐藏及 Redis/SSE 撤销（CI 强制 10 例且零跳过） |
 | DirectTenantInvitationMailSenderTest | 不经持久消息队列的邀请邮件与失败脱敏 |
 
 #### 过滤器与安全测试

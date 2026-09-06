@@ -4,23 +4,34 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.JwtUtils;
+import cn.flying.dao.mapper.AccountInvitationMapper;
 import cn.flying.dao.vo.admin.AcceptTenantInvitationRequest;
 import cn.flying.dao.vo.admin.CreateTenantInvitationRequest;
 import cn.flying.service.auth.AuthorizationStateService;
 import cn.flying.test.BaseIntegrationTest;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Proves last-admin and invitation single-use contracts against real MySQL transactions. */
 class TenantUserManagementMySqlIT extends BaseIntegrationTest {
@@ -34,6 +45,8 @@ class TenantUserManagementMySqlIT extends BaseIntegrationTest {
     @Autowired private TenantMemberQueryService queryService;
     @Autowired private AuthorizationStateService authorizationStateService;
     @Autowired private JwtUtils jwtUtils;
+    @Autowired private AccountInvitationMapper invitationMapper;
+    @Autowired private PlatformTransactionManager transactionManager;
 
     @BeforeEach
     void setUpData() {
@@ -46,6 +59,12 @@ class TenantUserManagementMySqlIT extends BaseIntegrationTest {
         insertTenant(INVITE_TENANT, "member-invite-race");
         insertAccount(9220101L, ADMIN_TENANT, "race-admin-a", "race-a@example.test", "admin");
         insertAccount(9220102L, ADMIN_TENANT, "race-admin-b", "race-b@example.test", "admin");
+    }
+
+    /** Removes synthetic caller authority even when a lifecycle assertion fails. */
+    @AfterEach
+    void clearTenantContext() {
+        TenantContext.clear();
     }
 
     @Test
@@ -67,12 +86,7 @@ class TenantUserManagementMySqlIT extends BaseIntegrationTest {
     @Test
     void concurrentInvitationAcceptanceCreatesExactlyOneAccount() throws Exception {
         String token = "integration-invitation-token-" + "x".repeat(24);
-        jdbcTemplate.update("""
-                INSERT INTO account_invitation
-                    (id, tenant_id, token_hash, email, role, status, invited_by, expires_at, create_time, update_time)
-                VALUES (?, ?, ?, ?, 'user', 'PENDING', ?, DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 HOUR),
-                        CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))
-                """, 9220201L, INVITE_TENANT, sha256(token), "accepted-once@example.test", 9220101L);
+        insertInvitation(9220201L, token, "accepted-once@example.test");
 
         CountDownLatch start = new CountDownLatch(1);
         try (var executor = Executors.newFixedThreadPool(2)) {
@@ -89,6 +103,63 @@ class TenantUserManagementMySqlIT extends BaseIntegrationTest {
                 "SELECT status FROM account_invitation WHERE id = ?", String.class, 9220201L);
         assertThat(accounts).isEqualTo(1);
         assertThat(status).isEqualTo("ACCEPTED");
+    }
+
+    /** A valid capability cannot create accounts for an inactive, deleted, absent or corrupt owner tenant. */
+    @ParameterizedTest
+    @ValueSource(strings = {"disabled", "deleted", "missing", "invalid-version"})
+    void rejectsInvitationForUnavailableTenantAndRestoresCaller(String lifecycle) throws Exception {
+        String token = "integration-unavailable-tenant-" + "y".repeat(24);
+        String email = "unavailable-tenant@example.test";
+        insertInvitation(9220202L, token, email);
+        switch (lifecycle) {
+            case "disabled" -> jdbcTemplate.update("UPDATE tenant SET status = 0 WHERE id = ?", INVITE_TENANT);
+            case "deleted" -> jdbcTemplate.update("UPDATE tenant SET deleted = 1 WHERE id = ?", INVITE_TENANT);
+            case "missing" -> jdbcTemplate.update("DELETE FROM tenant WHERE id = ?", INVITE_TENANT);
+            case "invalid-version" -> jdbcTemplate.update("UPDATE tenant SET version = -1 WHERE id = ?", INVITE_TENANT);
+            default -> throw new AssertionError("Unknown tenant lifecycle fixture");
+        }
+        TenantContext.setTenantId(ADMIN_TENANT);
+        TenantContext.setIgnoreIsolation(true);
+
+        assertInvitationRejected(token);
+
+        assertThat(TenantContext.getTenantId()).isEqualTo(ADMIN_TENANT);
+        assertThat(TenantContext.isIgnoreIsolation()).isTrue();
+        assertInvitationUnconsumed(9220202L, email);
+    }
+
+    /** Tenant validation must see a committed disable even after owner lookup established an older RR snapshot. */
+    @Test
+    void rejectsTenantDisabledAfterOwnerLookupSnapshot() throws Exception {
+        String token = "integration-tenant-snapshot-" + "z".repeat(24);
+        String tokenHash = sha256(token);
+        String email = "tenant-snapshot@example.test";
+        insertInvitation(9220203L, token, email);
+        TenantContext.setTenantId(ADMIN_TENANT);
+        TenantContext.setIgnoreIsolation(true);
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        transaction.setTimeout(20);
+
+        transaction.executeWithoutResult(state -> {
+            assertThat(invitationMapper.selectOwnerTenantIdByTokenHash(tokenHash)).isEqualTo(INVITE_TENANT);
+            assertThat(jdbcTemplate.queryForObject("SELECT status FROM tenant WHERE id = ?",
+                    Integer.class, INVITE_TENANT)).isEqualTo(1);
+            disableInvitationTenantOnAnotherConnection();
+            assertThat(jdbcTemplate.queryForObject("SELECT status FROM tenant WHERE id = ?",
+                    Integer.class, INVITE_TENANT)).as("ordinary reads still use the older snapshot").isEqualTo(1);
+
+            assertInvitationRejected(token);
+
+            assertThat(TenantContext.getTenantId()).isEqualTo(ADMIN_TENANT);
+            assertThat(TenantContext.isIgnoreIsolation()).isTrue();
+            state.setRollbackOnly();
+        });
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM tenant WHERE id = ?",
+                Integer.class, INVITE_TENANT)).isZero();
+        assertInvitationUnconsumed(9220203L, email);
     }
 
     @Test
@@ -203,6 +274,57 @@ class TenantUserManagementMySqlIT extends BaseIntegrationTest {
                 VALUES (?, ?, ?, '$2a$10$integration.placeholder.hash.value', ?, ?, 1, 0,
                         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)
                 """, id, tenantId, username, email, role);
+    }
+
+    /** Inserts an unexpired pending capability bound to the dedicated invitation tenant. */
+    private void insertInvitation(long id, String token, String email) throws Exception {
+        jdbcTemplate.update("""
+                INSERT INTO account_invitation
+                    (id, tenant_id, token_hash, email, role, status, invited_by, expires_at, create_time, update_time)
+                VALUES (?, ?, ?, ?, 'user', 'PENDING', ?, DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 HOUR),
+                        CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))
+                """, id, INVITE_TENANT, sha256(token), email, 9220101L);
+    }
+
+    /** Checks the non-disclosing public rejection without relying on localized or secret-bearing detail. */
+    private void assertInvitationRejected(String token) {
+        assertThatThrownBy(() -> invitationService.accept(
+                new AcceptTenantInvitationRequest(token, "unavailable-tenant-member", null, "password123")))
+                .isInstanceOfSatisfying(GeneralException.class,
+                        error -> assertThat(error.getResultEnum()).isEqualTo(ResultEnum.INVITATION_INVALID));
+    }
+
+    /** Proves a denied acceptance preserves the capability and produces no account or success audit. */
+    private void assertInvitationUnconsumed(long invitationId, String email) {
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, accepted_by FROM account_invitation WHERE id = ?", invitationId))
+                .containsEntry("status", "PENDING").containsEntry("accepted_by", null);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM account WHERE tenant_id = ? AND email = ?",
+                Integer.class, INVITE_TENANT, email)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM account_member_audit WHERE tenant_id = ?",
+                Integer.class, INVITE_TENANT)).isZero();
+    }
+
+    /** Commits a lifecycle change on an independent connection with a bounded wait and no timing sleeps. */
+    private void disableInvitationTenantOnAnotherConnection() {
+        var executor = Executors.newSingleThreadExecutor();
+        Future<?> disable = executor.submit(() -> new TransactionTemplate(transactionManager)
+                .executeWithoutResult(state -> assertThat(jdbcTemplate.update(
+                        "UPDATE tenant SET status = 0, version = version + 1 WHERE id = ?", INVITE_TENANT))
+                        .isEqualTo(1)));
+        try {
+            disable.get(10, TimeUnit.SECONDS);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while disabling the invitation tenant", exception);
+        } catch (ExecutionException | TimeoutException exception) {
+            throw new AssertionError("Independent tenant disable did not commit", exception);
+        } finally {
+            disable.cancel(true);
+            executor.shutdownNow();
+        }
     }
 
     /** Produces the database lookup digest used by invitation acceptance. */

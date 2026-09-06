@@ -159,7 +159,7 @@ jobs:
               sys.exit(f"Missing required Failsafe report: {report}")
 
           suite = ET.parse(report).getroot()
-          for name, expected in {"tests": 5, "skipped": 0, "failures": 0, "errors": 0}.items():
+          for name, expected in {"tests": 10, "skipped": 0, "failures": 0, "errors": 0}.items():
               actual = int(suite.attrib.get(name, "-1"))
               if actual != expected:
                   sys.exit(

@@ -127,6 +127,9 @@ public class TenantInvitationService {
 
     /** Performs all tenant-owned acceptance reads and writes under the recovered owner context. */
     private TenantMemberVO acceptInTenant(Long tenantId, String tokenHash, AcceptTenantInvitationRequest request) {
+        if (!Objects.equals(tenantMapper.lockActiveTenantForInvitationAcceptance(tenantId), tenantId)) {
+            throw new GeneralException(ResultEnum.INVITATION_INVALID);
+        }
         AccountInvitation invitation = invitationMapper.selectForAcceptance(tenantId, tokenHash);
         LocalDateTime now = LocalDateTime.now();
         if (invitation == null || !PENDING.equals(invitation.getStatus())

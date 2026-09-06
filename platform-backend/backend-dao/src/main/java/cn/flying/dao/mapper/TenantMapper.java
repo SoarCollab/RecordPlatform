@@ -35,4 +35,13 @@ public interface TenantMapper extends BaseMapper<Tenant> {
     @InterceptorIgnore(tenantLine = "true")
     @Select("SELECT id FROM tenant WHERE id = #{tenantId} AND deleted = 0 FOR UPDATE")
     Long lockTenantForMemberMutation(@Param("tenantId") Long tenantId);
+
+    /** Locks current tenant state before accepting an invitation, independent of an earlier read snapshot. */
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("""
+            SELECT id FROM tenant
+             WHERE id = #{tenantId} AND status = 1 AND deleted = 0 AND version >= 0
+             FOR UPDATE
+            """)
+    Long lockActiveTenantForInvitationAcceptance(@Param("tenantId") Long tenantId);
 }

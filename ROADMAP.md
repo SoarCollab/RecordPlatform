@@ -1,6 +1,6 @@
 # RecordPlatform 演进路线图
 
-> 最后更新：2026-09-04
+> 最后更新：2026-09-06
 >
 > 定位：个人维护的开源项目，以自动化门禁和可复核证据替代人工判断
 
@@ -28,7 +28,7 @@
 | --- | ---: | --- |
 | REST 控制器 | 35 | `platform-backend/backend-web/src/main/java` |
 | 后端服务类 | 221 | `platform-backend/backend-service/src/main/java` |
-| 后端测试文件 | 232 | `platform-backend/**/src/test/java` |
+| 后端测试文件 | 235 | `platform-backend/**/src/test/java` |
 | 数据库迁移 | 41（V1.0.0 ~ V1.22.0） | `platform-backend/backend-web/src/main/resources/db/migration` |
 | 核心工作流 | 5 | `test.yml`、`perf-smoke.yml`、`docs.yml`、`security-poc.yml`、`docs-consistency.yml` |
 
