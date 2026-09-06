@@ -876,12 +876,12 @@ class PlatformControlPlaneMySqlIT extends BaseIntegrationTest {
                 """, id, tenant, user, PREFIX + user);
     }
 
-    /** Seeds completed and non-completed tenant batches without invoking remote blockchain providers. */
+    /** Seeds tenant batches with stable fixture-owned issuance keys without invoking remote blockchain providers. */
     private void insertAttestation(long id, long tenant, String status) {
         jdbc.update("""
-                INSERT INTO attestation_batch (id, tenant_id, batch_no, merkle_root, proof_algorithm, leaf_count, status, deleted)
-                VALUES (?, ?, ?, ?, 'SHA256', 1, ?, 0)
-                """, id, tenant, PREFIX + id, "a".repeat(64), status);
+                INSERT INTO attestation_batch (id, tenant_id, batch_no, idempotency_key, merkle_root, proof_algorithm, leaf_count, status, deleted)
+                VALUES (?, ?, ?, ?, ?, 'SHA256', 1, ?, 0)
+                """, id, tenant, PREFIX + id, PREFIX + "attestation-" + id, "a".repeat(64), status);
     }
 
     /** Inserts explicit permission ownership variants using test-only JDBC, bypassing service reservation guards. */
