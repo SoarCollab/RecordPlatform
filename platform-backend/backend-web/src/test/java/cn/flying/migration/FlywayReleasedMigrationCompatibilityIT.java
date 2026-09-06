@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Testcontainers(disabledWithoutDocker = false)
 class FlywayReleasedMigrationCompatibilityIT {
 
-    private static final String LATEST_VERSION = "1.21.0";
+    private static final String LATEST_VERSION = "1.22.0";
     private static final String RELEASED_VERSION = "1.7.0";
     private static final String RELEASED_V1_SHA256 =
             "2d62aa70b0f58851579db62034ad12556409201a3cd2e7ad036d709348150645";
@@ -52,7 +52,7 @@ class FlywayReleasedMigrationCompatibilityIT {
     private static final int KNOWN_REWRITTEN_NICKNAME_FLYWAY_CHECKSUM = 529309880;
     private static final int KNOWN_REWRITTEN_SOFT_DELETE_FLYWAY_CHECKSUM = 1607980540;
     private static final int KNOWN_REWRITTEN_INTEGRITY_FLYWAY_CHECKSUM = 2100652293;
-    private static final int KNOWN_REWRITTEN_MIGRATION_COUNT = 40;
+    private static final int KNOWN_REWRITTEN_MIGRATION_COUNT = 41;
 
     @Container
     private static final MySQLContainer<?> MYSQL =

@@ -58,6 +58,8 @@ S3_SECRET_KEY=<MinIO密钥>
 SPRING_PROFILES_ACTIVE=local   # local / dev / prod
 ```
 
+发送租户成员邀请前，将 `INVITATION_ACCEPT_URL` 设置为收件人能访问的 HTTPS 前端页面，例如 `https://records.example.org/invitations/accept`。默认的 `https://localhost/invitations/accept` 仅用于本地占位。该值不要包含查询参数、fragment 或令牌：后端会追加一次性 `#token=` fragment，接受页面读取后立即清除，再通过请求体提交令牌。`scripts/start.sh` 会从仓库根目录 `.env` 导出此配置；其他启动方式需要将它传入后端进程。修改后重启后端，并通过已配置的邮件服务验证一次邀请。邀请令牌和 SMTP 凭据不得写入已提交配置或日志。
+
 ::: warning
 不要在共享主机或服务器上使用 `.env.example` 的占位值。基础设施 Compose 会在缺少必填密钥时快速失败，上述密码和令牌都必须替换为当前环境专用的强随机值。
 :::

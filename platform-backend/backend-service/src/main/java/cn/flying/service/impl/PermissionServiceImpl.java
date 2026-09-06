@@ -25,7 +25,7 @@ import java.util.*;
 
 /**
  * 权限服务实现
- * 支持 Redis 缓存，缓存 key 格式: perm:role:{tenantId}:{role}
+ * 支持 Redis 缓存；版本化 key 在新增全局权限后避免复用旧角色授权快照。
  */
 @Slf4j
 @Service

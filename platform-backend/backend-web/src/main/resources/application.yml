@@ -63,6 +63,9 @@ spring:
         trusted-proxies: ${RATE_LIMIT_TRUSTED_PROXY_CIDRS:}
     registration:
       tenant-id: ${PUBLIC_REGISTRATION_TENANT_ID:0}
+    invitation:
+      # Public frontend URL; override per deployment without embedding environment-specific hosts.
+      accept-url: ${INVITATION_ACCEPT_URL:https://localhost/invitations/accept}
     flow:
       period: 3
       limit: 50
@@ -110,7 +113,7 @@ springdoc:
       paths-to-match: "/api/v1/conversations/**,/api/v1/messages/**,/api/v1/sse/**"
       packages-to-scan: cn.flying.controller
     - group: "系统管理服务"
-      paths-to-match: "/api/v1/system/**,/api/v1/announcements/**,/api/v1/tickets/**"
+      paths-to-match: "/api/v1/system/**,/api/v1/admin/**,/api/v1/public/invitations/**,/api/v1/announcements/**,/api/v1/tickets/**"
       packages-to-scan: cn.flying.controller
 
 # knife4j配置

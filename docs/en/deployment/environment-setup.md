@@ -58,6 +58,8 @@ S3_SECRET_KEY=<minio-secret-key>
 SPRING_PROFILES_ACTIVE=local   # local / dev / prod
 ```
 
+Before sending tenant-member invitations, set `INVITATION_ACCEPT_URL` to the recipient-facing HTTPS frontend page, for example `https://records.example.org/invitations/accept`. The `https://localhost/invitations/accept` default is only a local placeholder. Do not include a query string, fragment, or token in this value: the backend adds a single-use `#token=` fragment, and the acceptance page clears it before submitting the token in the request body. `scripts/start.sh` exports this setting from the repository-root `.env`; other launchers must pass it to the backend process. Restart the backend after changing it and verify one invitation through the configured mail service. Invitation tokens and SMTP credentials must stay out of committed configuration and logs.
+
 ::: warning
 Do not use `.env.example` placeholder values on any shared or server host. The infrastructure compose file fails fast when required secrets are missing, and all passwords/tokens above must be replaced with strong environment-specific values.
 :::

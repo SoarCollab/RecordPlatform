@@ -45,7 +45,7 @@ public final class Const {
     public final static String ACCOUNT_ENTITY = "account";
 
     //权限缓存
-    public final static String PERMISSION_CACHE_PREFIX = "perm:role:";
+    public final static String PERMISSION_CACHE_PREFIX = "perm:role:v2:";
     public final static long PERMISSION_CACHE_TTL = 30 * 60;  // 30分钟
 
     //SSE短期令牌

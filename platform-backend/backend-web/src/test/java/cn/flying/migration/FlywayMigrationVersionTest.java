@@ -55,6 +55,7 @@ class FlywayMigrationVersionTest {
         assertTrue(migrationFiles.contains("V1.20.0__runtime_crypto_agility.sql"));
         assertTrue(migrationFiles.contains("V1.20.1__filter_sensitive_operation_view.sql"));
         assertTrue(migrationFiles.contains("V1.21.0__platform_identity_tenant_status.sql"));
+        assertTrue(migrationFiles.contains("V1.22.0__tenant_user_management.sql"));
         assertFalse(migrationFiles.contains("V1.5.0__add_account_nickname.sql"));
         assertFalse(migrationFiles.contains("V1.7.3__integrity_alert.sql"));
 
@@ -75,6 +76,21 @@ class FlywayMigrationVersionTest {
         assertFalse(normalizedSql.contains("ADD COLUMN `update_time`"));
         assertFalse(normalizedSql.contains("ADD COLUMN `deleted`"));
         assertFalse(normalizedSql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
+    }
+
+    /**
+     * Verifies tenant-user permission seeds remain compatible with Snowflake-owned identifiers.
+     */
+    @Test
+    void shouldSeedTenantUserPermissionWithExplicitIdentifiers() throws IOException {
+        String sql = Files.readString(resolveMigrationDir().resolve(
+                "V1.22.0__tenant_user_management.sql"));
+        String normalizedSql = sql.replaceAll("\\s+", " ").trim();
+
+        assertTrue(normalizedSql.contains("INSERT INTO `sys_permission` (`id`, `tenant_id`"));
+        assertTrue(normalizedSql.contains("SELECT COALESCE(MAX(`id`), 0) + 1 FROM `sys_permission`"));
+        assertTrue(normalizedSql.contains("INSERT INTO `sys_role_permission` (`id`, `tenant_id`"));
+        assertTrue(normalizedSql.contains("SELECT COALESCE(MAX(`id`), 0) + 1 FROM `sys_role_permission`"));
     }
 
     /**

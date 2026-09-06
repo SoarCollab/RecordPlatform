@@ -39,6 +39,7 @@ public class TenantFilter extends OncePerRequestFilter {
     private static final String TENANT_HEADER = "X-Tenant-ID";
     private static final String SSE_CONNECT_PATH = "/api/v1/sse/connect";
     private static final String PUBLIC_KEY_GRANT_CONSUME_PATH = "/api/v1/public/key-grants/consume";
+    private static final String PUBLIC_INVITATION_ACCEPT_PATH = "/api/v1/public/invitations/accept";
 
     private final PrometheusScrapeSecurity prometheusScrapeSecurity;
 
@@ -207,6 +208,9 @@ public class TenantFilter extends OncePerRequestFilter {
         if (PUBLIC_KEY_GRANT_CONSUME_PATH.equals(uri)) {
             return true;
         }
+        if (PUBLIC_INVITATION_ACCEPT_PATH.equals(uri)) {
+            return true;
+        }
         return WHITELIST_PATHS.stream().anyMatch(prefix -> matchesPathOrDescendant(uri, prefix));
     }
 
@@ -224,6 +228,9 @@ public class TenantFilter extends OncePerRequestFilter {
             return true;
         }
         if ("POST".equalsIgnoreCase(method) && PUBLIC_KEY_GRANT_CONSUME_PATH.equals(uri)) {
+            return true;
+        }
+        if ("POST".equalsIgnoreCase(method) && PUBLIC_INVITATION_ACCEPT_PATH.equals(uri)) {
             return true;
         }
         if (!"GET".equalsIgnoreCase(method)) {
@@ -244,7 +251,8 @@ public class TenantFilter extends OncePerRequestFilter {
     private boolean isSharePathFamily(String uri) {
         return matchesPathOrDescendant(uri, "/api/v1/shares")
                 || matchesPathOrDescendant(uri, "/api/v1/public/shares")
-                || matchesPathOrDescendant(uri, "/api/v1/public/key-grants");
+                || matchesPathOrDescendant(uri, "/api/v1/public/key-grants")
+                || matchesPathOrDescendant(uri, "/api/v1/public/invitations");
     }
 
     /**

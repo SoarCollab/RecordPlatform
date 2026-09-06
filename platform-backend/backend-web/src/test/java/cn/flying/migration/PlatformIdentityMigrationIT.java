@@ -50,7 +50,7 @@ class PlatformIdentityMigrationIT {
         Flyway upgraded = flyway(null, false);
         upgraded.migrate();
 
-        assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("1.21.0");
+        assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("1.22.0");
         try (Connection connection = connection();
              var statement = connection.createStatement()) {
             try (var rows = statement.executeQuery("""

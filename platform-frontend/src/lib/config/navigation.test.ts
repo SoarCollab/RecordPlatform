@@ -15,6 +15,7 @@ describe("navigation config", () => {
   it("adminItems 应包含管理员核心模块入口", () => {
     const hrefs = adminItems.map((item) => item.href);
     expect(hrefs).toEqual([
+      "/admin/users",
       "/admin/files",
       "/admin/manifest-backfill",
       "/admin/tickets",

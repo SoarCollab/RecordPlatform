@@ -60,6 +60,18 @@ public enum ResultEnum implements Serializable {
     USER_ACCOUNT_LOCKED(20006, "登录失败次数过多，账户已被临时锁定，请稍后重试"),
     /** 验证码错误 */
     AUTH_CODE_ERROR(20010, "验证码错误"),
+    /** Tenant member or invitation is not visible in the authenticated tenant. */
+    TENANT_MEMBER_NOT_FOUND(20020, "成员或邀请不存在"),
+    /** Requested invitation cannot be used in its current lifecycle state. */
+    INVITATION_INVALID(20021, "邀请无效、已过期或已使用"),
+    /** An active invitation already exists for the email in this tenant. */
+    INVITATION_ALREADY_EXISTS(20022, "该邮箱已有待接受邀请"),
+    /** Invitation acceptance conflicts with an existing global account identity. */
+    INVITATION_ACCOUNT_CONFLICT(20023, "用户名或邮箱已被使用"),
+    /** A tenant must retain at least one active administrator. */
+    LAST_TENANT_ADMIN_REQUIRED(20024, "租户必须至少保留一名有效管理员"),
+    /** Administrators cannot apply dangerous role or status mutations to themselves. */
+    TENANT_ADMIN_SELF_OPERATION_FORBIDDEN(20025, "不能对当前管理员执行此操作"),
 
     /* ==================== 外部服务错误：30000-39999 ==================== */
     /** 合约调用失败 */
