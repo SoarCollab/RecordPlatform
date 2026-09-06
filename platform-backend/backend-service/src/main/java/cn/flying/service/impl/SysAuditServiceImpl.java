@@ -9,6 +9,7 @@ import cn.flying.dao.dto.SysOperationLog;
 import cn.flying.dao.mapper.SysOperationLogMapper;
 import cn.flying.dao.vo.audit.*;
 import cn.flying.service.SysAuditService;
+import cn.flying.service.platform.PlatformConfigurationService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -40,6 +41,7 @@ public class SysAuditServiceImpl implements SysAuditService {
     private static final int MIN_BACKUP_RETENTION_DAYS = 1;
 
     private final SysOperationLogMapper operationLogMapper;
+    private final PlatformConfigurationService platformConfigurationService;
     
     @Override
     public IPage<SysOperationLog> queryOperationLogs(AuditLogQueryVO queryVO) {
@@ -119,17 +121,12 @@ public class SysAuditServiceImpl implements SysAuditService {
     
     @Override
     public List<AuditConfigVO> getAuditConfigs() {
-        return operationLogMapper.selectAuditConfigs();
+        return platformConfigurationService.getSafeTenantAuditConfigs();
     }
     
     @Override
     public boolean updateAuditConfig(AuditConfigVO configVO) {
-        int rows = operationLogMapper.updateAuditConfig(
-                configVO.getConfigKey(),
-                configVO.getConfigValue(),
-                configVO.getDescription()
-        );
-        return rows > 0;
+        throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
     }
     
     @Override

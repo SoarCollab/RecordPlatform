@@ -1,5 +1,6 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.constant.PlatformPermissions;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.CacheUtils;
@@ -38,6 +39,9 @@ public class PermissionServiceImpl implements PermissionService {
 
     @Override
     public Set<String> getPermissionCodes(String role, Long tenantId) {
+        if (isPlatformRole(role)) {
+            return Set.of();
+        }
         String cacheKey = buildCacheKey(role, tenantId);
 
         // 尝试从缓存获取
@@ -47,10 +51,7 @@ public class PermissionServiceImpl implements PermissionService {
         }
 
         // 从数据库查询
-        Set<String> permissions = permissionMapper.selectPermissionCodesByRole(role, tenantId);
-        if (permissions == null) {
-            permissions = new HashSet<>();
-        }
+        Set<String> permissions = tenantPermissions(permissionMapper.selectPermissionCodesByRole(role, tenantId));
 
         // 存入缓存
         cacheUtils.saveToCache(cacheKey, permissions, Const.PERMISSION_CACHE_TTL);
@@ -68,6 +69,9 @@ public class PermissionServiceImpl implements PermissionService {
 
         // 尝试从缓存获取每个角色的权限
         for (String role : roles) {
+            if (isPlatformRole(role)) {
+                continue;
+            }
             String cacheKey = buildCacheKey(role, tenantId);
             Set<String> cached = getCachedPermissions(cacheKey);
             if (cached != null) {
@@ -80,14 +84,12 @@ public class PermissionServiceImpl implements PermissionService {
         // 对未缓存的角色批量查询
         if (!uncachedRoles.isEmpty()) {
             Set<String> dbPermissions = permissionMapper.selectPermissionCodesByRoles(uncachedRoles, tenantId);
-            if (dbPermissions != null) {
-                allPermissions.addAll(dbPermissions);
-            }
+            allPermissions.addAll(tenantPermissions(dbPermissions));
             // 分别缓存每个角色的权限
             for (String role : uncachedRoles) {
                 Set<String> rolePermissions = permissionMapper.selectPermissionCodesByRole(role, tenantId);
                 String cacheKey = buildCacheKey(role, tenantId);
-                cacheUtils.saveToCache(cacheKey, rolePermissions != null ? rolePermissions : new HashSet<>(),
+                cacheUtils.saveToCache(cacheKey, tenantPermissions(rolePermissions),
                         Const.PERMISSION_CACHE_TTL);
             }
         }
@@ -97,12 +99,18 @@ public class PermissionServiceImpl implements PermissionService {
 
     @Override
     public boolean hasPermission(String role, String permissionCode, Long tenantId) {
+        if (PlatformPermissions.isReserved(permissionCode)) {
+            return false;
+        }
         Set<String> permissions = getPermissionCodes(role, tenantId);
         return permissions.contains(permissionCode);
     }
 
     @Override
     public boolean hasPermission(String permissionCode) {
+        if (PlatformPermissions.isReserved(permissionCode)) {
+            return false;
+        }
         String role = SecurityUtils.getLoginUserRole().getRole();
         Long tenantId = SecurityUtils.getTenantId();
         return hasPermission(role, permissionCode, tenantId);
@@ -198,9 +206,45 @@ public class PermissionServiceImpl implements PermissionService {
     private Set<String> getCachedPermissions(String cacheKey) {
         List<String> cached = cacheUtils.takeListFormCache(cacheKey, String.class);
         if (cached != null) {
-            return new HashSet<>(cached);
+            return tenantPermissions(cached);
         }
         return null;
+    }
+
+    /** Removes reserved or invalid codes from both database and cached tenant grants. */
+    private Set<String> tenantPermissions(Collection<String> permissions) {
+        Set<String> result = new HashSet<>();
+        if (permissions != null) {
+            for (String code : permissions) {
+                if (code != null && !code.isBlank() && !PlatformPermissions.isReserved(code)) {
+                    result.add(code);
+                }
+            }
+        }
+        return result;
+    }
+
+    /** Recognizes platform role variants before any tenant-managed permission lookup or write. */
+    private boolean isPlatformRole(String role) {
+        if (role == null) {
+            return false;
+        }
+        String normalized = role.strip().toLowerCase(Locale.ROOT);
+        return normalized.equals("platform_admin") || normalized.equals("role_platform_admin");
+    }
+
+    /** Rejects tenant mutation of code-owned capabilities. */
+    private void requireTenantPermission(String code) {
+        if (PlatformPermissions.isReserved(code)) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+        }
+    }
+
+    /** Prevents tenant permission mappings from granting or revoking platform identity. */
+    private void requireTenantRole(String role) {
+        if (isPlatformRole(role)) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+        }
     }
 
     // ==================== 权限 CRUD 操作 ====================
@@ -222,6 +266,7 @@ public class PermissionServiceImpl implements PermissionService {
 
     @Override
     public SysPermission createPermission(SysPermission permission) {
+        requireTenantPermission(permission.getCode());
         permissionMapper.insert(permission);
         return permission;
     }
@@ -237,6 +282,7 @@ public class PermissionServiceImpl implements PermissionService {
         if (permission == null) {
             return null;
         }
+        requireTenantPermission(permission.getCode());
 
         LambdaUpdateWrapper<SysPermission> updateWrapper = new LambdaUpdateWrapper<SysPermission>()
                 .eq(SysPermission::getId, permissionId)
@@ -276,6 +322,7 @@ public class PermissionServiceImpl implements PermissionService {
         if (permission == null) {
             return;
         }
+        requireTenantPermission(permission.getCode());
 
         LambdaQueryWrapper<SysRolePermission> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SysRolePermission::getPermissionId, permissionId)
@@ -291,10 +338,13 @@ public class PermissionServiceImpl implements PermissionService {
     @Override
     @Transactional
     public void assignPermissionToRole(String role, String permissionCode, Long tenantId) {
+        requireTenantRole(role);
+        requireTenantPermission(permissionCode);
         SysPermission permission = permissionMapper.selectByCode(permissionCode, tenantId);
         if (permission == null) {
             throw new GeneralException(ResultEnum.RESULT_DATA_NONE, "权限码不存在: " + permissionCode);
         }
+        requireTenantPermission(permission.getCode());
 
         int count = rolePermissionMapper.countByRoleAndPermission(role, permissionCode, tenantId);
         if (count > 0) {
@@ -312,10 +362,13 @@ public class PermissionServiceImpl implements PermissionService {
     @Override
     @Transactional
     public void revokePermissionFromRole(String role, String permissionCode, Long tenantId) {
+        requireTenantRole(role);
+        requireTenantPermission(permissionCode);
         SysPermission permission = permissionMapper.selectByCode(permissionCode, tenantId);
         if (permission == null) {
             throw new GeneralException(ResultEnum.RESULT_DATA_NONE, "权限码不存在: " + permissionCode);
         }
+        requireTenantPermission(permission.getCode());
 
         LambdaQueryWrapper<SysRolePermission> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SysRolePermission::getRole, role)

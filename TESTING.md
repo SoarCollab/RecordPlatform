@@ -2,17 +2,17 @@
 
 本项目采用"单元测试优先 + 少量高价值集成测试"的策略，目标是在 CI 中尽早发现回归，同时保持本地开发的执行成本足够低。
 
-## 当前测试文件快照（364 files）
+## 当前测试文件快照（377 files）
 
 > 2026-09-06 按 canonical source tree 中的 `*Test.java` / `*IT.java` / `*.test.ts` / `*.spec.ts` / `test_*.py` / `*_test.py` 统计。该数字是文件快照，不等同 test case 数；以下长表只说明代表性覆盖。`tools/docs/check_consistency.py --check-evidence` 会从 exact tree 重新计算并核对本表。
 
 | Component | Test files |
 | --- | ---: |
-| `platform-backend/backend-common` | 13 |
+| `platform-backend/backend-common` | 15 |
 | `platform-backend/backend-api` | 1 |
-| `platform-backend/backend-service` | 104 |
-| `platform-backend/backend-web` | 117 |
-| `platform-backend` | 235 |
+| `platform-backend/backend-service` | 111 |
+| `platform-backend/backend-web` | 121 |
+| `platform-backend` | 248 |
 | `platform-storage` | 28 |
 | `platform-frontend` | 57 |
 | `platform-verifier` | 15 |
@@ -22,7 +22,7 @@
 | `tools/contracts` | 4 |
 | `tools/docs` | 1 |
 | `tools` | 12 |
-| `total` | 364 |
+| `total` | 377 |
 
 ### 后端单元测试（backend-common，代表性测试类）
 
@@ -31,6 +31,7 @@
 | SecureIdCodecTest | ID 加密/解密编解码 |
 | Base62Test | Base62 编码算法 |
 | JwtUtilsTest | JWT 生成、解析、过期处理 |
+| PlatformPermissionsTest / SecurityUtilsPlatformTest | 固定平台权限、保留命名空间、真实 principal 与严格系统租户边界 |
 | UidEncoderTest | UID 编码器 |
 | CommonUtilsTest | 通用工具方法 |
 | TenantContextTest | 租户上下文 ThreadLocal 管理 |
@@ -64,6 +65,10 @@
 | TenantMemberCommandServiceTest | 成员角色/状态、自保护、最后管理员与会话撤销 |
 | TenantMemberQueryServiceTest | 租户分页、筛选、外部用户 ID、隐藏平台账号与响应隐私 |
 | TenantMemberAuditServiceTest | 必填原因、敏感赋值脱敏与结构化错误 |
+| PlatformOperationExecutorTest | 持久化幂等领取、终态重放、指纹冲突、失败审计与上下文恢复 |
+| PlatformTenantCommandServiceTest / PlatformTenantQueryServiceTest | 租户生命周期、版本、配额、明确目标与测量失败 |
+| PlatformConfigurationServiceTest | 安全数值白名单、坏值屏蔽、版本冲突与旧只读投影 |
+| PlatformUserServiceTest / PlatformAuditServiceTest / PlatformQueryServiceTest | 用户元数据隔离、平台审计脱敏、固定能力及真实健康状态 |
 | ShareAuditServiceImplTest | 分享审计日志 |
 | SysAuditServiceImplTest | 系统审计服务 |
 | SysOperationLogServiceImplTest | 操作日志查询与导出 |
@@ -123,6 +128,10 @@
 | TenantUserAdminControllerMvcTest | 全部管理路由的 HTTP 绑定、成功路径、双重权限与错误映射 |
 | PublicInvitationControllerMvcTest | 匿名接受、真实 TenantFilter、输入校验与上下文清理 |
 | TenantUserManagementMySqlIT | 最后管理员、邀请并发、租户生命周期与 RR 快照拒绝、平台账号隐藏及 Redis/SSE 撤销（CI 强制 10 例且零跳过） |
+| PlatformWireSerializationTest | 真实生产 ObjectMapper 的 67 个数值、可空性、日期、分页及 JS 安全整数边界场景 |
+| PlatformControlPlaneMvcTest | 24 个平台路由及角色/能力、必填幂等头、请求校验、类型化 ID 与错误矩阵 |
+| PlatformControlPlaneMySqlIT | 真实 MySQL/Redis 幂等并发、乐观版本、审计失败回滚、跨租户隔离与恢复、权限 SQL 分页、会话撤销及脱敏（CI 强制 20 例且零跳过） |
+| PlatformControlPlaneMigrationIT | V1.22.0 既有配额/配置升级与系统审计状态约束（CI 强制 2 例且零跳过） |
 | DirectTenantInvitationMailSenderTest | 不经持久消息队列的邀请邮件与失败脱敏 |
 
 #### 过滤器与安全测试

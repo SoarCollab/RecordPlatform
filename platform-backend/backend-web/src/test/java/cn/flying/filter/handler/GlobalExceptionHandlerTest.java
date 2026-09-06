@@ -16,13 +16,18 @@ import jakarta.validation.Path;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.method.annotation.MethodArgumentConversionNotSupportedException;
@@ -34,6 +39,7 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
@@ -47,6 +53,13 @@ class GlobalExceptionHandlerTest {
      * 捕获全局异常处理器日志，供敏感路径脱敏断言复用。
      */
     private List<String> captureLogMessages(Level level, Runnable action) {
+        return captureLogEvents(level, action).stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .toList();
+    }
+
+    /** Captures complete log events so secret checks cover arguments and exception proxies as well as text. */
+    private List<ILoggingEvent> captureLogEvents(Level level, Runnable action) {
         Logger logger = (Logger) LoggerFactory.getLogger(GlobalExceptionHandler.class);
         Level previousLevel = logger.getLevel();
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
@@ -60,9 +73,7 @@ class GlobalExceptionHandlerTest {
             logger.setLevel(previousLevel);
             appender.stop();
         }
-        return appender.list.stream()
-                .map(ILoggingEvent::getFormattedMessage)
-                .toList();
+        return List.copyOf(appender.list);
     }
 
     // ---- existing tests (refactored to use shared handler instance) ----
@@ -225,6 +236,67 @@ class GlobalExceptionHandlerTest {
             Result<?> result = response.getBody();
             assertNotNull(result);
             assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), result.getCode());
+        }
+    }
+
+    @Nested
+    @DisplayName("handleMissingRequestHeaderException")
+    class MissingRequestHeaderTests {
+
+        /** Required-header failures identify the header while leaving credential-bearing causes out of every sink. */
+        @ParameterizedTest
+        @ValueSource(strings = {"Idempotency-Key", "Authorization", "X-Request_ID"})
+        void shouldReturnParamNotCompleteWithOnlySafeHeaderName(String headerName) {
+            MissingRequestHeaderException ex = new MissingRequestHeaderException(
+                    headerName, mock(MethodParameter.class));
+            ex.initCause(new IllegalArgumentException("header-value-secret-sentinel"));
+            ex.addSuppressed(new IllegalStateException("suppressed-secret-sentinel"));
+
+            List<ILoggingEvent> events = captureLogEvents(Level.WARN, () -> {
+                Result<?> result = handler.handleMissingRequestHeaderException(ex);
+
+                assertEquals(ResultEnum.PARAM_NOT_COMPLETE.getCode(), result.getCode());
+                ErrorPayload payload = assertInstanceOf(ErrorPayload.class, result.getData());
+                assertEquals("缺少请求头: " + headerName, payload.getDetail());
+            });
+
+            assertEquals(1, events.size());
+            ILoggingEvent event = events.getFirst();
+            assertTrue(event.getFormattedMessage().contains("缺少请求头: " + headerName));
+            assertFalse(event.getFormattedMessage().contains("secret-sentinel"));
+            assertNull(event.getThrowableProxy());
+            for (Object argument : event.getArgumentArray()) {
+                assertFalse(argument instanceof Throwable);
+                assertFalse(String.valueOf(argument).contains("secret-sentinel"));
+            }
+        }
+
+        /** Invalid diagnostic header names cannot inject values, control characters or oversized text. */
+        @ParameterizedTest
+        @MethodSource("unsafeHeaderNames")
+        void shouldOmitUnsafeHeaderNames(String headerName) {
+            MissingRequestHeaderException ex = new MissingRequestHeaderException(
+                    headerName, mock(MethodParameter.class));
+
+            List<ILoggingEvent> events = captureLogEvents(Level.WARN, () -> {
+                Result<?> result = handler.handleMissingRequestHeaderException(ex);
+
+                assertEquals(ResultEnum.PARAM_NOT_COMPLETE.getCode(), result.getCode());
+                ErrorPayload payload = assertInstanceOf(ErrorPayload.class, result.getData());
+                assertEquals("缺少请求头: unknown", payload.getDetail());
+            });
+
+            assertEquals(1, events.size());
+            assertTrue(events.getFirst().getFormattedMessage().contains("缺少请求头: unknown"));
+            assertFalse(events.getFirst().getFormattedMessage().contains("secret-sentinel"));
+            assertNull(events.getFirst().getThrowableProxy());
+        }
+
+        /** Includes missing names and malformed value-bearing diagnostics that must not reach clients or logs. */
+        static Stream<String> unsafeHeaderNames() {
+            return Stream.of(null, "", " ", "X-Test\r\nheader-value-secret-sentinel",
+                    "Authorization: header-value-secret-sentinel", "token=header-value-secret-sentinel",
+                    "X-" + "a".repeat(127));
         }
     }
 

@@ -42,6 +42,9 @@ public class QuotaPolicy implements Serializable {
 
     private Integer status;
 
+    /** Optimistic version of the tenant quota override. */
+    private Long version;
+
     @TableField(fill = FieldFill.INSERT)
     private Date createTime;
 

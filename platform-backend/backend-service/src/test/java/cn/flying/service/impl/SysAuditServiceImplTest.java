@@ -6,6 +6,7 @@ import cn.flying.common.tenant.TenantContext;
 import cn.flying.dao.dto.SysOperationLog;
 import cn.flying.dao.mapper.SysOperationLogMapper;
 import cn.flying.dao.vo.audit.*;
+import cn.flying.service.platform.PlatformConfigurationService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +14,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
@@ -34,6 +37,9 @@ class SysAuditServiceImplTest {
 
     @Mock
     private SysOperationLogMapper operationLogMapper;
+
+    @Mock
+    private PlatformConfigurationService platformConfigurationService;
 
     @InjectMocks
     private SysAuditServiceImpl sysAuditService;
@@ -229,18 +235,46 @@ class SysAuditServiceImplTest {
     @DisplayName("getAuditConfigs Tests")
     class GetAuditConfigsTests {
 
+        /** Uses the safe registry projection without reading arbitrary global configuration rows. */
         @Test
-        @DisplayName("should return audit configs list")
-        void shouldReturnAuditConfigs() {
+        @DisplayName("should return only the safe tenant audit configuration projection")
+        void shouldReturnSafeTenantAuditConfigs() {
             AuditConfigVO config = new AuditConfigVO();
-            config.setConfigKey("AUDIT_ENABLED");
-            config.setConfigValue("true");
-            when(operationLogMapper.selectAuditConfigs()).thenReturn(List.of(config));
+            config.setConfigKey("HIGH_FREQ_THRESHOLD");
+            config.setConfigValue("100");
+            config.setDescription("High-frequency threshold");
+            List<AuditConfigVO> safeConfigs = List.of(config);
+            when(platformConfigurationService.getSafeTenantAuditConfigs()).thenReturn(safeConfigs);
 
             List<AuditConfigVO> result = sysAuditService.getAuditConfigs();
 
-            assertThat(result).hasSize(1);
-            assertThat(result.get(0).getConfigKey()).isEqualTo("AUDIT_ENABLED");
+            assertThat(result).isSameAs(safeConfigs);
+            assertThat(result.getFirst().getConfigKey()).isEqualTo("HIGH_FREQ_THRESHOLD");
+            assertThat(result.getFirst().getConfigValue()).isEqualTo("100");
+            verify(platformConfigurationService).getSafeTenantAuditConfigs();
+            verifyNoInteractions(operationLogMapper);
+        }
+
+        /** An empty safe registry never triggers a fallback to unfiltered configuration storage. */
+        @Test
+        void shouldKeepEmptySafeProjectionWithoutFallback() {
+            when(platformConfigurationService.getSafeTenantAuditConfigs()).thenReturn(List.of());
+
+            assertThat(sysAuditService.getAuditConfigs()).isEmpty();
+
+            verifyNoInteractions(operationLogMapper);
+        }
+
+        /** Safe projection failures propagate instead of exposing raw rows or pretending the registry is empty. */
+        @Test
+        void shouldPropagateSafeProjectionFailureWithoutFallback() {
+            IllegalStateException failure = new IllegalStateException("Configuration projection unavailable");
+            when(platformConfigurationService.getSafeTenantAuditConfigs()).thenThrow(failure);
+
+            assertThat(assertThrows(IllegalStateException.class, sysAuditService::getAuditConfigs))
+                    .isSameAs(failure);
+
+            verifyNoInteractions(operationLogMapper);
         }
     }
 
@@ -248,31 +282,32 @@ class SysAuditServiceImplTest {
     @DisplayName("updateAuditConfig Tests")
     class UpdateAuditConfigTests {
 
-        @Test
-        @DisplayName("should return true when update succeeds")
-        void shouldReturnTrueWhenUpdateSucceeds() {
+        /** The retired writer rejects both safe and arbitrary keys before touching any persistence boundary. */
+        @ParameterizedTest
+        @ValueSource(strings = {"HIGH_FREQ_THRESHOLD", "AUDIT_ENABLED", "NONEXISTENT", "NACOS_PASSWORD"})
+        void shouldDenyEveryLegacyConfigWrite(String key) {
             AuditConfigVO config = new AuditConfigVO();
-            config.setConfigKey("AUDIT_ENABLED");
-            config.setConfigValue("false");
-            config.setDescription("Enable audit");
-            when(operationLogMapper.updateAuditConfig(anyString(), anyString(), anyString())).thenReturn(1);
+            config.setConfigKey(key);
+            config.setConfigValue("legacy-write-secret-marker");
+            config.setDescription("legacy-description-secret-marker");
 
-            boolean result = sysAuditService.updateAuditConfig(config);
+            GeneralException error = assertThrows(GeneralException.class,
+                    () -> sysAuditService.updateAuditConfig(config));
 
-            assertThat(result).isTrue();
-            verify(operationLogMapper).updateAuditConfig("AUDIT_ENABLED", "false", "Enable audit");
+            assertThat(error.getResultEnum()).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED);
+            assertThat(error.getData()).isNull();
+            assertThat(error.toString()).doesNotContain("legacy-write-secret-marker", "legacy-description-secret-marker");
+            verifyNoInteractions(operationLogMapper, platformConfigurationService);
         }
 
+        /** Even malformed direct calls are denied without dereferencing an obsolete request body. */
         @Test
-        @DisplayName("should return false when update fails")
-        void shouldReturnFalseWhenUpdateFails() {
-            AuditConfigVO config = new AuditConfigVO();
-            config.setConfigKey("NONEXISTENT");
-            when(operationLogMapper.updateAuditConfig(anyString(), any(), any())).thenReturn(0);
+        void shouldDenyNullLegacyConfigWrite() {
+            GeneralException error = assertThrows(GeneralException.class,
+                    () -> sysAuditService.updateAuditConfig(null));
 
-            boolean result = sysAuditService.updateAuditConfig(config);
-
-            assertThat(result).isFalse();
+            assertThat(error.getResultEnum()).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED);
+            verifyNoInteractions(operationLogMapper, platformConfigurationService);
         }
     }
 

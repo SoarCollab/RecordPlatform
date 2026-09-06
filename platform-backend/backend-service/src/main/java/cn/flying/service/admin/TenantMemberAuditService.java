@@ -1,15 +1,20 @@
 package cn.flying.service.admin;
 
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.constant.PlatformPermissions;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.IdUtils;
+import cn.flying.common.util.SecurityUtils;
 import cn.flying.common.util.SensitiveDataMasker;
 import cn.flying.dao.entity.AccountMemberAudit;
 import cn.flying.dao.mapper.AccountMemberAuditMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.time.LocalDateTime;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 /** Persists redacted tenant-member mutation evidence. */
@@ -25,6 +30,10 @@ public class TenantMemberAuditService {
     /** Writes a sanitized audit record without request bodies or secrets. */
     public void record(Long tenantId, Long actorId, Long targetAccountId, Long invitationId,
                        String action, String oldValue, String newValue, String reason) {
+        String safeReason = sanitizeReason(reason);
+        if (isPlatformActor(tenantId, actorId)) {
+            return;
+        }
         AccountMemberAudit audit = new AccountMemberAudit()
                 .setId(IdUtils.nextEntityId())
                 .setTenantId(tenantId)
@@ -34,11 +43,22 @@ public class TenantMemberAuditService {
                 .setAction(action)
                 .setOldValue(sanitizeValue(oldValue))
                 .setNewValue(sanitizeValue(newValue))
-                .setReason(sanitizeReason(reason))
+                .setReason(safeReason)
                 .setCreateTime(LocalDateTime.now());
         if (auditMapper.insert(audit) != 1) {
             throw new IllegalStateException("Tenant member audit persistence failed");
         }
+    }
+
+    /** Leaves platform commands to the dedicated audit executor after a forced tenant context switch. */
+    private boolean isPlatformActor(Long tenantId, Long actorId) {
+        return actorId != null && actorId > 0
+                && actorId.equals(SecurityUtils.getUserId())
+                && tenantId != null && Objects.equals(tenantId, TenantContext.getTenantId())
+                && !TenantContext.isIgnoreIsolation()
+                && SecurityUtils.isPlatformPrincipal()
+                && SecurityContextHolder.getContext().getAuthentication().getAuthorities().stream()
+                .anyMatch(authority -> PlatformPermissions.USER_WRITE.equals(authority.getAuthority()));
     }
 
     /** Normalizes a mandatory reason and removes control characters from audit storage. */

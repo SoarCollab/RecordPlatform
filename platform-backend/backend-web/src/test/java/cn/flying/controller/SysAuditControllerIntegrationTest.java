@@ -447,17 +447,30 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
     @DisplayName("PUT /configs - Update Audit Config")
     class UpdateAuditConfigTests {
 
+        /** Tenant administrators cannot use the retired endpoint to mutate global configuration. */
         @Test
-        @DisplayName("should update audit config")
-        void shouldUpdateAuditConfig() throws Exception {
+        @DisplayName("should deny legacy audit config updates for tenant admin")
+        void shouldDenyLegacyAuditConfigUpdatesForAdmin() throws Exception {
             AuditConfigVO configVO = new AuditConfigVO();
-            configVO.setConfigKey("audit.retention.days");
+            configVO.setConfigKey("LOG_RETENTION_DAYS");
             configVO.setConfigValue("90");
-            configVO.setDescription("审计日志保留天数");
+            configVO.setDescription("Audit retention days");
 
             performPut(BASE_URL + "/configs", configVO)
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.code").value(200));
+                    .andExpect(status().isForbidden());
+        }
+
+        /** Monitor access to audit reads does not retain permission to change global settings. */
+        @Test
+        void shouldDenyLegacyAuditConfigUpdatesForMonitor() throws Exception {
+            String monitorToken = JwtTestSupport.generateMonitorToken(monitorAccount.getId(), testTenantId);
+
+            mockMvc.perform(put(BASE_URL + "/configs")
+                            .header("Authorization", "Bearer " + monitorToken)
+                            .header(HEADER_TENANT_ID, testTenantId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"configKey\":\"LOG_RETENTION_DAYS\",\"configValue\":\"90\"}"))
+                    .andExpect(status().isForbidden());
         }
     }
 

@@ -16,6 +16,10 @@ import org.aspectj.lang.reflect.MethodSignature;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.http.ResponseEntity;
@@ -28,7 +32,9 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -36,6 +42,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @DisplayName("OperationLogAspect Tests")
@@ -494,6 +501,112 @@ class OperationLogAspectTest {
         verify(operationLogService, never()).saveOperationLog(any());
     }
 
+    /** Platform successes and failures bypass generic tenant audit and all aspect payload logging. */
+    @ParameterizedTest(name = "platform route {0}")
+    @MethodSource("platformRequests")
+    void shouldLeavePlatformOperationsToDedicatedAudit(String path, String contextPath) throws Throwable {
+        SysOperationLogService operationLogService = mock(SysOperationLogService.class);
+        OperationLogAspect aspect = new OperationLogAspect(operationLogService, newResolver(""));
+        MockHttpServletRequest request = new MockHttpServletRequest("PUT", path);
+        request.setContextPath(contextPath);
+        request.setServletPath(path.substring(contextPath.length()));
+        request.setParameter("reason", "platform-query-sentinel");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        MDC.put("userId", "41");
+        MDC.put("traceId", "platform-audit-trace");
+
+        Map<String, String> result = Map.of("details", "platform-response-sentinel");
+        ProceedingJoinPoint successful = payloadAuditedJoinPoint("platform-body-sentinel", result, null);
+        IllegalStateException original = new IllegalStateException("platform-exception-sentinel");
+        ProceedingJoinPoint failing = payloadAuditedJoinPoint("platform-body-sentinel", null, original);
+        Logger logger = (Logger) LoggerFactory.getLogger(OperationLogAspect.class);
+        Level previousLevel = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.setLevel(Level.INFO);
+        logger.addAppender(appender);
+        try {
+            assertThat(aspect.doAround(successful)).isSameAs(result);
+            assertThatThrownBy(() -> aspect.doAround(failing)).isSameAs(original);
+
+            assertThat(appender.list).isEmpty();
+            assertThat(MDC.get("reqId")).isNull();
+            assertThat(MDC.get("userId")).isEqualTo("41");
+            assertThat(MDC.get("traceId")).isEqualTo("platform-audit-trace");
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previousLevel);
+            appender.stop();
+        }
+
+        verify(successful).proceed();
+        verify(failing).proceed();
+        verify(successful, never()).getArgs();
+        verify(failing, never()).getArgs();
+        verifyNoInteractions(operationLogService);
+    }
+
+    /** Similarly named ordinary routes keep their success/failure metadata and safe payload audit. */
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/platforms/tenants", "/api/v1/platform-admin/overview"})
+    void shouldRetainTenantAuditForSimilarlyPrefixedRoutes(String path) throws Throwable {
+        SysOperationLogService operationLogService = mock(SysOperationLogService.class);
+        OperationLogAspect aspect = new OperationLogAspect(operationLogService, newResolver(""));
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+        request.setServletPath(path);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        Map<String, String> result = Map.of("message", "ordinary-response-marker");
+        ProceedingJoinPoint successful = payloadAuditedJoinPoint("ordinary-request-marker", result, null);
+        IllegalStateException original = new IllegalStateException("ordinary operation failed");
+        ProceedingJoinPoint failing = payloadAuditedJoinPoint("ordinary-request-marker", null, original);
+
+        assertThat(aspect.doAround(successful)).isSameAs(result);
+        assertThatThrownBy(() -> aspect.doAround(failing)).isSameAs(original);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(SysOperationLog.class);
+        verify(operationLogService, org.mockito.Mockito.times(2)).saveOperationLog(captor.capture());
+        List<SysOperationLog> events = captor.getAllValues();
+        assertThat(events).allSatisfy(event -> {
+            assertThat(event.getRequestUrl()).isEqualTo(path);
+            assertThat(event.getRequestParam()).contains("ordinary-request-marker");
+            assertThat(event.getModule()).isEqualTo("test");
+        });
+        assertThat(events.getFirst().getStatus()).isZero();
+        assertThat(events.getFirst().getResponseResult()).contains("ordinary-response-marker");
+        assertThat(events.getLast().getStatus()).isEqualTo(1);
+        assertThat(events.getLast().getErrorMsg()).isEqualTo("ordinary operation failed");
+    }
+
+    /** Covers root, descendant, deployed context path and Spring-normalized route spellings. */
+    private static Stream<Arguments> platformRequests() {
+        return Stream.of(
+                Arguments.of("/api/v1/platform", ""),
+                Arguments.of("/api/v1/platform/", ""),
+                Arguments.of("/api/v1/platform/tenants/target/users", ""),
+                Arguments.of("/record-platform/api/v1/platform/configuration", "/record-platform"),
+                Arguments.of("/api/v1/platf%6frm;view=1/tenants", ""),
+                Arguments.of("/record-platform/api/v1/platform;view=1/%2E/tenants", "/record-platform"));
+    }
+
+    /** Supplies an annotation that requests both payloads so the route boundary itself must suppress them. */
+    private ProceedingJoinPoint payloadAuditedJoinPoint(String payload, Object result, Exception failure)
+            throws Throwable {
+        ProceedingJoinPoint joinPoint = mock(ProceedingJoinPoint.class);
+        MethodSignature signature = mock(MethodSignature.class);
+        Method method = AuditedFixture.class.getDeclaredMethod("executePayload", String.class);
+        when(joinPoint.getSignature()).thenReturn(signature);
+        when(joinPoint.getArgs()).thenReturn(new Object[]{payload});
+        when(signature.getMethod()).thenReturn(method);
+        when(signature.getDeclaringTypeName()).thenReturn(AuditedFixture.class.getName());
+        when(signature.getName()).thenReturn(method.getName());
+        if (failure == null) {
+            when(joinPoint.proceed()).thenReturn(result);
+        } else {
+            when(joinPoint.proceed()).thenThrow(failure);
+        }
+        return joinPoint;
+    }
+
     /**
      * 构造带指定可信代理网段的操作日志切面。
      */
@@ -593,6 +706,13 @@ class OperationLogAspectTest {
     }
 
     private static final class AuditedFixture {
+
+        /** Requests generic payload audit so platform suppression cannot rely on annotation defaults. */
+        @OperationLog(module = "test", operationType = "update", description = "payload audit",
+                saveRequestData = true, saveResponseData = true)
+        private Object executePayload(String payload) {
+            return payload;
+        }
 
         /**
          * 提供携带操作日志注解的测试目标方法。

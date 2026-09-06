@@ -1,8 +1,12 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.constant.PlatformPermissions;
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.CacheUtils;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
+import cn.flying.common.util.SecurityUtils;
 import cn.flying.common.util.TenantKeyUtils;
 import cn.flying.dao.entity.SysPermission;
 import cn.flying.dao.entity.SysRolePermission;
@@ -19,6 +23,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -26,6 +33,7 @@ import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.*;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -353,20 +361,23 @@ class PermissionServiceImplTest {
             verify(permissionMapper, never()).selectList(any());
         }
 
-        /**
-         * 验证权限分页查询保留模块过滤和租户可见范围。
-         */
+        /** Preserves mapper-filtered page totals and boundaries without filtering an already paged result. */
         @Test
         @DisplayName("should list permissions with optional module filter")
         void listPermissions_returnsPagedPermissions() {
-            Page<SysPermission> page = new Page<>(1, 10);
-            Page<SysPermission> expected = new Page<>(1, 10);
+            Page<SysPermission> page = new Page<>(2, 2);
+            Page<SysPermission> expected = new Page<>(2, 2, 3);
             expected.setRecords(List.of(createPermission(1L, PERM_FILE_READ, "file")));
             when(permissionMapper.selectVisiblePermissionPage(page, TENANT_ID, "file")).thenReturn(expected);
 
             IPage<SysPermission> result = permissionService.listPermissions(TENANT_ID, "file", page);
 
             assertSame(expected, result);
+            assertEquals(3, result.getTotal());
+            assertEquals(2, result.getCurrent());
+            assertEquals(2, result.getSize());
+            assertEquals(2, result.getPages());
+            assertEquals(expected.getRecords(), result.getRecords());
             verify(permissionMapper).selectVisiblePermissionPage(page, TENANT_ID, "file");
             verify(permissionMapper, never()).selectPage(any(), any());
         }
@@ -658,6 +669,209 @@ class PermissionServiceImplTest {
             verify(rolePermissionMapper).delete(any(Wrapper.class));
             verify(cacheUtils).deleteCachePattern("*" + Const.PERMISSION_CACHE_PREFIX + ROLE_USER);
             verify(cacheUtils, never()).deleteCache(buildExpectedCacheKey(ROLE_USER, globalTenantId));
+        }
+    }
+
+    @Nested
+    @DisplayName("Code-owned platform permission boundary")
+    class ReservedPlatformBoundaryTests {
+
+        /** Removes reserved and invalid entries from old cache snapshots without losing ordinary grants. */
+        @Test
+        void filtersPlatformCodesFromCachedTenantGrants() {
+            String cacheKey = buildExpectedCacheKey(ROLE_ADMIN, TENANT_ID);
+            List<String> cached = Arrays.asList(PERM_FILE_READ, null, "", " \t",
+                    PlatformPermissions.USER_WRITE, " PLATFORM:future:write ", "platformer:read");
+            when(cacheUtils.takeListFormCache(cacheKey, String.class)).thenReturn(cached);
+
+            Set<String> result = permissionService.getPermissionCodes(ROLE_ADMIN, TENANT_ID);
+
+            assertEquals(Set.of(PERM_FILE_READ, "platformer:read"), result);
+            assertTrue(cached.contains(PlatformPermissions.USER_WRITE));
+            verifyNoInteractions(permissionMapper, rolePermissionMapper);
+            verify(cacheUtils, never()).saveToCache(anyString(), any(), anyLong());
+        }
+
+        /** Filters database grants before both returning them and populating the tenant permission cache. */
+        @Test
+        void filtersPlatformCodesBeforeCachingDatabaseGrants() {
+            String cacheKey = buildExpectedCacheKey(ROLE_ADMIN, TENANT_ID);
+            when(cacheUtils.takeListFormCache(cacheKey, String.class)).thenReturn(null);
+            Set<String> databaseCodes = new HashSet<>(Arrays.asList(PERM_FILE_WRITE, null, "", "\n",
+                    PlatformPermissions.TENANT_WRITE, "\tPlatform:future:write"));
+            when(permissionMapper.selectPermissionCodesByRole(ROLE_ADMIN, TENANT_ID)).thenReturn(databaseCodes);
+
+            Set<String> result = permissionService.getPermissionCodes(ROLE_ADMIN, TENANT_ID);
+
+            assertEquals(Set.of(PERM_FILE_WRITE), result);
+            assertTrue(databaseCodes.contains(PlatformPermissions.TENANT_WRITE));
+            verify(cacheUtils).saveToCache(cacheKey, Set.of(PERM_FILE_WRITE), Const.PERMISSION_CACHE_TTL);
+        }
+
+        /** Mixed role lookups exclude platform identities and sanitize every cached, batch and per-role source. */
+        @Test
+        void filtersMixedRoleResultsAndNeverLooksUpPlatformRoles() {
+            String userKey = buildExpectedCacheKey(ROLE_USER, TENANT_ID);
+            String adminKey = buildExpectedCacheKey(ROLE_ADMIN, TENANT_ID);
+            when(cacheUtils.takeListFormCache(userKey, String.class))
+                    .thenReturn(Arrays.asList(PERM_FILE_READ, PlatformPermissions.AUDIT_READ, null));
+            when(cacheUtils.takeListFormCache(adminKey, String.class)).thenReturn(null);
+            when(permissionMapper.selectPermissionCodesByRoles(List.of(ROLE_ADMIN), TENANT_ID))
+                    .thenReturn(Set.of(PERM_FILE_WRITE, PlatformPermissions.USER_WRITE));
+            when(permissionMapper.selectPermissionCodesByRole(ROLE_ADMIN, TENANT_ID))
+                    .thenReturn(Set.of(PERM_FILE_WRITE, " PLATFORM:future:write "));
+
+            Set<String> result = permissionService.getPermissionCodes(
+                    List.of(ROLE_USER, "platform_admin", ROLE_ADMIN, " ROLE_PLATFORM_ADMIN "), TENANT_ID);
+
+            assertEquals(Set.of(PERM_FILE_READ, PERM_FILE_WRITE), result);
+            verify(permissionMapper).selectPermissionCodesByRoles(List.of(ROLE_ADMIN), TENANT_ID);
+            verify(permissionMapper).selectPermissionCodesByRole(ROLE_ADMIN, TENANT_ID);
+            verify(cacheUtils).takeListFormCache(userKey, String.class);
+            verify(cacheUtils).takeListFormCache(adminKey, String.class);
+            verify(cacheUtils).saveToCache(adminKey, Set.of(PERM_FILE_WRITE), Const.PERMISSION_CACHE_TTL);
+            verifyNoMoreInteractions(permissionMapper, cacheUtils);
+            verifyNoInteractions(rolePermissionMapper);
+        }
+
+        /** Platform identities cannot inherit tenant-managed grants through either lookup overload. */
+        @ParameterizedTest
+        @ValueSource(strings = {"platform_admin", "ROLE_platform_admin", " PLATFORM_ADMIN ", "\tROLE_PLATFORM_ADMIN\n"})
+        void rejectsPlatformRoleGrantLookups(String role) {
+            assertTrue(permissionService.getPermissionCodes(role, TENANT_ID).isEmpty());
+            assertTrue(permissionService.getPermissionCodes(List.of(role), TENANT_ID).isEmpty());
+            assertFalse(permissionService.hasPermission(role, PERM_FILE_READ, TENANT_ID));
+
+            verifyNoInteractions(permissionMapper, rolePermissionMapper, cacheUtils);
+        }
+
+        /** Reserved permission checks fail before reading either caller identity or tenant-managed grants. */
+        @ParameterizedTest
+        @MethodSource("reservedCodes")
+        void rejectsReservedPermissionChecksBeforeIdentityLookup(String code) {
+            try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+                assertFalse(permissionService.hasPermission(ROLE_ADMIN, code, TENANT_ID));
+                assertFalse(permissionService.hasPermission(code));
+                security.verifyNoInteractions();
+            }
+            verifyNoInteractions(permissionMapper, rolePermissionMapper, cacheUtils);
+        }
+
+        /** Tenant permission creation cannot register present or future platform namespace entries. */
+        @ParameterizedTest
+        @MethodSource("reservedCodes")
+        void rejectsCreatingReservedPermission(String code) {
+            SysPermission permission = createPermission(91L, code, "platform");
+
+            GeneralException error = assertThrows(GeneralException.class,
+                    () -> permissionService.createPermission(permission));
+
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, error.getResultEnum());
+            verifyNoInteractions(permissionMapper, rolePermissionMapper, cacheUtils);
+        }
+
+        /** Existing reserved rows cannot be renamed, disabled or otherwise mutated through tenant CRUD. */
+        @ParameterizedTest
+        @MethodSource("reservedCodes")
+        void rejectsUpdatingReservedPermission(String code) {
+            SysPermission permission = createPermission(91L, code, "platform");
+            when(permissionMapper.selectOne(any())).thenReturn(permission);
+            try (MockedStatic<IdUtils> ids = mockStatic(IdUtils.class)) {
+                ids.when(() -> IdUtils.fromExternalId("reserved-permission")).thenReturn(91L);
+
+                GeneralException error = assertThrows(GeneralException.class,
+                        () -> permissionService.updatePermission(
+                                "reserved-permission", "changed", "changed", 0, TENANT_ID));
+
+                assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, error.getResultEnum());
+            }
+            assertEquals(code, permission.getName());
+            assertEquals(1, permission.getStatus());
+            verify(permissionMapper).selectOne(any());
+            verifyNoMoreInteractions(permissionMapper);
+            verifyNoInteractions(rolePermissionMapper, cacheUtils);
+        }
+
+        /** Reserved deletion fails before removing any role mapping, definition or cache entry. */
+        @ParameterizedTest
+        @MethodSource("reservedCodes")
+        void rejectsDeletingReservedPermission(String code) {
+            when(permissionMapper.selectOne(any())).thenReturn(createPermission(91L, code, "platform"));
+            try (MockedStatic<IdUtils> ids = mockStatic(IdUtils.class)) {
+                ids.when(() -> IdUtils.fromExternalId("reserved-permission")).thenReturn(91L);
+
+                GeneralException error = assertThrows(GeneralException.class,
+                        () -> permissionService.deletePermission("reserved-permission", TENANT_ID));
+
+                assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, error.getResultEnum());
+            }
+            verify(permissionMapper).selectOne(any());
+            verifyNoMoreInteractions(permissionMapper);
+            verifyNoInteractions(rolePermissionMapper, cacheUtils);
+        }
+
+        /** Both mapping mutation directions reject a reserved request code before looking up definitions. */
+        @ParameterizedTest
+        @MethodSource("reservedCodes")
+        void rejectsAssigningAndRevokingReservedCodes(String code) {
+            GeneralException assignError = assertThrows(GeneralException.class,
+                    () -> permissionService.assignPermissionToRole(ROLE_ADMIN, code, TENANT_ID));
+            GeneralException revokeError = assertThrows(GeneralException.class,
+                    () -> permissionService.revokePermissionFromRole(ROLE_ADMIN, code, TENANT_ID));
+
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, assignError.getResultEnum());
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, revokeError.getResultEnum());
+            verifyNoInteractions(permissionMapper, rolePermissionMapper, cacheUtils);
+        }
+
+        /** A corrupt definition result cannot disguise a reserved grant behind an ordinary requested code. */
+        @ParameterizedTest
+        @MethodSource("reservedCodes")
+        void rejectsReservedDefinitionReturnedForOrdinaryCode(String code) {
+            when(permissionMapper.selectByCode(PERM_FILE_READ, TENANT_ID))
+                    .thenReturn(createPermission(91L, code, "platform"));
+
+            GeneralException assignError = assertThrows(GeneralException.class,
+                    () -> permissionService.assignPermissionToRole(ROLE_ADMIN, PERM_FILE_READ, TENANT_ID));
+            GeneralException revokeError = assertThrows(GeneralException.class,
+                    () -> permissionService.revokePermissionFromRole(ROLE_ADMIN, PERM_FILE_READ, TENANT_ID));
+
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, assignError.getResultEnum());
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, revokeError.getResultEnum());
+            verify(permissionMapper, times(2)).selectByCode(PERM_FILE_READ, TENANT_ID);
+            verifyNoMoreInteractions(permissionMapper);
+            verifyNoInteractions(rolePermissionMapper, cacheUtils);
+        }
+
+        /** Tenant-managed mapping writes cannot target platform role aliases even for ordinary permissions. */
+        @ParameterizedTest
+        @ValueSource(strings = {"platform_admin", "ROLE_platform_admin", " PLATFORM_ADMIN ", "\tROLE_PLATFORM_ADMIN\n"})
+        void rejectsGrantChangesForPlatformRoles(String role) {
+            GeneralException assignError = assertThrows(GeneralException.class,
+                    () -> permissionService.assignPermissionToRole(role, PERM_FILE_READ, TENANT_ID));
+            GeneralException revokeError = assertThrows(GeneralException.class,
+                    () -> permissionService.revokePermissionFromRole(role, PERM_FILE_READ, TENANT_ID));
+
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, assignError.getResultEnum());
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, revokeError.getResultEnum());
+            verifyNoInteractions(permissionMapper, rolePermissionMapper, cacheUtils);
+        }
+
+        /** Namespace reservation does not consume unrelated tenant permission names. */
+        @ParameterizedTest
+        @ValueSource(strings = {"platformer:read", "tenant:platform:read", "platform-read"})
+        void allowsSimilarlyNamedTenantPermissions(String code) {
+            SysPermission permission = createPermission(91L, code, "tenant");
+
+            assertSame(permission, permissionService.createPermission(permission));
+
+            verify(permissionMapper).insert(permission);
+            verifyNoInteractions(rolePermissionMapper, cacheUtils);
+        }
+
+        /** Covers a fixed capability, a future capability and normalized namespace aliases. */
+        static Stream<String> reservedCodes() {
+            return Stream.of(PlatformPermissions.USER_WRITE, "platform:future:write", " \tPLATFORM:tenant:read ");
         }
     }
 

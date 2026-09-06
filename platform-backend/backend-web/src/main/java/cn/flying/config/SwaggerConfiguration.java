@@ -81,7 +81,24 @@ public class SwaggerConfiguration {
         return api -> {
             this.authorizePathItems().forEach(api.getPaths()::addPathItem);
             this.removeDeprecatedPageFields(api);
+            this.preserveNullablePlatformAuditResult(api);
         };
+    }
+
+    /** Preserves a nullable object reference without modifying its shared OpenAPI 3.0 component schema. */
+    private void preserveNullablePlatformAuditResult(io.swagger.v3.oas.models.OpenAPI api) {
+        if (api.getComponents() == null || api.getComponents().getSchemas() == null) {
+            return;
+        }
+        Schema<?> audit = api.getComponents().getSchemas().get("PlatformAuditVO");
+        if (audit == null || audit.getProperties() == null || !audit.getProperties().containsKey("result")) {
+            return;
+        }
+        Schema<Object> nullableResult = new Schema<>();
+        nullableResult.setDescription("Recorded successful response; null before success or after failure");
+        nullableResult.setNullable(true);
+        nullableResult.setAllOf(List.of(new Schema<>().$ref("#/components/schemas/PlatformMutationVO")));
+        audit.addProperty("result", nullableResult);
     }
 
     /**

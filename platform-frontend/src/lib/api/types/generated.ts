@@ -2021,6 +2021,334 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 分页查询平台操作审计 */
+        get: operations["platformListAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/audit/{operationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询平台操作审计详情 */
+        get: operations["platformGetAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/configuration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询平台安全配置 */
+        get: operations["platformListConfiguration"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/configuration/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询平台配置详情 */
+        get: operations["platformGetConfiguration"];
+        /** 更新平台安全配置 */
+        put: operations["platformUpdateConfiguration"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询平台概览 */
+        get: operations["platformGetOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/resources/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询共享资源健康 */
+        get: operations["platformGetResourceHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询平台会话能力 */
+        get: operations["platformGetSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 分页查询平台租户 */
+        get: operations["platformListTenants"];
+        put?: never;
+        /** 创建租户 */
+        post: operations["platformCreateTenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenantId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询租户详情 */
+        get: operations["platformGetTenant"];
+        /** 更新租户元数据 */
+        put: operations["platformUpdateTenant"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenantId}/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询目标租户邀请 */
+        get: operations["platformListTenantInvitations"];
+        put?: never;
+        /** 邀请目标租户成员 */
+        post: operations["platformInviteTenantMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenantId}/invitations/{invitationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 撤销目标租户邀请 */
+        delete: operations["platformRevokeTenantInvitation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenantId}/quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询租户配额 */
+        get: operations["platformGetTenantQuota"];
+        /** 更新租户配额 */
+        put: operations["platformUpdateTenantQuota"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenantId}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 更新租户状态 */
+        put: operations["platformChangeTenantStatus"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenantId}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询租户用量 */
+        get: operations["platformGetTenantUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenantId}/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询目标租户成员 */
+        get: operations["platformListTenantMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenantId}/users/{userId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改目标租户成员角色 */
+        put: operations["platformChangeTenantMemberRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenantId}/users/{userId}/sessions/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 撤销目标租户成员会话 */
+        post: operations["platformRevokeTenantMemberSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenantId}/users/{userId}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改目标租户成员状态 */
+        put: operations["platformChangeTenantMemberStatus"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 分页查询平台用户 */
+        get: operations["platformListUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/invitations/accept": {
         parameters: {
             query?: never;
@@ -2377,7 +2705,10 @@ export interface paths {
         };
         /** 获取审计配置列表 */
         get: operations["getAuditConfigs"];
-        /** 更新审计配置 */
+        /**
+         * 已停用：请使用平台配置管理接口
+         * @deprecated
+         */
         put: operations["updateAuditConfig"];
         post?: never;
         delete?: never;
@@ -3831,6 +4162,21 @@ export interface components {
             /** @description 旧密码 */
             password?: string;
         };
+        /** @description Changes versioned tenant lifecycle status. */
+        ChangePlatformTenantStatusRequest: {
+            /**
+             * Format: int64
+             * @description Current tenant version
+             */
+            expectedVersion: number;
+            /** @description Required operation reason */
+            reason: string;
+            /**
+             * Format: int32
+             * @description 0 disabled; 1 active
+             */
+            status: number;
+        };
         ChangeTenantMemberRoleRequest: {
             reason: string;
             role: string;
@@ -3935,6 +4281,25 @@ export interface components {
              * @description 未读消息数
              */
             unreadCount?: number;
+        };
+        /** @description Creates a tenant without provisioning credentials. */
+        CreatePlatformTenantRequest: {
+            /** @description Immutable lower-case tenant code */
+            code: string;
+            /**
+             * Format: int64
+             * @description Initial file limit; null uses the existing application default
+             */
+            maxFileCount?: number | null;
+            /**
+             * Format: int64
+             * @description Initial storage limit; null uses the existing application default
+             */
+            maxStorageBytes?: number | null;
+            /** @description Tenant display name */
+            name: string;
+            /** @description Required operation reason */
+            reason: string;
         };
         CreateTenantInvitationRequest: {
             email: string;
@@ -4913,6 +5278,36 @@ export interface components {
             total?: number;
         };
         /** @description 结果数据 */
+        IPagePlatformAuditVO: {
+            /** Format: int64 */
+            current?: number;
+            records?: components["schemas"]["PlatformAuditVO"][];
+            /** Format: int64 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+        };
+        /** @description 结果数据 */
+        IPagePlatformTenantVO: {
+            /** Format: int64 */
+            current?: number;
+            records?: components["schemas"]["PlatformTenantVO"][];
+            /** Format: int64 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+        };
+        /** @description 结果数据 */
+        IPagePlatformUserVO: {
+            /** Format: int64 */
+            current?: number;
+            records?: components["schemas"]["PlatformUserVO"][];
+            /** Format: int64 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+        };
+        /** @description 结果数据 */
         IPageShareAccessLogVO: {
             /** Format: int64 */
             current?: number;
@@ -5411,6 +5806,331 @@ export interface components {
             name?: string;
             /** Format: int32 */
             status?: number;
+        };
+        /** @description Sanitized system-owned platform operation evidence. */
+        PlatformAuditVO: {
+            /** @description External platform actor identifier */
+            actorId: string;
+            /** @description Bounded sanitized after summary */
+            afterSummary: string | null;
+            /** @description Bounded sanitized before summary */
+            beforeSummary: string | null;
+            /**
+             * Format: date-time
+             * @description Operation completion timestamp
+             */
+            completedAt: string | null;
+            /**
+             * Format: int64
+             * @description Duration in milliseconds
+             */
+            durationMs: number | null;
+            /**
+             * Format: int32
+             * @description Stable business error code on failure
+             */
+            errorCode: number | null;
+            /** @description External operation identifier */
+            id: string;
+            /** @description Code-owned operation name */
+            operation: string;
+            /** @description Sanitized reason */
+            reason: string;
+            /** @description Typed external resource identifier or safe configuration key */
+            resourceId: string | null;
+            /** @description Code-owned resource type */
+            resourceType: string;
+            /** @description Recorded successful response; null before success or after failure */
+            result: components["schemas"]["PlatformMutationVO"] | null;
+            /**
+             * Format: date-time
+             * @description Operation start timestamp
+             */
+            startedAt: string;
+            /**
+             * @description Durable lifecycle
+             * @enum {string}
+             */
+            status: "PROCESSING" | "SUCCESS" | "FAILURE";
+            /** @description External target tenant identifier */
+            targetTenantId: string | null;
+            /** @description Validated trace identifier */
+            traceId: string | null;
+        };
+        /** @description Validated metadata and value from the safe global registry. */
+        PlatformConfigurationVO: {
+            /** @description Code-owned description */
+            description: string;
+            /** @description Code-owned configuration key */
+            key: string;
+            /**
+             * Format: int64
+             * @description Inclusive maximum
+             */
+            maximum: number;
+            /**
+             * Format: int64
+             * @description Inclusive minimum
+             */
+            minimum: number;
+            /** @description Whether online updates are supported */
+            mutable: boolean;
+            /** @description Whether an application restart is required */
+            restartRequired: boolean;
+            /** @description Fixed global scope */
+            scope: string;
+            /** @description Persisted value source */
+            source: string;
+            /**
+             * @description Value availability
+             * @enum {string}
+             */
+            state: "AVAILABLE" | "UNAVAILABLE";
+            /**
+             * @description Registry value type
+             * @enum {string}
+             */
+            type: "INTEGER";
+            /**
+             * Format: int64
+             * @description Validated integer value; null when unavailable
+             */
+            value: number | null;
+            /**
+             * Format: int64
+             * @description Current configuration version; 0 when absent, null when the stored version is invalid
+             */
+            version: number | null;
+        };
+        /** @description Allowlisted shared-component health without provider details. */
+        PlatformHealthVO: {
+            /** @description Allowlisted component name to normalized status */
+            components: {
+                [key: string]: string;
+            };
+            /**
+             * @description Aggregate status
+             * @enum {string}
+             */
+            status: "UP" | "DOWN" | "DEGRADED" | "UNKNOWN";
+        };
+        /** @description Durable platform command outcome. */
+        PlatformMutationVO: {
+            /** @description External operation identifier */
+            operationId: string;
+            /** @description Typed external resource identifier or safe configuration key */
+            resourceId: string;
+            /**
+             * Format: int64
+             * @description Resource version when the command changes a versioned resource
+             */
+            version: number | null;
+        };
+        /** @description Platform metadata counts from successful database measurements. */
+        PlatformOverviewVO: {
+            /**
+             * Format: int64
+             * @description Active tenant count
+             */
+            activeTenants: number;
+            /**
+             * Format: int64
+             * @description Active tenant member count
+             */
+            activeUsers: number;
+            /**
+             * Format: int64
+             * @description Disabled tenant count
+             */
+            disabledTenants: number;
+            /**
+             * @description Measurement state
+             * @enum {string}
+             */
+            state: "AVAILABLE";
+            /**
+             * Format: int64
+             * @description Undeleted tenant count
+             */
+            tenants: number;
+            /**
+             * Format: int64
+             * @description Undeleted tenant member count, excluding platform accounts
+             */
+            users: number;
+        };
+        /** @description Effective tenant quota and writable override version. */
+        PlatformQuotaVO: {
+            /**
+             * @description Effective rollout-aware enforcement mode
+             * @enum {string}
+             */
+            enforcementMode: "SHADOW" | "ENFORCE";
+            /**
+             * Format: int64
+             * @description Effective file count limit
+             */
+            maxFileCount: number;
+            /**
+             * Format: int64
+             * @description Effective storage limit
+             */
+            maxStorageBytes: number;
+            /**
+             * @description Effective source
+             * @enum {string}
+             */
+            source: "TENANT_OVERRIDE" | "TENANT_DEFAULT" | "APPLICATION_DEFAULT";
+            /** @description External tenant identifier */
+            tenantId: string;
+            /**
+             * Format: int64
+             * @description Current quota-eligible file count
+             */
+            usedFileCount: number;
+            /**
+             * Format: int64
+             * @description Current logical storage usage
+             */
+            usedStorageBytes: number;
+            /**
+             * Format: int64
+             * @description Writable override version; 0 when absent
+             */
+            version: number;
+        };
+        /** @description Authenticated platform identity and code-owned capabilities. */
+        PlatformSessionVO: {
+            /** @description External platform actor identifier */
+            actorId: string;
+            /** @description Deterministically ordered platform permissions */
+            capabilities: string[];
+            /**
+             * @description Fixed platform scope
+             * @enum {string}
+             */
+            scope: "platform";
+            /**
+             * Format: int64
+             * @description Fixed system tenant identity
+             * @enum {integer}
+             */
+            systemTenantId: 0;
+            /** @description Current principal name */
+            username: string;
+        };
+        /** @description Tenant metadata without business content. */
+        PlatformTenantVO: {
+            /** @description Immutable tenant code */
+            code: string;
+            /**
+             * Format: date-time
+             * @description Creation timestamp
+             */
+            createTime: string | null;
+            /**
+             * Format: date-time
+             * @description Disable timestamp
+             */
+            disabledAt: string | null;
+            /** @description External actor who disabled this tenant */
+            disabledBy: string | null;
+            /** @description Sanitized disable reason */
+            disabledReason: string | null;
+            /** @description External tenant identifier */
+            id: string;
+            /**
+             * Format: int64
+             * @description Current undeleted tenant member count; excludes platform accounts
+             */
+            memberCount: number;
+            /** @description Tenant display name */
+            name: string;
+            /**
+             * Format: int32
+             * @description 0 disabled; 1 active
+             */
+            status: number;
+            /**
+             * Format: date-time
+             * @description Last metadata change
+             */
+            updateTime: string | null;
+            /**
+             * Format: int64
+             * @description Optimistic tenant version
+             */
+            version: number;
+        };
+        /** @description Explicitly scoped tenant usage without file content. */
+        PlatformUsageVO: {
+            /** @description Attestation measurement scope */
+            attestationScope: string;
+            /**
+             * Format: int64
+             * @description Tenant business operation audit count, excluding platform audit
+             */
+            auditRecords: number;
+            /** @description Audit measurement scope */
+            auditScope: string;
+            /**
+             * Format: int64
+             * @description Completed tenant attestation batch count
+             */
+            completedAttestations: number;
+            /**
+             * Format: int64
+             * @description Quota-eligible PREPARE and SUCCESS file count
+             */
+            files: number;
+            /**
+             * Format: int64
+             * @description Quota-eligible logical storage bytes
+             */
+            logicalStorageBytes: number;
+            /**
+             * @description Measurement state
+             * @enum {string}
+             */
+            state: "AVAILABLE";
+            /** @description External tenant identifier */
+            tenantId: string;
+            /**
+             * Format: int64
+             * @description Undeleted tenant member count
+             */
+            users: number;
+        };
+        /** @description Bounded cross-tenant member metadata. */
+        PlatformUserVO: {
+            /** @description External user identifier */
+            id: string;
+            /**
+             * Format: date-time
+             * @description Last successful login timestamp
+             */
+            lastLoginTime: string | null;
+            /** @description Display nickname */
+            nickname: string | null;
+            /**
+             * Format: date-time
+             * @description Registration timestamp
+             */
+            registerTime: string | null;
+            /**
+             * @description Tenant role
+             * @enum {string}
+             */
+            role: "user" | "admin" | "monitor";
+            /**
+             * Format: int32
+             * @description 0 disabled; 1 active
+             */
+            status: number;
+            /** @description External tenant identifier */
+            tenantId: string;
+            /** @description Username */
+            username: string;
         };
         /** @description 文件上传进度类 */
         ProgressVO: {
@@ -6091,6 +6811,39 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
+        ResultIPagePlatformAuditVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["IPagePlatformAuditVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultIPagePlatformTenantVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["IPagePlatformTenantVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultIPagePlatformUserVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["IPagePlatformUserVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
         ResultIPageShareAccessLogVO: {
             /**
              * Format: int32
@@ -6309,6 +7062,18 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
+        ResultListPlatformConfigurationVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            /** @description 结果数据 */
+            data?: components["schemas"]["PlatformConfigurationVO"][];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
         ResultListShareFileVO: {
             /**
              * Format: int32
@@ -6482,6 +7247,105 @@ export interface components {
              */
             code?: number;
             data?: components["schemas"]["PageFileVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultPlatformAuditVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["PlatformAuditVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultPlatformConfigurationVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["PlatformConfigurationVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultPlatformHealthVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["PlatformHealthVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultPlatformMutationVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["PlatformMutationVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultPlatformOverviewVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["PlatformOverviewVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultPlatformQuotaVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["PlatformQuotaVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultPlatformSessionVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["PlatformSessionVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultPlatformTenantVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["PlatformTenantVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultPlatformUsageVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["PlatformUsageVO"];
             /** @description 提示信息 */
             message?: string;
         };
@@ -7447,6 +8311,53 @@ export interface components {
              * @description 文件状态：0-处理中，1-已完成（仅已完成记录幂等设置），2-已删除，-1-失败；禁止通过管理接口将未完成文件提升为已完成
              */
             status: number;
+        };
+        /** @description Updates one code-owned integer configuration. */
+        UpdatePlatformConfigurationRequest: {
+            /**
+             * Format: int64
+             * @description Current configuration version
+             */
+            expectedVersion: number;
+            /** @description Required operation reason */
+            reason: string;
+            /**
+             * Format: int64
+             * @description Integer value within registry bounds
+             */
+            value: number;
+        };
+        /** @description Updates a versioned tenant quota override. */
+        UpdatePlatformQuotaRequest: {
+            /**
+             * Format: int64
+             * @description Current override version; 0 when absent
+             */
+            expectedVersion: number;
+            /**
+             * Format: int64
+             * @description File count limit
+             */
+            maxFileCount: number;
+            /**
+             * Format: int64
+             * @description Storage limit in logical bytes
+             */
+            maxStorageBytes: number;
+            /** @description Required operation reason */
+            reason: string;
+        };
+        /** @description Updates versioned tenant display metadata. */
+        UpdatePlatformTenantRequest: {
+            /**
+             * Format: int64
+             * @description Current tenant version
+             */
+            expectedVersion: number;
+            /** @description Tenant display name */
+            name: string;
+            /** @description Required operation reason */
+            reason: string;
         };
         /** @description 更新好友备注 */
         UpdateRemarkVO: {
@@ -10548,6 +11459,605 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultMapStringInteger"];
+                };
+            };
+        };
+    };
+    platformListAudit: {
+        parameters: {
+            query?: {
+                pageNum?: number;
+                pageSize?: number;
+                status?: string;
+                tenantId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultIPagePlatformAuditVO"];
+                };
+            };
+        };
+    };
+    platformGetAudit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformAuditVO"];
+                };
+            };
+        };
+    };
+    platformListConfiguration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultListPlatformConfigurationVO"];
+                };
+            };
+        };
+    };
+    platformGetConfiguration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformConfigurationVO"];
+                };
+            };
+        };
+    };
+    platformUpdateConfiguration: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePlatformConfigurationRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformMutationVO"];
+                };
+            };
+        };
+    };
+    platformGetOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformOverviewVO"];
+                };
+            };
+        };
+    };
+    platformGetResourceHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformHealthVO"];
+                };
+            };
+        };
+    };
+    platformGetSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformSessionVO"];
+                };
+            };
+        };
+    };
+    platformListTenants: {
+        parameters: {
+            query?: {
+                keyword?: string;
+                pageNum?: number;
+                pageSize?: number;
+                status?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultIPagePlatformTenantVO"];
+                };
+            };
+        };
+    };
+    platformCreateTenant: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePlatformTenantRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformMutationVO"];
+                };
+            };
+        };
+    };
+    platformGetTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformTenantVO"];
+                };
+            };
+        };
+    };
+    platformUpdateTenant: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePlatformTenantRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformMutationVO"];
+                };
+            };
+        };
+    };
+    platformListTenantInvitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultListTenantInvitationVO"];
+                };
+            };
+        };
+    };
+    platformInviteTenantMember: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTenantInvitationRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformMutationVO"];
+                };
+            };
+        };
+    };
+    platformRevokeTenantInvitation: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                invitationId: string;
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantMemberReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformMutationVO"];
+                };
+            };
+        };
+    };
+    platformGetTenantQuota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformQuotaVO"];
+                };
+            };
+        };
+    };
+    platformUpdateTenantQuota: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePlatformQuotaRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformMutationVO"];
+                };
+            };
+        };
+    };
+    platformChangeTenantStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePlatformTenantStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformMutationVO"];
+                };
+            };
+        };
+    };
+    platformGetTenantUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformUsageVO"];
+                };
+            };
+        };
+    };
+    platformListTenantMembers: {
+        parameters: {
+            query?: {
+                keyword?: string;
+                pageNum?: number;
+                pageSize?: number;
+                role?: string;
+                status?: number;
+            };
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultIPageTenantMemberVO"];
+                };
+            };
+        };
+    };
+    platformChangeTenantMemberRole: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeTenantMemberRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformMutationVO"];
+                };
+            };
+        };
+    };
+    platformRevokeTenantMemberSessions: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantMemberReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformMutationVO"];
+                };
+            };
+        };
+    };
+    platformChangeTenantMemberStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeTenantMemberStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultPlatformMutationVO"];
+                };
+            };
+        };
+    };
+    platformListUsers: {
+        parameters: {
+            query?: {
+                keyword?: string;
+                pageNum?: number;
+                pageSize?: number;
+                role?: string;
+                status?: number;
+                tenantId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultIPagePlatformUserVO"];
                 };
             };
         };

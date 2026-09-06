@@ -37,6 +37,11 @@ import cn.flying.controller.TenantUserAdminController;
 import cn.flying.controller.TicketController;
 import cn.flying.controller.TransactionController;
 import cn.flying.controller.UploadSessionController;
+import cn.flying.controller.platform.PlatformAuditController;
+import cn.flying.controller.platform.PlatformConfigurationController;
+import cn.flying.controller.platform.PlatformOverviewController;
+import cn.flying.controller.platform.PlatformTenantController;
+import cn.flying.controller.platform.PlatformUserController;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.IntegrityAlertMapper;
 import cn.flying.dao.mapper.SysPermissionMapper;
@@ -82,6 +87,12 @@ import cn.flying.service.auth.AuthorizationStateService;
 import cn.flying.service.admin.TenantInvitationService;
 import cn.flying.service.admin.TenantMemberCommandService;
 import cn.flying.service.admin.TenantMemberQueryService;
+import cn.flying.service.platform.PlatformAuditService;
+import cn.flying.service.platform.PlatformConfigurationService;
+import cn.flying.service.platform.PlatformQueryService;
+import cn.flying.service.platform.PlatformTenantCommandService;
+import cn.flying.service.platform.PlatformTenantQueryService;
+import cn.flying.service.platform.PlatformUserService;
 import cn.flying.security.TrustedClientIpResolver;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -295,6 +306,24 @@ class OpenApiContractExportTest {
     @MockitoBean
     private TenantMemberQueryService tenantMemberQueryService;
 
+    @MockitoBean
+    private PlatformAuditService platformAuditService;
+
+    @MockitoBean
+    private PlatformConfigurationService platformConfigurationService;
+
+    @MockitoBean
+    private PlatformQueryService platformQueryService;
+
+    @MockitoBean
+    private PlatformTenantCommandService platformTenantCommandService;
+
+    @MockitoBean
+    private PlatformTenantQueryService platformTenantQueryService;
+
+    @MockitoBean
+    private PlatformUserService platformUserService;
+
     /**
      * 调用 `/v3/api-docs` 并将结果写入 `target/openapi/openapi.json`。
      *
@@ -357,6 +386,7 @@ class OpenApiContractExportTest {
 
         JsonNode rootNode = objectMapper.readTree(openApiContent);
         assertThat(rootNode.path("openapi").asText()).isNotBlank();
+        assertPlatformOperationContracts(rootNode);
         assertThat(rootNode.path("paths").has("/api/v1/files")).isTrue();
         assertThat(rootNode.path("paths").has("/api/v1/admin/quota/rollout/audits")).isTrue();
         assertThat(rootNode.path("paths").has("/api/v1/admin/integrity-alerts")).isTrue();
@@ -744,6 +774,67 @@ class OpenApiContractExportTest {
         assertThat(operation.has("security")).isFalse();
     }
 
+    /** Keeps every platform route in the exported contract with required mutation headers and safe schemas. */
+    private void assertPlatformOperationContracts(JsonNode rootNode) {
+        List<JsonNode> operations = new ArrayList<>();
+        rootNode.path("paths").fields().forEachRemaining(path -> {
+            if (!path.getKey().startsWith("/api/v1/platform/")) {
+                return;
+            }
+            path.getValue().fields().forEachRemaining(method -> {
+                if (!List.of("get", "post", "put", "delete").contains(method.getKey())) {
+                    return;
+                }
+                JsonNode operation = method.getValue();
+                operations.add(operation);
+                assertProtectedOperation(rootNode, path.getKey(), method.getKey());
+                if (!"get".equals(method.getKey())) {
+                    assertThat(operation.path("parameters")).anySatisfy(parameter -> {
+                        assertThat(parameter.path("in").asText()).isEqualTo("header");
+                        assertThat(parameter.path("name").asText()).isEqualTo("Idempotency-Key");
+                        assertThat(parameter.path("required").asBoolean()).isTrue();
+                        assertThat(parameter.path("schema").path("pattern").asText()).isNotBlank();
+                    });
+                }
+            });
+        });
+        assertThat(operations).hasSize(24);
+        assertThat(operations).extracting(operation -> operation.path("operationId").asText())
+                .containsExactlyInAnyOrder(
+                        "platformGetSession", "platformGetOverview", "platformGetResourceHealth",
+                        "platformListTenants", "platformCreateTenant", "platformGetTenant", "platformUpdateTenant",
+                        "platformChangeTenantStatus", "platformGetTenantUsage", "platformGetTenantQuota",
+                        "platformUpdateTenantQuota", "platformListUsers", "platformListTenantMembers",
+                        "platformChangeTenantMemberRole", "platformChangeTenantMemberStatus",
+                        "platformRevokeTenantMemberSessions", "platformListTenantInvitations",
+                        "platformInviteTenantMember", "platformRevokeTenantInvitation",
+                        "platformListConfiguration", "platformGetConfiguration", "platformUpdateConfiguration",
+                        "platformListAudit", "platformGetAudit");
+        assertThat(rootNode.path("paths").path("/api/v1/system/audit/configs")
+                .path("put").path("deprecated").asBoolean()).isTrue();
+        JsonNode configuration = rootNode.path("components").path("schemas").path("PlatformConfigurationVO");
+        assertRequiredFields(configuration, "key", "type", "value", "version", "minimum", "maximum",
+                "description", "scope", "source", "mutable", "restartRequired", "state");
+        assertNullableFields(configuration, "value", "version");
+        assertThat(configuration.path("properties").path("value").path("type").asText()).isEqualTo("integer");
+        JsonNode mutation = rootNode.path("components").path("schemas").path("PlatformMutationVO");
+        assertRequiredFields(mutation, "operationId", "resourceId", "version");
+        assertNullableFields(mutation, "version");
+        assertThat(mutation.path("properties").path("version").path("type").asText()).isEqualTo("integer");
+        JsonNode auditResult = rootNode.path("components").path("schemas").path("PlatformAuditVO")
+                .path("properties").path("result");
+        assertThat(auditResult.path("nullable").asBoolean()).isTrue();
+        assertThat(auditResult.path("allOf")).hasSize(1).anySatisfy(reference ->
+                assertThat(reference.path("$ref").asText()).isEqualTo("#/components/schemas/PlatformMutationVO"));
+        for (String schemaName : List.of("PlatformUserVO", "PlatformTenantVO", "PlatformAuditVO")) {
+            JsonNode properties = rootNode.path("components").path("schemas").path(schemaName).path("properties");
+            assertThat(properties.isMissingNode()).isFalse();
+            for (String forbidden : List.of("password", "authVersion", "token", "tokenDigest", "storagePath")) {
+                assertThat(properties.has(forbidden)).as(schemaName + "." + forbidden).isFalse();
+            }
+        }
+    }
+
     /**
      * 校验签名 ZIP operation 的成功响应头和可重试失败响应合同。
      *
@@ -935,6 +1026,11 @@ class OpenApiContractExportTest {
             ManifestBackfillAdminController.class,
             MessageController.class,
             PermissionController.class,
+            PlatformAuditController.class,
+            PlatformConfigurationController.class,
+            PlatformOverviewController.class,
+            PlatformTenantController.class,
+            PlatformUserController.class,
             QuotaAdminController.class,
             QuotaController.class,
             PublicProofController.class,

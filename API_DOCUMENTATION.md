@@ -30,6 +30,7 @@
   - [Attestation Batch Production Module](#19-attestation-batch-production-module-admin)
   - [Manifest Backfill Governance Module](#20-manifest-backfill-governance-module-admin)
   - [Controller-Aligned Endpoint Checklist](#21-controller-aligned-endpoint-checklist)
+  - [Platform Control Plane](#22-platform-control-plane)
 - [Appendix](#appendix)
 
 ---
@@ -2455,11 +2456,11 @@ GET /api/v1/system/audit/time-distribution
 
 ### 11.9 Get Audit Configs
 
-```
+```http
 GET /api/v1/system/audit/configs
 ```
 
-**Response Example**:
+Authorized tenant audit readers receive only validated numeric registry values and code-owned descriptions. The allowed keys are `HIGH_FREQ_THRESHOLD`, `FAILED_LOGIN_THRESHOLD`, `ERROR_RATE_THRESHOLD`, and `LOG_RETENTION_DAYS`. Corrupt or missing values are omitted; arbitrary stored configuration text, IDs, and timestamps are not part of the safe projection.
 
 ```json
 {
@@ -2467,20 +2468,9 @@ GET /api/v1/system/audit/configs
   "message": "success",
   "data": [
     {
-      "id": 1,
       "configKey": "HIGH_FREQ_THRESHOLD",
       "configValue": "100",
-      "description": "High frequency operation threshold (ops per 5 min)",
-      "createTime": "2025-01-01 00:00:00",
-      "updateTime": "2025-01-05 10:00:00"
-    },
-    {
-      "id": 2,
-      "configKey": "FAILED_LOGIN_THRESHOLD",
-      "configValue": "5",
-      "description": "Failed login threshold per hour",
-      "createTime": "2025-01-01 00:00:00",
-      "updateTime": "2025-01-01 00:00:00"
+      "description": "Operations per five-minute audit window"
     }
   ]
 }
@@ -2488,32 +2478,13 @@ GET /api/v1/system/audit/configs
 
 ---
 
-### 11.10 Update Audit Config
+### 11.10 Retired Audit Config Write
 
-```
+```http
 PUT /api/v1/system/audit/configs
 ```
 
-**Request Body**:
-
-```json
-{
-  "id": 1,
-  "configKey": "HIGH_FREQ_THRESHOLD",
-  "configValue": "150",
-  "description": "High frequency operation threshold (ops per 5 min)"
-}
-```
-
-**Response Example**:
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": true
-}
-```
+This endpoint is deprecated and always denied. Tenant administrators and monitors, including legacy tenant-zero administrators, cannot modify global configuration. Use `PUT /api/v1/platform/configuration/{key}` with a platform identity, UUID `Idempotency-Key`, `reason`, `value`, and `expectedVersion`. See [Platform Control Plane](#22-platform-control-plane).
 
 ---
 
@@ -4116,6 +4087,40 @@ Current event types include:
 - `friend-share`
 - `audit-alert`
 - `integrity-alert`
+
+
+## 22. Platform Control Plane
+
+These endpoints require an enabled `platform_admin` identity, `scope=platform`, and `X-Tenant-ID: 0`. The target tenant is an explicit typed path/query identifier. Legacy tenant-zero administrators and tenant-managed `platform:` permission rows do not confer platform access.
+
+Every write requires a canonical UUID `Idempotency-Key` and a nonblank `reason` (at most 255 characters). Tenant metadata/status, quota and configuration updates also require `expectedVersion`. Successful mutations return `operationId`, `resourceId` and an optional `version`. Retrying an uncertain request preserves the same key and payload. See [operation and recovery procedures](docs/en/deployment/platform-control-plane.md).
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/v1/platform/session` | Platform identity and fixed capabilities |
+| GET | `/api/v1/platform/overview` | Tenant and user metadata counts |
+| GET | `/api/v1/platform/resources/health` | Sanitized shared component status |
+| GET | `/api/v1/platform/tenants` | Bounded tenant page |
+| POST | `/api/v1/platform/tenants` | Create tenant and initial quota |
+| GET | `/api/v1/platform/tenants/{tenantId}` | Safe tenant detail |
+| PUT | `/api/v1/platform/tenants/{tenantId}` | Versioned tenant metadata update |
+| PUT | `/api/v1/platform/tenants/{tenantId}/status` | Disable or restore a tenant |
+| GET | `/api/v1/platform/tenants/{tenantId}/usage` | Tenant usage and audit/attestation counts |
+| GET | `/api/v1/platform/tenants/{tenantId}/quota` | Effective quota, source and version |
+| PUT | `/api/v1/platform/tenants/{tenantId}/quota` | Versioned quota override |
+| GET | `/api/v1/platform/users` | Safe global tenant-user metadata page |
+| GET | `/api/v1/platform/tenants/{tenantId}/users` | Target-tenant member page |
+| PUT | `/api/v1/platform/tenants/{tenantId}/users/{userId}/role` | Change a tenant member role |
+| PUT | `/api/v1/platform/tenants/{tenantId}/users/{userId}/status` | Enable or disable a tenant member |
+| POST | `/api/v1/platform/tenants/{tenantId}/users/{userId}/sessions/revoke` | Revoke member sessions |
+| GET | `/api/v1/platform/tenants/{tenantId}/invitations` | Safe target-tenant invitations |
+| POST | `/api/v1/platform/tenants/{tenantId}/invitations` | Invite a tenant member or first administrator |
+| DELETE | `/api/v1/platform/tenants/{tenantId}/invitations/{invitationId}` | Revoke an invitation |
+| GET | `/api/v1/platform/configuration` | Code-owned numeric configuration registry |
+| GET | `/api/v1/platform/configuration/{key}` | Read one safe configuration entry |
+| PUT | `/api/v1/platform/configuration/{key}` | Versioned configuration update |
+| GET | `/api/v1/platform/audit` | Platform operation history |
+| GET | `/api/v1/platform/audit/{operationId}` | Sanitized durable operation outcome |
 
 
 ## Appendix

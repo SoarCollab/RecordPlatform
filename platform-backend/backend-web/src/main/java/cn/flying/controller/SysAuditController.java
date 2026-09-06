@@ -303,8 +303,9 @@ public class SysAuditController {
      * @return 是否成功
      */
     @PutMapping("/configs")
-    @Operation(summary = "更新审计配置")
-    @OperationLog(module = "系统审计", operationType = "修改", description = "更新审计配置")
+    @Operation(summary = "已停用：请使用平台配置管理接口", deprecated = true)
+    @PreAuthorize("denyAll()")
+    @OperationLog(module = "系统审计", operationType = "修改", description = "已停用的审计配置写入", saveRequestData = false)
     public Result<Boolean> updateAuditConfig(@Valid @RequestBody AuditConfigVO configVO) {
         return Result.success(auditService.updateAuditConfig(configVO));
     }
