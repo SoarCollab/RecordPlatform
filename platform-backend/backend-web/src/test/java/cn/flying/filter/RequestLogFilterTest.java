@@ -1,22 +1,41 @@
 package cn.flying.filter;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.MDC;
+import org.slf4j.LoggerFactory;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.User;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
@@ -41,6 +60,8 @@ class RequestLogFilterTest {
     @AfterEach
     void tearDown() {
         MDC.clear();
+        SecurityContextHolder.clearContext();
+        TenantContext.clear();
     }
 
     @Nested
@@ -480,6 +501,217 @@ class RequestLogFilterTest {
             assertThat(content).contains("\"token\":\"******\"");
             assertThat(content).contains("\"message\":\"ok\"");
             assertThat(content).doesNotContain("secret-token");
+        }
+    }
+
+    /** Platform traffic preserves client bytes while omitting every request parameter and response payload. */
+    @ParameterizedTest(name = "platform route {0}")
+    @MethodSource("platformRequests")
+    void shouldOmitPlatformPayloadsWithoutWrappingResponse(String path, String contextPath) throws Exception {
+        configurePlatformRequest(path, contextPath);
+        byte[] requestBody = "{\"reason\":\"platform-body-sentinel\"}".getBytes(StandardCharsets.UTF_8);
+        byte[] responseBody = "{\"details\":\"platform-response-sentinel\"}".getBytes(StandardCharsets.UTF_8);
+        request.setContent(requestBody);
+        request.setParameter("reason", "platform-query-sentinel");
+        request.setParameter("platform-query-name-sentinel", "ignored");
+        request.setAttribute(Const.ATTR_USER_ID, 41L);
+        User principal = new User("platform-operator", "unused", List.of(
+                new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_platform_admin")));
+        SecurityContextHolder.getContext().setAuthentication(
+                UsernamePasswordAuthenticationToken.authenticated(principal, null, principal.getAuthorities()));
+        MockHttpServletRequest observedRequest = spy(request);
+        MDC.put("traceId", "platform-request-trace");
+
+        try (CapturedLogs logs = new CapturedLogs()) {
+            filter.doFilter(observedRequest, response, (incoming, outgoing) -> {
+                assertThat(incoming).isSameAs(observedRequest);
+                assertThat(incoming.getInputStream().readAllBytes()).isEqualTo(requestBody);
+                assertThat(outgoing).isSameAs(response);
+                assertThat(MDC.get(Const.ATTR_REQ_ID)).isNotBlank();
+                HttpServletResponse clientResponse = (HttpServletResponse) outgoing;
+                clientResponse.setStatus(201);
+                clientResponse.setContentType("application/json");
+                clientResponse.setHeader("X-Operation", "completed");
+                clientResponse.getOutputStream().write(responseBody);
+            });
+
+            assertThat(response.getContentAsByteArray()).isEqualTo(responseBody);
+            assertThat(response.getStatus()).isEqualTo(201);
+            assertThat(response.getHeader("X-Operation")).isEqualTo("completed");
+            assertThat(logs.events()).extracting(ILoggingEvent::getFormattedMessage)
+                    .anyMatch(message -> message.contains("请求参数列表: <omitted>"))
+                    .anyMatch(message -> message.contains("响应结果: <skipped>"));
+            assertNoLogSentinels(logs.events(), "platform-body-sentinel", "platform-response-sentinel",
+                    "platform-query-sentinel", "platform-query-name-sentinel");
+        }
+
+        verify(observedRequest, never()).getParameterMap();
+        assertThat(MDC.get(Const.ATTR_REQ_ID)).isNull();
+        assertThat(MDC.get("traceId")).isEqualTo("platform-request-trace");
+    }
+
+    /** Platform failures retain the original exception graph and partial client bytes without logging either. */
+    @ParameterizedTest
+    @MethodSource("platformFailures")
+    void shouldPreservePlatformFailuresAndPartialResponses(Exception failure) throws Exception {
+        configurePlatformRequest("/api/v1/platform/configuration", "");
+        request.setParameter("reason", "platform-query-sentinel");
+        byte[] partialBody = "platform-partial-response-sentinel".getBytes(StandardCharsets.UTF_8);
+        failure.addSuppressed(new IllegalArgumentException("platform-suppressed-sentinel"));
+
+        try (CapturedLogs logs = new CapturedLogs()) {
+            assertThatThrownBy(() -> filter.doFilter(request, response, (incoming, outgoing) -> {
+                assertThat(outgoing).isSameAs(response);
+                outgoing.getOutputStream().write(partialBody);
+                if (failure instanceof ServletException servletFailure) {
+                    throw servletFailure;
+                }
+                throw (IOException) failure;
+            })).isSameAs(failure);
+
+            assertThat(response.getContentAsByteArray()).isEqualTo(partialBody);
+            assertThat(failure.getCause()).hasMessage("platform-cause-sentinel");
+            assertThat(failure.getSuppressed()).singleElement().satisfies(suppressed ->
+                    assertThat(suppressed).hasMessage("platform-suppressed-sentinel"));
+            assertThat(logs.events()).extracting(ILoggingEvent::getFormattedMessage)
+                    .anyMatch(message -> message.contains("请求参数列表: <omitted>"));
+            assertNoLogSentinels(logs.events(), "platform-query-sentinel", "platform-partial-response-sentinel",
+                    "platform-exception-sentinel", "platform-cause-sentinel", "platform-suppressed-sentinel");
+        }
+
+        assertThat(MDC.get(Const.ATTR_REQ_ID)).isNull();
+    }
+
+    /** Requesting event-stream handling does not bypass the platform parameter omission boundary. */
+    @Test
+    void shouldOmitPlatformParametersWhenClientRequestsEventStream() throws Exception {
+        configurePlatformRequest("/api/v1/platform/overview", "");
+        request.addHeader("Accept", "text/event-stream");
+        request.setParameter("reason", "platform-query-sentinel");
+        byte[] body = "data: platform-stream-sentinel\n\n".getBytes(StandardCharsets.UTF_8);
+
+        try (CapturedLogs logs = new CapturedLogs()) {
+            filter.doFilter(request, response, (incoming, outgoing) -> {
+                assertThat(outgoing).isSameAs(response);
+                outgoing.getOutputStream().write(body);
+            });
+
+            assertThat(response.getContentAsByteArray()).isEqualTo(body);
+            assertThat(logs.events()).extracting(ILoggingEvent::getFormattedMessage)
+                    .anyMatch(message -> message.contains("请求参数列表: <omitted>"))
+                    .anyMatch(message -> message.contains("SSE连接保持"));
+            assertNoLogSentinels(logs.events(), "platform-query-sentinel", "platform-stream-sentinel");
+        }
+        assertThat(MDC.get(Const.ATTR_REQ_ID)).isNull();
+    }
+
+    /** Ordinary and similarly prefixed routes still cache, log safe data and return unmodified responses. */
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/platforms/summary", "/api/v1/platform-admin/overview", "/api/v1/conversations"})
+    void shouldKeepOrdinaryRequestAndResponseLogging(String path) throws Exception {
+        request.setRequestURI(path);
+        request.setServletPath(path);
+        request.setMethod("GET");
+        request.setParameter("query", "ordinary-query-marker");
+        byte[] body = "{\"message\":\"ordinary-response-marker\"}".getBytes(StandardCharsets.UTF_8);
+
+        try (CapturedLogs logs = new CapturedLogs()) {
+            filter.doFilter(request, response, (incoming, outgoing) -> {
+                assertThat(outgoing).isInstanceOf(ContentCachingResponseWrapper.class);
+                outgoing.setContentType("application/json");
+                outgoing.getOutputStream().write(body);
+            });
+
+            assertThat(response.getContentAsByteArray()).isEqualTo(body);
+            assertThat(logs.events()).extracting(ILoggingEvent::getFormattedMessage)
+                    .anyMatch(message -> message.contains("ordinary-query-marker"))
+                    .anyMatch(message -> message.contains("ordinary-response-marker"));
+        }
+    }
+
+    /** The public preview hook also suppresses platform payloads if another filter supplied a cached wrapper. */
+    @Test
+    void shouldOmitPlatformBodyFromExplicitResponsePreview() throws IOException {
+        configurePlatformRequest("/api/v1/platform/overview", "");
+        ContentCachingResponseWrapper wrapper = new ContentCachingResponseWrapper(response);
+        byte[] body = "{\"details\":\"platform-preview-sentinel\"}".getBytes(StandardCharsets.UTF_8);
+        wrapper.setContentType("application/json");
+        wrapper.getOutputStream().write(body);
+
+        try (CapturedLogs logs = new CapturedLogs()) {
+            filter.logRequestEnd(request, wrapper, System.currentTimeMillis());
+
+            assertThat(wrapper.getContentAsByteArray()).isEqualTo(body);
+            assertThat(logs.events()).extracting(ILoggingEvent::getFormattedMessage)
+                    .anyMatch(message -> message.contains("响应结果: <skipped>"));
+            assertNoLogSentinels(logs.events(), "platform-preview-sentinel");
+        }
+    }
+
+    /** Configures the URI and servlet path as the container does for platform requests. */
+    private void configurePlatformRequest(String path, String contextPath) {
+        request.setRequestURI(path);
+        request.setContextPath(contextPath);
+        request.setServletPath(path.substring(contextPath.length()));
+        request.setMethod("PUT");
+        request.setContentType("application/json");
+    }
+
+    /** Supplies canonical and normalized platform routes, including the production context path. */
+    private static Stream<Arguments> platformRequests() {
+        return Stream.of(
+                Arguments.of("/api/v1/platform", ""),
+                Arguments.of("/api/v1/platform/tenants", ""),
+                Arguments.of("/record-platform/api/v1/platform/configuration", "/record-platform"),
+                Arguments.of("/api/v1/platf%6frm;view=1/tenants", ""),
+                Arguments.of("/record-platform/api/v1/platform;view=1/%2E/tenants", "/record-platform"));
+    }
+
+    /** Creates the checked exception kinds allowed by the servlet filter contract. */
+    private static Stream<Exception> platformFailures() {
+        return Stream.of(
+                new ServletException("platform-exception-sentinel", new IllegalStateException("platform-cause-sentinel")),
+                new IOException("platform-exception-sentinel", new IllegalStateException("platform-cause-sentinel")));
+    }
+
+    /** Checks both rendered messages and raw logging arguments so deferred formatting cannot hide a leak. */
+    private void assertNoLogSentinels(List<ILoggingEvent> events, String... sentinels) {
+        assertThat(events).isNotEmpty();
+        for (ILoggingEvent event : events) {
+            assertThat(event.getFormattedMessage()).doesNotContain(sentinels);
+            assertThat(event.getThrowableProxy()).isNull();
+            if (event.getArgumentArray() != null) {
+                for (Object argument : event.getArgumentArray()) {
+                    assertThat(String.valueOf(argument)).doesNotContain(sentinels);
+                }
+            }
+        }
+    }
+
+    /** Captures only filter events and restores the shared logger even if an assertion fails. */
+    private static final class CapturedLogs implements AutoCloseable {
+        private final Logger logger = (Logger) LoggerFactory.getLogger(RequestLogFilter.class);
+        private final Level previousLevel = logger.getLevel();
+        private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
+
+        /** Attaches a temporary INFO appender before exercising the real filter. */
+        private CapturedLogs() {
+            appender.start();
+            logger.setLevel(Level.INFO);
+            logger.addAppender(appender);
+        }
+
+        /** Returns the collected events without rendering their argument objects. */
+        private List<ILoggingEvent> events() {
+            return appender.list;
+        }
+
+        /** Detaches and stops the temporary appender and restores the logger's previous level. */
+        @Override
+        public void close() {
+            logger.detachAppender(appender);
+            logger.setLevel(previousLevel);
+            appender.stop();
         }
     }
 

@@ -167,6 +167,30 @@ jobs:
                   )
           PY
 
+      - name: Require Platform Control Plane IT Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          reports = Path("platform-backend/backend-web/target/failsafe-reports")
+          required_suites = {
+              "cn.flying.service.platform.PlatformControlPlaneMySqlIT": 20,
+              "cn.flying.migration.PlatformControlPlaneMigrationIT": 2,
+          }
+          for class_name, case_count in required_suites.items():
+              report = reports / f"TEST-{class_name}.xml"
+              if not report.is_file():
+                  sys.exit(f"Missing required Failsafe report: {report}")
+              suite = ET.parse(report).getroot()
+              expected_counts = {"tests": case_count, "skipped": 0, "failures": 0, "errors": 0}
+              for name, expected in expected_counts.items():
+                  actual = int(suite.attrib.get(name, "-1"))
+                  if actual != expected:
+                      sys.exit(f"{class_name} {name}={actual}; expected {expected}")
+          PY
+
       - name: Require Permission Tenant Isolation IT Execution
         run: |
           python3 - <<'PY'

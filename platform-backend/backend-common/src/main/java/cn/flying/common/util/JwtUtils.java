@@ -7,6 +7,7 @@ import com.auth0.jwt.exceptions.JWTVerificationException;
 import com.auth0.jwt.interfaces.Claim;
 import com.auth0.jwt.interfaces.DecodedJWT;
 import cn.flying.common.constant.UserRole;
+import cn.flying.common.constant.PlatformPermissions;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -239,11 +240,20 @@ public class JwtUtils {
      * @return UserDetails
      */
     public UserDetails toUser(DecodedJWT jwt) {
+        if (jwt == null || !hasRequiredIdentityClaims(jwt, jwt.getClaims())) {
+            throw new IllegalArgumentException("Invalid authorization identity");
+        }
         Map<String, Claim> claims = jwt.getClaims();
+        String role = toRoleFromClaims(claims);
+        java.util.List<String> authorities = new java.util.ArrayList<>();
+        authorities.add("ROLE_" + role);
+        if (UserRole.ROLE_PLATFORM_ADMIN.getRole().equals(role)) {
+            authorities.addAll(PlatformPermissions.allCodes());
+        }
         return User
                 .withUsername(claims.get("name").asString())
                 .password("******")
-                .authorities(claims.get("authorities").asArray(String.class))
+                .authorities(authorities.toArray(String[]::new))
                 .build();
     }
 

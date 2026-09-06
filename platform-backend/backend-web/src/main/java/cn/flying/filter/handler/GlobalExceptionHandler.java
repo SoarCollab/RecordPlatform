@@ -18,6 +18,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.BindException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
@@ -60,6 +61,18 @@ public class GlobalExceptionHandler {
         String traceId = currentTraceId();
         String detail = "缺少参数: " + ex.getParameterName();
         log.warn("参数缺失(MissingServletRequestParameterException): detail={}, traceId={}", detail, traceId);
+        return Result.error(ResultEnum.PARAM_NOT_COMPLETE, withTrace(detail));
+    }
+
+    /** Returns a protocol error for a missing required header without exposing values or exception details. */
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<?> handleMissingRequestHeaderException(MissingRequestHeaderException ex) {
+        String headerName = ex.getHeaderName();
+        String safeHeaderName = headerName != null && headerName.matches("[A-Za-z0-9_-]{1,128}")
+                ? headerName : "unknown";
+        String detail = "缺少请求头: " + safeHeaderName;
+        log.warn("请求头缺失(MissingRequestHeaderException): detail={}, traceId={}", detail, currentTraceId());
         return Result.error(ResultEnum.PARAM_NOT_COMPLETE, withTrace(detail));
     }
 

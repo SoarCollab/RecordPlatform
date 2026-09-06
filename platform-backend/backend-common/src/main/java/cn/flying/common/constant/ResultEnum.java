@@ -157,6 +157,23 @@ public enum ResultEnum implements Serializable {
     /** 源文件状态不允许创建新版本 */
     VERSION_SOURCE_INVALID(50016, "源文件状态不允许创建新版本"),
 
+    /** The explicit platform target does not exist. */
+    PLATFORM_TARGET_NOT_FOUND(50020, "平台管理目标不存在"),
+    /** System tenant lifecycle operations must preserve platform recovery. */
+    PLATFORM_SYSTEM_TENANT_PROTECTED(50021, "系统租户不允许此操作"),
+    /** A versioned platform resource changed since it was read. */
+    PLATFORM_VERSION_CONFLICT(50022, "资源版本已变化，请刷新后重试"),
+    /** One idempotency key cannot identify different logical commands. */
+    PLATFORM_IDEMPOTENCY_CONFLICT(50023, "幂等键已用于其他操作"),
+    /** A durable operation is still processing or requires operator reconciliation. */
+    PLATFORM_OPERATION_IN_PROGRESS(50024, "操作正在处理，请使用同一幂等键查询结果"),
+    /** Tenant codes remain globally unique, including historical tenants. */
+    PLATFORM_TENANT_CODE_EXISTS(50025, "租户编码已存在"),
+    /** Only the code-owned configuration registry can be addressed. */
+    PLATFORM_CONFIGURATION_UNSUPPORTED(50026, "不支持的平台配置项"),
+    /** New invitations require an active target tenant. */
+    PLATFORM_TENANT_INACTIVE(50027, "目标租户已停用"),
+
     /* ==================== 消息服务错误：60000-69999 ==================== */
     /** 消息不存在 */
     MESSAGE_NOT_FOUND(60001, "消息不存在"),

@@ -1,11 +1,13 @@
 package cn.flying.common.util;
 
+import cn.flying.common.constant.PlatformPermissions;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.constant.UserRole;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
 import org.slf4j.MDC;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.stereotype.Component;
@@ -118,6 +120,36 @@ public class SecurityUtils {
         if (!isAdminOrMonitor()) {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
         }
+    }
+
+    /** Requires an authenticated platform capability in an explicitly isolated system context. */
+    public static Long requirePlatformPermission(String permissionCode) {
+        Long actorId = getUserId();
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (!PlatformPermissions.allCodes().contains(permissionCode)
+                || !isPlatformPrincipal()
+                || !Long.valueOf(0L).equals(TenantContext.getTenantId())
+                || TenantContext.isIgnoreIsolation()
+                || actorId == null || actorId <= 0
+                || authentication.getAuthorities().stream()
+                .noneMatch(authority -> permissionCode.equals(authority.getAuthority()))) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+        }
+        return actorId;
+    }
+
+    /** Identifies the authenticated platform principal even during an explicit target-tenant call. */
+    public static boolean isPlatformPrincipal() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()
+                || !(authentication.getPrincipal() instanceof User)) {
+            return false;
+        }
+        java.util.List<String> roles = authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .filter(authority -> authority != null && authority.startsWith("ROLE_"))
+                .toList();
+        return roles.size() == 1 && "ROLE_platform_admin".equals(roles.getFirst());
     }
 
     /**

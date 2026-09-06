@@ -53,6 +53,40 @@ The anonymous public-share surface is limited to the five exact share-related `G
 
 ## Endpoints by Module
 
+### Platform Control Plane (`/api/v1/platform`)
+
+These endpoints require an enabled `platform_admin` identity, `scope=platform`, and `X-Tenant-ID: 0`. The target tenant is an explicit typed path/query identifier. Legacy tenant-zero administrators and tenant-managed `platform:` permission rows do not confer platform access.
+
+Every write requires a canonical UUID `Idempotency-Key` and a nonblank `reason` (at most 255 characters). Tenant metadata/status, quota and configuration updates also require `expectedVersion`. Successful mutations return `operationId`, `resourceId` and an optional `version`. Retrying an uncertain request preserves the same key and payload. See [operation and recovery procedures](/en/deployment/platform-control-plane).
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/v1/platform/session` | Platform identity and fixed capabilities |
+| GET | `/api/v1/platform/overview` | Tenant and user metadata counts |
+| GET | `/api/v1/platform/resources/health` | Sanitized shared component status |
+| GET | `/api/v1/platform/tenants` | Bounded tenant page |
+| POST | `/api/v1/platform/tenants` | Create tenant and initial quota |
+| GET | `/api/v1/platform/tenants/{tenantId}` | Safe tenant detail |
+| PUT | `/api/v1/platform/tenants/{tenantId}` | Versioned tenant metadata update |
+| PUT | `/api/v1/platform/tenants/{tenantId}/status` | Disable or restore a tenant |
+| GET | `/api/v1/platform/tenants/{tenantId}/usage` | Tenant usage and audit/attestation counts |
+| GET | `/api/v1/platform/tenants/{tenantId}/quota` | Effective quota, source and version |
+| PUT | `/api/v1/platform/tenants/{tenantId}/quota` | Versioned quota override |
+| GET | `/api/v1/platform/users` | Safe global tenant-user metadata page |
+| GET | `/api/v1/platform/tenants/{tenantId}/users` | Target-tenant member page |
+| PUT | `/api/v1/platform/tenants/{tenantId}/users/{userId}/role` | Change a tenant member role |
+| PUT | `/api/v1/platform/tenants/{tenantId}/users/{userId}/status` | Enable or disable a tenant member |
+| POST | `/api/v1/platform/tenants/{tenantId}/users/{userId}/sessions/revoke` | Revoke member sessions |
+| GET | `/api/v1/platform/tenants/{tenantId}/invitations` | Safe target-tenant invitations |
+| POST | `/api/v1/platform/tenants/{tenantId}/invitations` | Invite a tenant member or first administrator |
+| DELETE | `/api/v1/platform/tenants/{tenantId}/invitations/{invitationId}` | Revoke an invitation |
+| GET | `/api/v1/platform/configuration` | Code-owned numeric configuration registry |
+| GET | `/api/v1/platform/configuration/{key}` | Read one safe configuration entry |
+| PUT | `/api/v1/platform/configuration/{key}` | Versioned configuration update |
+| GET | `/api/v1/platform/audit` | Platform operation history |
+| GET | `/api/v1/platform/audit/{operationId}` | Sanitized durable operation outcome |
+
+
 ### Auth (`/api/v1/auth`)
 
 | Method | Endpoint | Description |
@@ -375,8 +409,8 @@ Alert responses add `severity` and bounded `evidence` while retaining existing f
 | POST | `/api/v1/system/audit/sensitive/page` | Sensitive operation page |
 | GET | `/api/v1/system/audit/error-stats` | Error stats |
 | GET | `/api/v1/system/audit/time-distribution` | Time distribution |
-| GET | `/api/v1/system/audit/configs` | Audit configs |
-| PUT | `/api/v1/system/audit/configs` | Update audit configs |
+| GET | `/api/v1/system/audit/configs` | Validated safe numeric configuration projection |
+| PUT | `/api/v1/system/audit/configs` | Retired: always denied; use platform configuration management |
 | POST | `/api/v1/system/audit/anomalies/check` | Check anomalies |
 | POST | `/api/v1/system/audit/logs/backups` | Backup logs |
 

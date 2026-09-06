@@ -56,6 +56,7 @@ class FlywayMigrationVersionTest {
         assertTrue(migrationFiles.contains("V1.20.1__filter_sensitive_operation_view.sql"));
         assertTrue(migrationFiles.contains("V1.21.0__platform_identity_tenant_status.sql"));
         assertTrue(migrationFiles.contains("V1.22.0__tenant_user_management.sql"));
+        assertTrue(migrationFiles.contains("V1.23.0__platform_admin_control_plane.sql"));
         assertFalse(migrationFiles.contains("V1.5.0__add_account_nickname.sql"));
         assertFalse(migrationFiles.contains("V1.7.3__integrity_alert.sql"));
 

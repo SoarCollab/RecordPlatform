@@ -3,6 +3,7 @@ package cn.flying.common.util;
 import com.auth0.jwt.JWT;
 import com.auth0.jwt.algorithms.Algorithm;
 import com.auth0.jwt.interfaces.DecodedJWT;
+import cn.flying.common.constant.PlatformPermissions;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -230,6 +231,16 @@ class JwtUtilsTest {
             assertThat(jwtUtils.toAuthVersion(jwt)).isEqualTo(7L);
             assertThat(jwtUtils.toTenantId(jwt)).isZero();
             assertThat(jwtUtils.toRole(jwt)).isEqualTo("platform_admin");
+            assertThat(jwt.getClaim("authorities").asList(String.class)).containsExactly("ROLE_platform_admin");
+            UserDetails principal = jwtUtils.toUser(jwt);
+            assertThat(principal.getAuthorities()).extracting(authority -> authority.getAuthority())
+                    .containsAll(PlatformPermissions.allCodes())
+                    .contains("ROLE_platform_admin")
+                    .hasSize(PlatformPermissions.allCodes().size() + 1);
+
+            String reissued = jwtUtils.createJwt(principal, "operator", 900L, 0L, 7L);
+            assertThat(JWT.decode(reissued).getClaim("authorities").asList(String.class))
+                    .containsExactly("ROLE_platform_admin");
         }
 
         @Test
@@ -526,6 +537,47 @@ class JwtUtilsTest {
             assertThat(jwtUtils.toScope(jwt)).isNull();
             assertThat(jwtUtils.toAuthVersion(jwt)).isNull();
             assertThat(jwtUtils.toRole(jwt)).isNull();
+        }
+
+        /** Invalid conversions cannot bypass the same identity checks used during JWT resolution. */
+        @Test
+        void toUserRejectsMissingIdentityAndNullToken() {
+            DecodedJWT incomplete = JWT.decode(JWT.create().withClaim("name", "operator")
+                    .sign(Algorithm.HMAC512(TEST_KEY)));
+            assertThatThrownBy(() -> jwtUtils.toUser(incomplete)).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> jwtUtils.toUser(null)).isInstanceOf(IllegalArgumentException.class);
+        }
+
+        /** Embedded permission claims, conflicting roles and invalid platform scope all fail closed. */
+        @Test
+        void toUserRejectsAuthorityAndScopeInjection() {
+            List<DecodedJWT> invalidTokens = List.of(
+                    identityToken(0L, "platform", List.of("ROLE_platform_admin", "platform:tenant:write")),
+                    identityToken(0L, "platform", List.of("ROLE_platform_admin", "ROLE_admin")),
+                    identityToken(91L, "platform", List.of("ROLE_platform_admin")),
+                    identityToken(0L, "tenant", List.of("ROLE_platform_admin")),
+                    identityToken(0L, "platform", List.of("ROLE_admin")),
+                    identityToken(91L, "tenant", List.of("ROLE_admin", "platform:tenant:write")));
+            for (DecodedJWT invalid : invalidTokens) {
+                assertThatThrownBy(() -> jwtUtils.toUser(invalid)).isInstanceOf(IllegalArgumentException.class);
+            }
+        }
+
+        /** Tenant-zero legacy administrators retain a tenant role without platform capabilities. */
+        @Test
+        void toUserDoesNotPromoteLegacySystemTenantAdmin() {
+            UserDetails principal = jwtUtils.toUser(identityToken(0L, "tenant", List.of("ROLE_admin")));
+            assertThat(principal.getAuthorities()).extracting(authority -> authority.getAuthority())
+                    .containsExactly("ROLE_admin");
+        }
+
+        /** Builds signed complete claim fixtures while letting each case vary only its identity boundary. */
+        private DecodedJWT identityToken(Long tenantId, String scope, List<String> authorities) {
+            return JWT.decode(JWT.create().withJWTId("identity-conversion")
+                    .withClaim("id", 17L).withClaim("name", "operator")
+                    .withClaim("tenantId", tenantId).withClaim("scope", scope).withClaim("authVersion", 0L)
+                    .withClaim("authorities", authorities).withExpiresAt(new Date(System.currentTimeMillis() + 60000))
+                    .sign(Algorithm.HMAC512(TEST_KEY)));
         }
     }
 

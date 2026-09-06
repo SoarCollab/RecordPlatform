@@ -26,10 +26,10 @@
 
 | 指标 | 当前值 | 自动校验来源 |
 | --- | ---: | --- |
-| REST 控制器 | 35 | `platform-backend/backend-web/src/main/java` |
-| 后端服务类 | 221 | `platform-backend/backend-service/src/main/java` |
-| 后端测试文件 | 235 | `platform-backend/**/src/test/java` |
-| 数据库迁移 | 41（V1.0.0 ~ V1.22.0） | `platform-backend/backend-web/src/main/resources/db/migration` |
+| REST 控制器 | 40 | `platform-backend/backend-web/src/main/java` |
+| 后端服务类 | 231 | `platform-backend/backend-service/src/main/java` |
+| 后端测试文件 | 248 | `platform-backend/**/src/test/java` |
+| 数据库迁移 | 42（V1.0.0 ~ V1.23.0） | `platform-backend/backend-web/src/main/resources/db/migration` |
 | 核心工作流 | 5 | `test.yml`、`perf-smoke.yml`、`docs.yml`、`security-poc.yml`、`docs-consistency.yml` |
 
 | 组件 | 当前基线 | 演进原则 |

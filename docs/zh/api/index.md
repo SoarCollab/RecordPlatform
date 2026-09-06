@@ -53,6 +53,40 @@ Authorization: Bearer <token>
 
 ## API 端点（按模块）
 
+### 平台管理员控制面（`/api/v1/platform`）
+
+所有端点要求已启用的 `platform_admin` 身份、`scope=platform` 和 `X-Tenant-ID: 0`。目标租户通过明确的类型化路径或查询 ID 指定。历史租户 0 管理员，以及租户权限表中的 `platform:` 权限，都不能获得平台管理权。
+
+所有写操作必须提供规范 UUID `Idempotency-Key` 和非空 `reason`（最多 255 字符）。租户元数据、状态、配额和配置更新还要求 `expectedVersion`。成功结果包含 `operationId`、`resourceId` 和可选 `version`；请求结果不确定时必须保留原幂等键与载荷。操作及恢复步骤见[平台控制面运维](/zh/deployment/platform-control-plane)。
+
+| 方法 | 端点 | 说明 |
+|---|---|---|
+| GET | `/api/v1/platform/session` | 平台身份与固定权限 |
+| GET | `/api/v1/platform/overview` | 租户与用户元数据统计 |
+| GET | `/api/v1/platform/resources/health` | 脱敏的共享组件状态 |
+| GET | `/api/v1/platform/tenants` | 租户分页 |
+| POST | `/api/v1/platform/tenants` | 创建租户及初始配额 |
+| GET | `/api/v1/platform/tenants/{tenantId}` | 安全租户详情 |
+| PUT | `/api/v1/platform/tenants/{tenantId}` | 按版本更新租户元数据 |
+| PUT | `/api/v1/platform/tenants/{tenantId}/status` | 停用或恢复租户 |
+| GET | `/api/v1/platform/tenants/{tenantId}/usage` | 租户用量及审计、存证统计 |
+| GET | `/api/v1/platform/tenants/{tenantId}/quota` | 有效配额、来源与版本 |
+| PUT | `/api/v1/platform/tenants/{tenantId}/quota` | 按版本更新租户配额 |
+| GET | `/api/v1/platform/users` | 全局租户用户安全元数据分页 |
+| GET | `/api/v1/platform/tenants/{tenantId}/users` | 目标租户成员分页 |
+| PUT | `/api/v1/platform/tenants/{tenantId}/users/{userId}/role` | 修改租户成员角色 |
+| PUT | `/api/v1/platform/tenants/{tenantId}/users/{userId}/status` | 启用或停用租户成员 |
+| POST | `/api/v1/platform/tenants/{tenantId}/users/{userId}/sessions/revoke` | 撤销成员会话 |
+| GET | `/api/v1/platform/tenants/{tenantId}/invitations` | 目标租户安全邀请列表 |
+| POST | `/api/v1/platform/tenants/{tenantId}/invitations` | 邀请租户成员或首位管理员 |
+| DELETE | `/api/v1/platform/tenants/{tenantId}/invitations/{invitationId}` | 撤销邀请 |
+| GET | `/api/v1/platform/configuration` | 代码定义的数值配置注册表 |
+| GET | `/api/v1/platform/configuration/{key}` | 读取安全配置项 |
+| PUT | `/api/v1/platform/configuration/{key}` | 按版本更新安全配置 |
+| GET | `/api/v1/platform/audit` | 平台操作历史 |
+| GET | `/api/v1/platform/audit/{operationId}` | 脱敏的持久化操作结果 |
+
+
 ### 认证（`/api/v1/auth`）
 
 | 方法 | 端点 | 说明 |
@@ -375,8 +409,8 @@ Authorization: Bearer <token>
 | POST | `/api/v1/system/audit/sensitive/page` | 敏感操作分页 |
 | GET | `/api/v1/system/audit/error-stats` | 错误统计 |
 | GET | `/api/v1/system/audit/time-distribution` | 时间分布 |
-| GET | `/api/v1/system/audit/configs` | 审计配置 |
-| PUT | `/api/v1/system/audit/configs` | 更新审计配置 |
+| GET | `/api/v1/system/audit/configs` | 已校验的安全数值配置投影 |
+| PUT | `/api/v1/system/audit/configs` | 已停用：始终拒绝，请使用平台配置管理 |
 | POST | `/api/v1/system/audit/anomalies/check` | 检查异常 |
 | POST | `/api/v1/system/audit/logs/backups` | 备份日志 |
 

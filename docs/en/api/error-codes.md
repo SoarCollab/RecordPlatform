@@ -96,6 +96,14 @@ This page documents all error codes returned by the RecordPlatform API.
 | 50014 | VERSION_CHAIN_NOT_FOUND | Version chain not found |
 | 50015 | VERSION_CONFLICT | Version creation conflict, please retry |
 | 50016 | VERSION_SOURCE_INVALID | Source file state does not allow creating new version |
+| 50020 | PLATFORM_TARGET_NOT_FOUND | Platform management target does not exist |
+| 50021 | PLATFORM_SYSTEM_TENANT_PROTECTED | The system tenant does not permit this operation |
+| 50022 | PLATFORM_VERSION_CONFLICT | Resource version changed; refresh and review before a new command |
+| 50023 | PLATFORM_IDEMPOTENCY_CONFLICT | Operation key is already bound to another request |
+| 50024 | PLATFORM_OPERATION_IN_PROGRESS | Preserve the same operation key while the result is unresolved |
+| 50025 | PLATFORM_TENANT_CODE_EXISTS | Tenant code already exists |
+| 50026 | PLATFORM_CONFIGURATION_UNSUPPORTED | Configuration key is outside the safe registry |
+| 50027 | PLATFORM_TENANT_INACTIVE | Target tenant is disabled |
 
 ## Messaging Errors (60000-69999)
 

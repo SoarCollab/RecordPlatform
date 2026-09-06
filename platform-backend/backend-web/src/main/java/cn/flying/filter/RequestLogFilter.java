@@ -1,6 +1,7 @@
 package cn.flying.filter;
 
 import cn.flying.common.util.Const;
+import cn.flying.security.PlatformRequestPaths;
 import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SensitiveDataMasker;
 import cn.hutool.json.JSONObject;
@@ -159,6 +160,9 @@ public class RequestLogFilter extends OncePerRequestFilter {
      * @return true 表示不包装响应（避免缓存/打印大块内容）
      */
     private boolean shouldSkipResponseBodyCache(HttpServletRequest request) {
+        if (PlatformRequestPaths.isPlatformRequest(request)) {
+            return true;
+        }
         String requestUri = request.getRequestURI();
         if (requestUri == null || requestUri.isBlank()) {
             requestUri = request.getServletPath();
@@ -289,17 +293,20 @@ public class RequestLogFilter extends OncePerRequestFilter {
         }
 
         // 将请求参数转换为JSON，敏感参数脱敏处理
-        JSONObject object = new JSONObject();
-        request.getParameterMap().forEach((k, v) -> {
-            if (isSensitiveParam(k)) {
-                object.set(k, MASK);
-            } else {
-                String value = v.length > 0 ? v[0] : null;
-                object.set(k, sanitizeParameterForLog(k, value));
-            }
-        });
-        // Sanitize the final copy as well: a capability can occur in a parameter name, not only its value.
-        String safeParameters = SensitiveDataMasker.maskSensitiveFields(object.toString());
+        String safeParameters = "<omitted>";
+        if (!PlatformRequestPaths.isPlatformRequest(request)) {
+            JSONObject object = new JSONObject();
+            request.getParameterMap().forEach((k, v) -> {
+                if (isSensitiveParam(k)) {
+                    object.set(k, MASK);
+                } else {
+                    String value = v.length > 0 ? v[0] : null;
+                    object.set(k, sanitizeParameterForLog(k, value));
+                }
+            });
+            // Sanitize names as well as values before writing the final log copy.
+            safeParameters = SensitiveDataMasker.maskSensitiveFields(object.toString());
+        }
 
         // 获取用户信息
         Object id = request.getAttribute(Const.ATTR_USER_ID);

@@ -8,6 +8,7 @@ import cn.flying.common.util.JsonConverter;
 import cn.flying.common.util.SensitiveDataMasker;
 import cn.flying.dao.dto.SysOperationLog;
 import cn.flying.security.TrustedClientIpResolver;
+import cn.flying.security.PlatformRequestPaths;
 import cn.flying.service.SysOperationLogService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -85,7 +86,7 @@ public class OperationLogAspect {
         ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         if (attributes != null) {
             HttpServletRequest request = attributes.getRequest();
-            if (!isIgnoreUrl(request.getServletPath())) {
+            if (!isIgnoreUrl(request.getServletPath()) && !PlatformRequestPaths.isPlatformRequest(request)) {
                 // 设置请求ID到MDC
                 String reqId = IdUtils.nextLogId();
                 MDC.put("reqId", reqId);
@@ -187,7 +188,7 @@ public class OperationLogAspect {
             }
             
             HttpServletRequest request = attributes.getRequest();
-            if (isIgnoreUrl(request.getServletPath())) {
+            if (isIgnoreUrl(request.getServletPath()) || PlatformRequestPaths.isPlatformRequest(request)) {
                 return;
             }
             

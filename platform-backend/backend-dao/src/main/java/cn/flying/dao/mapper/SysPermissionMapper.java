@@ -27,6 +27,7 @@ public interface SysPermissionMapper extends BaseMapper<SysPermission> {
         SELECT id, tenant_id, code, name, module, action, description, status, create_time, update_time
         FROM sys_permission
         WHERE status = 1
+          AND LOWER(code) NOT REGEXP '^[[:space:]]*platform:'
           AND (tenant_id = 0 OR tenant_id = #{tenantId})
         ORDER BY module, code
         """)
@@ -41,6 +42,7 @@ public interface SysPermissionMapper extends BaseMapper<SysPermission> {
         SELECT id, tenant_id, code, name, module, action, description, status, create_time, update_time
         FROM sys_permission
         WHERE (tenant_id = 0 OR tenant_id = #{tenantId})
+          AND LOWER(code) NOT REGEXP '^[[:space:]]*platform:'
         <if test="module != null and module != ''">
           AND module = #{module}
         </if>
@@ -60,6 +62,7 @@ public interface SysPermissionMapper extends BaseMapper<SysPermission> {
         SELECT module
         FROM sys_permission
         WHERE (tenant_id = 0 OR tenant_id = #{tenantId})
+          AND LOWER(code) NOT REGEXP '^[[:space:]]*platform:'
         GROUP BY module
         ORDER BY module
         """)
@@ -74,6 +77,7 @@ public interface SysPermissionMapper extends BaseMapper<SysPermission> {
         INNER JOIN sys_role_permission rp ON p.id = rp.permission_id
         WHERE rp.role = #{role}
           AND p.status = 1
+          AND LOWER(p.code) NOT REGEXP '^[[:space:]]*platform:'
           AND (p.tenant_id = 0 OR p.tenant_id = #{tenantId})
           AND (rp.tenant_id = 0 OR rp.tenant_id = #{tenantId})
         """)
@@ -92,6 +96,7 @@ public interface SysPermissionMapper extends BaseMapper<SysPermission> {
             #{role}
         </foreach>
           AND p.status = 1
+          AND LOWER(p.code) NOT REGEXP '^[[:space:]]*platform:'
           AND (p.tenant_id = 0 OR p.tenant_id = #{tenantId})
           AND (rp.tenant_id = 0 OR rp.tenant_id = #{tenantId})
         </script>
@@ -107,6 +112,7 @@ public interface SysPermissionMapper extends BaseMapper<SysPermission> {
         FROM sys_permission
         WHERE module = #{module}
           AND status = 1
+          AND LOWER(code) NOT REGEXP '^[[:space:]]*platform:'
           AND (tenant_id = 0 OR tenant_id = #{tenantId})
         ORDER BY code
         """)
@@ -121,6 +127,7 @@ public interface SysPermissionMapper extends BaseMapper<SysPermission> {
         FROM sys_permission
         WHERE code = #{code}
           AND status = 1
+          AND LOWER(code) NOT REGEXP '^[[:space:]]*platform:'
           AND (tenant_id = 0 OR tenant_id = #{tenantId})
         LIMIT 1
         """)
