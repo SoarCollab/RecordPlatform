@@ -13,6 +13,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,6 +24,7 @@ import static cn.flying.service.platform.PlatformServiceTestSupport.rejected;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
@@ -63,10 +65,10 @@ class PlatformConfigurationServiceTest {
             row.setConfigValue(invocation.getArgument(1)).setVersion(row.getVersion() + 1);
             return 1;
         });
-        when(mapper.insertEntry(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
+        when(mapper.insertEntry(anyLong(), anyString(), anyString(), anyString())).thenAnswer(invocation -> {
             isolated(0);
-            String key = invocation.getArgument(0);
-            rows.put(key, entry(key, invocation.getArgument(1), 1L));
+            String key = invocation.getArgument(1);
+            rows.put(key, entry(key, invocation.getArgument(2), 1L));
             return 1;
         });
         service = new PlatformConfigurationService(mapper, tenants, fixture.executor);
@@ -165,17 +167,24 @@ class PlatformConfigurationServiceTest {
         verifyNoInteractions(mapper, tenants, fixture.operations);
     }
 
-    /** Missing entries keep unavailable metadata and can be restored only from version zero. */
+    /** Missing entries receive a distinct positive ID and version one; replay does not insert another row. */
     @Test
     void restoresMissingRegistryEntryWithVersionOne() {
         rows.remove("ERROR_RATE_THRESHOLD");
         assertThat(service.get("ERROR_RATE_THRESHOLD").state()).isEqualTo("UNAVAILABLE");
         assertThat(service.get("ERROR_RATE_THRESHOLD").version()).isZero();
 
-        var result = service.update("ERROR_RATE_THRESHOLD", KEY, update(25L, 0L));
+        var request = update(25L, 0L);
+        var result = service.update("ERROR_RATE_THRESHOLD", KEY, request);
 
+        assertThat(result.resourceId()).isEqualTo("ERROR_RATE_THRESHOLD");
         assertThat(result.version()).isEqualTo(1L);
         assertThat(rows.get("ERROR_RATE_THRESHOLD").getConfigValue()).isEqualTo("25");
+        assertThat(rows.get("ERROR_RATE_THRESHOLD").getVersion()).isEqualTo(1L);
+        assertThat(service.update("ERROR_RATE_THRESHOLD", KEY, request)).isEqualTo(result);
+        ArgumentCaptor<Long> id = ArgumentCaptor.forClass(Long.class);
+        verify(mapper).insertEntry(id.capture(), eq("ERROR_RATE_THRESHOLD"), eq("25"), eq("Error-rate alert percentage"));
+        assertThat(id.getValue()).isPositive().isNotEqualTo(fixture.row().getId());
         verify(mapper, never()).updateEntry(anyString(), anyString(), anyLong());
     }
 

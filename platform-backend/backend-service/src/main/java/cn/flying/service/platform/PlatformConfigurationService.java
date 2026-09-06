@@ -3,6 +3,7 @@ package cn.flying.service.platform;
 import cn.flying.common.constant.PlatformPermissions;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.entity.platform.PlatformConfigurationEntry;
 import cn.flying.dao.mapper.platform.PlatformConfigurationMapper;
@@ -77,7 +78,7 @@ public class PlatformConfigurationService {
                     PlatformInputs.version(version, request.expectedVersion());
                     PlatformConfigurationVO before = toView(definition, current);
                     int changed = current == null
-                            ? mapper.insertEntry(key, String.valueOf(request.value()), definition.description())
+                            ? mapper.insertEntry(IdUtils.nextEntityId(), key, String.valueOf(request.value()), definition.description())
                             : mapper.updateEntry(key, String.valueOf(request.value()), request.expectedVersion());
                     if (changed != 1) {
                         throw new GeneralException(ResultEnum.PLATFORM_VERSION_CONFLICT);

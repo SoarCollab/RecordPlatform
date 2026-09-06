@@ -38,6 +38,14 @@ class PlatformControlPlaneMigrationIT {
         flyway("1.22.0", false).migrate();
         long originalConfigId;
         try (Connection connection = connection(); var statement = connection.createStatement()) {
+            try (var rows = statement.executeQuery("""
+                    SELECT data_type, extra FROM information_schema.columns
+                    WHERE table_schema = DATABASE() AND table_name = 'sys_audit_config' AND column_name = 'id'
+                    """)) {
+                assertThat(rows.next()).isTrue();
+                assertThat(rows.getString("data_type")).isEqualTo("int");
+                assertThat(rows.getString("extra")).doesNotContain("auto_increment");
+            }
             statement.executeUpdate("""
                     INSERT INTO quota_policy (id, tenant_id, scope_type, scope_id, max_storage_bytes, max_file_count, status)
                     VALUES (9234001, 42, 'TENANT', 42, 123456, 123, 1),
@@ -59,6 +67,25 @@ class PlatformControlPlaneMigrationIT {
         assertThat(upgraded.migrate().migrationsExecuted).isZero();
 
         try (Connection connection = connection(); var statement = connection.createStatement()) {
+            try (var rows = statement.executeQuery("""
+                    SELECT data_type, extra FROM information_schema.columns
+                    WHERE table_schema = DATABASE() AND table_name = 'sys_audit_config' AND column_name = 'id'
+                    """)) {
+                assertThat(rows.next()).isTrue();
+                assertThat(rows.getString("data_type")).isEqualTo("bigint");
+                assertThat(rows.getString("extra")).doesNotContain("auto_increment");
+            }
+            assertThat(statement.executeUpdate("""
+                    INSERT INTO sys_audit_config (id, config_key, config_value)
+                    VALUES (923400000000000001, 'PLATFORM_MIGRATION_BIGINT_TEST', '1')
+                    """)).isOne();
+            try (var rows = statement.executeQuery("""
+                    SELECT id, version FROM sys_audit_config WHERE config_key = 'PLATFORM_MIGRATION_BIGINT_TEST'
+                    """)) {
+                assertThat(rows.next()).isTrue();
+                assertThat(rows.getLong("id")).isEqualTo(923400000000000001L);
+                assertThat(rows.getLong("version")).isZero();
+            }
             try (var rows = statement.executeQuery("""
                     SELECT id, tenant_id, scope_type, scope_id, max_storage_bytes, max_file_count, status, version
                     FROM quota_policy WHERE id IN (9234001, 9234002) ORDER BY id

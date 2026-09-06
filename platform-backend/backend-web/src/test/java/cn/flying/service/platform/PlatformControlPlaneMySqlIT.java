@@ -9,6 +9,7 @@ import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.JwtUtils;
 import cn.flying.controller.SseController;
 import cn.flying.dao.entity.SysPermission;
+import cn.flying.dao.mapper.SysOperationLogMapper;
 import cn.flying.dao.mapper.SysPermissionMapper;
 import cn.flying.dao.mapper.platform.PlatformOperationMapper;
 import cn.flying.dao.mapper.platform.PlatformQuotaMapper;
@@ -82,6 +83,8 @@ class PlatformControlPlaneMySqlIT extends BaseIntegrationTest {
     private static final long MEMBER_A = 9230102L;
     private static final long MEMBER_B = 9230201L;
     private static final long ACTOR = 9230001L;
+    private static final long CONFIG_ID = 9230801L;
+    private static final long UNKNOWN_CONFIG_ID = 9230802L;
     private static final String PREFIX = "platform-it-";
     private static final String REASON = "Approved integration maintenance";
     private static final String HASH_SENTINEL = "synthetic-password-hash-never-project";
@@ -103,6 +106,7 @@ class PlatformControlPlaneMySqlIT extends BaseIntegrationTest {
     @Autowired private PlatformOperationMapper operationMapper;
     @Autowired private PlatformTenantMapper tenantMapper;
     @Autowired private PlatformQuotaMapper quotaMapper;
+    @Autowired private SysOperationLogMapper auditConfigMapper;
     @Autowired private SysPermissionMapper permissionMapper;
     @Autowired private QuotaService quotaService;
     @Autowired private AuthorizationStateService authorization;
@@ -122,14 +126,14 @@ class PlatformControlPlaneMySqlIT extends BaseIntegrationTest {
         cleanOwnedRows();
         reset(invitationMail);
         originalConfigurations = jdbc.queryForList(
-                "SELECT id, config_key, config_value, description, update_time, version FROM sys_audit_config WHERE config_key = ?",
+                "SELECT id, config_key, config_value, description, create_time, update_time, version FROM sys_audit_config WHERE config_key = ?",
                 CONFIG_KEY);
         jdbc.update("DELETE FROM sys_audit_config WHERE config_key = ?", UNKNOWN_KEY);
         jdbc.update("""
-                INSERT INTO sys_audit_config (config_key, config_value, description, version)
-                VALUES (?, '100', 'Synthetic platform fixture', 0)
+                INSERT INTO sys_audit_config (id, config_key, config_value, description, version)
+                VALUES (?, ?, '100', 'Synthetic platform fixture', 0)
                 ON DUPLICATE KEY UPDATE config_value = '100', description = 'Synthetic platform fixture', version = 0
-                """, CONFIG_KEY);
+                """, CONFIG_ID, CONFIG_KEY);
         insertTenant(TENANT_A, "a");
         insertTenant(TENANT_B, "b");
         insertAccount(ACTOR, 0L, "operator", "platform_admin");
@@ -147,15 +151,14 @@ class PlatformControlPlaneMySqlIT extends BaseIntegrationTest {
             cleanOwnedRows();
             jdbc.update("DELETE FROM sys_audit_config WHERE config_key = ?", UNKNOWN_KEY);
             if (originalConfigurations != null) {
-                if (originalConfigurations.isEmpty()) {
-                    jdbc.update("DELETE FROM sys_audit_config WHERE config_key = ?", CONFIG_KEY);
-                } else {
+                jdbc.update("DELETE FROM sys_audit_config WHERE config_key = ?", CONFIG_KEY);
+                if (!originalConfigurations.isEmpty()) {
                     Map<String, Object> row = originalConfigurations.getFirst();
                     jdbc.update("""
-                            UPDATE sys_audit_config SET config_value = ?, description = ?, update_time = ?, version = ?
-                            WHERE id = ?
-                            """, row.get("config_value"), row.get("description"), row.get("update_time"),
-                            row.get("version"), row.get("id"));
+                            INSERT INTO sys_audit_config (id, config_key, config_value, description, create_time, update_time, version)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, row.get("id"), row.get("config_key"), row.get("config_value"), row.get("description"),
+                            row.get("create_time"), row.get("update_time"), row.get("version"));
                 }
             }
         } finally {
@@ -506,13 +509,13 @@ class PlatformControlPlaneMySqlIT extends BaseIntegrationTest {
         expectFailure(ResultEnum.PERMISSION_UNAUTHORIZED, () -> audits.get(operationId));
     }
 
-    /** Corrupt persisted values and descriptions never escape the registry; a valid optimistic correction remains possible. */
+    /** Corrupt entries stay redacted; recreated entries retain version/replay semantics and remain readable by tenant audit consumers. */
     @Test
     void safeConfigurationOmitsCorruptValuesDescriptionsAndUnknownKeys() throws Exception {
         jdbc.update("UPDATE sys_audit_config SET config_value = ?, description = ?, version = 7 WHERE config_key = ?",
                 TOKEN_SENTINEL, HASH_SENTINEL, CONFIG_KEY);
-        jdbc.update("INSERT INTO sys_audit_config (config_key, config_value, description) VALUES (?, ?, ?)",
-                UNKNOWN_KEY, TOKEN_SENTINEL, HASH_SENTINEL);
+        jdbc.update("INSERT INTO sys_audit_config (id, config_key, config_value, description) VALUES (?, ?, ?, ?)",
+                UNKNOWN_CONFIG_ID, UNKNOWN_KEY, TOKEN_SENTINEL, HASH_SENTINEL);
 
         var unavailable = configurations.get(CONFIG_KEY);
         assertThat(unavailable.state()).isEqualTo("UNAVAILABLE");
@@ -529,6 +532,35 @@ class PlatformControlPlaneMySqlIT extends BaseIntegrationTest {
         assertThat(configurations.get(CONFIG_KEY).value()).isEqualTo(120L);
         assertThat(configurations.get(CONFIG_KEY).version()).isEqualTo(8L);
         assertThat(operation(key).getBeforeSummary()).contains("unavailable").doesNotContain(TOKEN_SENTINEL);
+
+        long previousId = count("SELECT id FROM sys_audit_config WHERE config_key = ?", CONFIG_KEY);
+        assertThat(jdbc.update("DELETE FROM sys_audit_config WHERE config_key = ?", CONFIG_KEY)).isOne();
+        var missing = configurations.get(CONFIG_KEY);
+        assertThat(missing.state()).isEqualTo("UNAVAILABLE");
+        assertThat(missing.value()).isNull();
+        assertThat(missing.version()).isZero();
+        String restoreKey = key();
+        var restore = new UpdatePlatformConfigurationRequest(130L, 0L, REASON);
+
+        PlatformMutationVO restored = configurations.update(CONFIG_KEY, restoreKey, restore);
+
+        assertThat(restored.resourceId()).isEqualTo(CONFIG_KEY);
+        assertThat(restored.version()).isOne();
+        long restoredId = count("SELECT id FROM sys_audit_config WHERE config_key = ?", CONFIG_KEY);
+        assertThat(restoredId).isGreaterThan(Integer.MAX_VALUE).isNotEqualTo(previousId);
+        assertThat(count("SELECT COUNT(*) FROM sys_audit_config WHERE config_key = ?", CONFIG_KEY)).isOne();
+        assertThat(count("SELECT version FROM sys_audit_config WHERE config_key = ?", CONFIG_KEY)).isOne();
+        assertThat(configurations.get(CONFIG_KEY).value()).isEqualTo(130L);
+        assertThat(configurations.get(CONFIG_KEY).state()).isEqualTo("AVAILABLE");
+        var consumed = TenantContext.callWithTenantIsolation(TENANT_A,
+                () -> auditConfigMapper.selectAuditConfigByKey(CONFIG_KEY));
+        assertThat(consumed).isNotNull();
+        assertThat(consumed.getConfigValue()).isEqualTo("130");
+        assertThat(configurations.update(CONFIG_KEY, restoreKey, restore)).isEqualTo(restored);
+        assertThat(count("SELECT id FROM sys_audit_config WHERE config_key = ?", CONFIG_KEY)).isEqualTo(restoredId);
+        assertThat(countOperations(restoreKey, "SUCCESS")).isOne();
+        assertThat(operation(restoreKey).getBeforeSummary()).contains("value=unavailable", "version=0");
+        assertThat(operation(restoreKey).getAfterSummary()).contains("value=130", "version=1");
         assertSystemContext();
     }
 

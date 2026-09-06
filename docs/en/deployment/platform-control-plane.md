@@ -6,6 +6,8 @@ The platform control plane manages tenant lifecycle, tenant-user metadata, quota
 
 Apply the additive `V1.23.0` migration and follow [Platform Administrator Bootstrap](./platform-administrator-bootstrap.md). Keep the one-time bootstrap disabled after provisioning. Platform authentication must be explicitly enabled with `PLATFORM_IDENTITY_ENABLED=true`; enabling the feature does not promote an existing tenant administrator.
 
+The migration preserves existing configuration IDs and widens `sys_audit_config.id` from INT to BIGINT so missing safe configuration rows can be recreated with application-generated Snowflake IDs. Automatic ID allocation remains disabled; apply the forward migration before using the new configuration writer.
+
 All platform API requests carry:
 
 ```http

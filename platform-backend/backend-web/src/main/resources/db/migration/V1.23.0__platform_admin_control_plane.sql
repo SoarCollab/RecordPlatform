@@ -1,3 +1,6 @@
+-- Preserve released configuration IDs while allowing new rows to use Snowflake identifiers.
+ALTER TABLE sys_audit_config MODIFY COLUMN id BIGINT NOT NULL COMMENT 'Config ID';
+
 -- Add optimistic versions without replacing released quota or configuration rows.
 SET @platform_quota_version_exists = (
     SELECT COUNT(*) FROM information_schema.columns

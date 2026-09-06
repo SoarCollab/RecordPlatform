@@ -6,6 +6,8 @@
 
 执行增量迁移 `V1.23.0`，再按[平台管理员初始化](../../en/deployment/platform-administrator-bootstrap.md)创建平台管理员。初始化完成后保持一次性 bootstrap 关闭，通过 `PLATFORM_IDENTITY_ENABLED=true` 明确启用平台登录。启用开关不会提升已有租户管理员的权限。
 
+迁移保留既有配置 ID，并将 `sys_audit_config.id` 从 INT 扩为 BIGINT，使缺失的安全配置能以应用生成的 Snowflake ID 重建。数据库自动分配 ID 仍保持禁用；启用新配置写入前必须完成此前向迁移。
+
 所有平台请求使用：
 
 ```http

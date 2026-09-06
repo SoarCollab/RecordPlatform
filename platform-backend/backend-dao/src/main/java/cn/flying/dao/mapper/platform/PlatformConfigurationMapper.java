@@ -36,9 +36,9 @@ public interface PlatformConfigurationMapper {
     int updateEntry(@Param("key") String key, @Param("value") String value,
                     @Param("expectedVersion") Long expectedVersion);
 
-    /** Restores a missing allowlisted row with code-owned metadata and first-write version one. */
-    @Insert("INSERT INTO sys_audit_config (config_key, config_value, description, version) "
-            + "SELECT #{key}, #{value}, #{description}, 1 WHERE #{key} IN " + SAFE_KEYS)
-    int insertEntry(@Param("key") String key, @Param("value") String value,
+    /** Restores a missing allowlisted row with a Snowflake ID, code-owned metadata and first-write version one. */
+    @Insert("INSERT INTO sys_audit_config (id, config_key, config_value, description, version) "
+            + "SELECT #{id}, #{key}, #{value}, #{description}, 1 WHERE #{key} IN " + SAFE_KEYS)
+    int insertEntry(@Param("id") Long id, @Param("key") String key, @Param("value") String value,
                     @Param("description") String description);
 }
