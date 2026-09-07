@@ -2,9 +2,9 @@
 
 本项目采用"单元测试优先 + 少量高价值集成测试"的策略，目标是在 CI 中尽早发现回归，同时保持本地开发的执行成本足够低。
 
-## 当前测试文件快照（377 files）
+## 当前测试文件快照（384 files）
 
-> 2026-09-06 按 canonical source tree 中的 `*Test.java` / `*IT.java` / `*.test.ts` / `*.spec.ts` / `test_*.py` / `*_test.py` 统计。该数字是文件快照，不等同 test case 数；以下长表只说明代表性覆盖。`tools/docs/check_consistency.py --check-evidence` 会从 exact tree 重新计算并核对本表。
+> 2026-09-08 按 canonical source tree 中的 `*Test.java` / `*IT.java` / `*.test.ts` / `*.spec.ts` / `test_*.py` / `*_test.py` 统计。该数字是文件快照，不等同 test case 数；以下长表只说明代表性覆盖。`tools/docs/check_consistency.py --check-evidence` 会从 exact tree 重新计算并核对本表。
 
 | Component | Test files |
 | --- | ---: |
@@ -14,7 +14,7 @@
 | `platform-backend/backend-web` | 121 |
 | `platform-backend` | 248 |
 | `platform-storage` | 28 |
-| `platform-frontend` | 57 |
+| `platform-frontend` | 64 |
 | `platform-verifier` | 15 |
 | `platform-fisco` | 14 |
 | `platform-api` | 3 |
@@ -22,7 +22,7 @@
 | `tools/contracts` | 4 |
 | `tools/docs` | 1 |
 | `tools` | 12 |
-| `total` | 377 |
+| `total` | 384 |
 
 ### 后端单元测试（backend-common，代表性测试类）
 
@@ -177,6 +177,8 @@
 |----------|----------|
 | client.test.ts | HTTP 客户端、Token 管理、ApiError |
 | auth.test.ts | 登录、注册、密码重置 API |
+| auth-session.test.ts | 平台固定零身份、租户登录、记住登录、晚到认证响应与匿名请求隔离 |
+| platform.test.ts | 24 个平台 API、显式目标租户、UUID/DELETE 原因与数值/可空性响应校验 |
 | files.test.ts | 文件列表、删除、下载 API |
 | messages.test.ts | 私信 API |
 | friends.test.ts | 好友 API |
@@ -414,3 +416,15 @@ pnpm -C docs docs:build
 - 优先给 **纯业务逻辑** 写单元测试：无 Spring 上下文、无外部依赖、直接 new / Mockito 即可
 - 只为最关键链路写少量集成测试：数据库迁移 + ORM 映射 + 关键 AOP/拦截器
 - 单测不要依赖执行顺序；集成测试也尽量使用随机/唯一数据，避免与其他用例耦合
+
+### 平台管理前端回归
+
+| 测试文件 | 覆盖范围 |
+|---|---|
+| `platformMutation.test.ts` | 十种命令的能力检查、不可变载荷、同键重试与安全错误分类 |
+| `PlatformMutationDialog.render.test.ts` | 原因、二次确认、重复提交、冲突恢复、外部关闭与不确定结果重试 |
+| `routes/platform/pages.render.test.ts` | 七个页面、全部高风险操作、分页、空值与目标切换后的过期响应 |
+| `routes/platform/platform-boundary.render.test.ts` | 真实根布局/平台与租户布局组合、下载隔离、跨标签页凭据变化及公开邀请 |
+| `SettingsDrawer.render.test.ts` | 租户安全配置只读、无 ID 投影与异常检查/备份回归 |
+
+平台页面测试与真实 MySQL/Redis 后端 CI 属于不同证据层；只有最终 home-server 的浏览器和服务验收才能证明部署后的完整业务链路。

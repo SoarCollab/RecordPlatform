@@ -1,5 +1,16 @@
-import { api, setToken, clearToken, wasRememberMeSelected } from "../client";
+import {
+  api,
+  ApiError,
+  createApiClient,
+  setToken,
+  clearToken,
+  beginCredentialChange,
+  getCredentialSnapshot,
+  isCurrentCredential,
+} from "../client";
+import { ResultCode } from "../types/common";
 import type {
+  AuthScope,
   AuthorizeVO,
   AccountVO,
   LoginRequest,
@@ -13,6 +24,26 @@ import type {
 } from "../types";
 
 const BASE = "/auth";
+const platformAuth = createApiClient({ tenantId: "0" });
+
+/** Select the immutable authentication context, never a caller-supplied tenant. */
+function scopedTransport(scope: AuthScope | null) {
+  return scope === "platform" ? platformAuth : api;
+}
+
+/** Reject malformed credential responses before writing browser persistence. */
+function validateCredentials(result: RefreshTokenVO): void {
+  if (
+    !result ||
+    typeof result.token !== "string" ||
+    !result.token.trim() ||
+    typeof result.expire !== "string" ||
+    !Number.isFinite(Date.parse(result.expire)) ||
+    Date.parse(result.expire) <= Date.now()
+  ) {
+    throw new ApiError(ResultCode.PARSE_ERROR, "认证响应格式无效");
+  }
+}
 
 /**
  * 用户登录。
@@ -24,11 +55,33 @@ const BASE = "/auth";
 export async function login(
   data: LoginRequest,
   rememberMe: boolean = true,
+  mode: AuthScope = "tenant",
 ): Promise<AuthorizeVO> {
-  const result = await api.post<AuthorizeVO>(`${BASE}/login`, data, {
-    skipAuth: true,
-  });
-  setToken(result.token, result.expire, rememberMe);
+  const snapshot = beginCredentialChange();
+  const result = await scopedTransport(mode).post<AuthorizeVO>(
+    `${BASE}/login`,
+    data,
+    {
+      skipAuth: true,
+      retries: 0,
+    },
+  );
+  if (!isCurrentCredential(snapshot)) {
+    throw new DOMException("The session has changed", "AbortError");
+  }
+  validateCredentials(result);
+  if (
+    result.scope !== mode ||
+    (mode === "platform"
+      ? result.role !== "platform_admin"
+      : !["user", "admin", "monitor"].includes(result.role))
+  ) {
+    throw new ApiError(
+      ResultCode.PERMISSION_UNAUTHORIZED,
+      "请使用与账号身份对应的登录入口",
+    );
+  }
+  setToken(result.token, result.expire, rememberMe, result.scope);
   return result;
 }
 
@@ -47,10 +100,13 @@ export async function register(data: RegisterRequest): Promise<void> {
  * 用户登出。
  */
 export async function logout(): Promise<void> {
+  const snapshot = beginCredentialChange();
   try {
-    await api.post(`${BASE}/logout`);
+    await scopedTransport(snapshot.scope).post(`${BASE}/logout`, undefined, {
+      retries: 0,
+    });
   } finally {
-    clearToken();
+    if (isCurrentCredential(snapshot)) clearToken();
   }
 }
 
@@ -90,8 +146,17 @@ export async function updateUser(data: UpdateUserRequest): Promise<AccountVO> {
  * @returns 刷新结果
  */
 export async function refreshToken(): Promise<RefreshTokenVO> {
-  const result = await api.post<RefreshTokenVO>(`${BASE}/tokens/refresh`);
-  setToken(result.token, result.expire, wasRememberMeSelected());
+  const snapshot = getCredentialSnapshot();
+  const result = await scopedTransport(snapshot.scope).post<RefreshTokenVO>(
+    `${BASE}/tokens/refresh`,
+    undefined,
+    { retries: 0 },
+  );
+  if (!isCurrentCredential(snapshot)) {
+    throw new DOMException("The session has changed", "AbortError");
+  }
+  validateCredentials(result);
+  setToken(result.token, result.expire, snapshot.rememberMe, snapshot.scope);
   return result;
 }
 

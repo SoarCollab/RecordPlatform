@@ -1,24 +1,20 @@
 <script lang="ts">
-	import type { Snippet } from "svelte";
-	import { goto } from "$app/navigation";
-	import { useAuth } from "$stores/auth.svelte";
-
-	interface Props { children: Snippet }
-	let { children }: Props = $props();
-
-	const auth = useAuth();
-
-	$effect(() => {
-		if (auth.isAuthenticated) {
-			goto("/dashboard", { replaceState: true });
-		}
-	});
+  import { onMount, type Snippet } from "svelte";
+  import { goto } from "$app/navigation";
+  import { getToken } from "$api/client";
+  import { getStoredScopeHint, landingForScope } from "$utils/authSession";
+  let { children }: { children: Snippet } = $props();
+  let redirecting = $state(false);
+  onMount(() => {
+    if (getToken()) {
+      redirecting = true;
+      void goto(landingForScope(getStoredScopeHint()), { replaceState: true });
+    }
+  });
 </script>
 
-{#if !auth.isAuthenticated}
-	<div class="flex min-h-screen items-center justify-center bg-muted/50 px-4">
-		<div class="w-full max-w-md">
-			{@render children()}
-		</div>
-	</div>
+{#if !redirecting}
+  <div class="bg-muted/50 flex min-h-screen items-center justify-center px-4">
+    <div class="w-full max-w-md">{@render children()}</div>
+  </div>
 {/if}

@@ -2,26 +2,51 @@
   import "../app.css";
   import { ModeWatcher } from "mode-watcher";
   import { onNavigate } from "$app/navigation";
+  import { page } from "$app/stores";
+  import { subscribeCredentialChanges } from "$api/client";
+  import { getStoredScopeHint } from "$utils/authSession";
   import { useNotifications } from "$stores/notifications.svelte";
   import { useSSE } from "$stores/sse.svelte";
   import { useDownload } from "$stores/download.svelte";
+  import { useAuth } from "$stores/auth.svelte";
   import { onMount } from "svelte";
   import DownloadManager from "$components/DownloadManager.svelte";
   import type { Snippet } from "svelte";
   import { LoadingBar } from "$components/ui/loading-bar";
   import logo from "$lib/assets/logo.png";
 
-  interface Props { children: Snippet }
+  interface Props {
+    children: Snippet;
+  }
   let { children }: Props = $props();
 
   const notifications = useNotifications();
   const sse = useSSE();
   const download = useDownload();
+  const auth = useAuth();
+
+  let scopeHint = $state(getStoredScopeHint());
+  const showDownloads = $derived(
+    scopeHint !== "platform" &&
+      (auth.scope === "tenant" || $page.url.pathname.startsWith("/share/")) &&
+      !$page.url.pathname.startsWith("/platform") &&
+      !(
+        $page.url.pathname === "/login" &&
+        $page.url.searchParams.get("mode") === "platform"
+      ),
+  );
+
+  $effect(() => {
+    if (showDownloads) void download.restoreTasks();
+  });
 
   onMount(() => {
-    download.restoreTasks();
+    const unsubscribe = subscribeCredentialChanges((snapshot) => {
+      scopeHint = snapshot.scope;
+    });
 
     return () => {
+      unsubscribe();
       sse.disconnect();
     };
   });
@@ -50,7 +75,7 @@
 </div>
 
 <!-- 下载管理器 -->
-<DownloadManager />
+{#if showDownloads}<DownloadManager />{/if}
 
 <!-- 通知提示（左侧显示，避免与下载管理器重叠） -->
 {#if notifications.notifications.length > 0}

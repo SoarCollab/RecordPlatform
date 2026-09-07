@@ -5,9 +5,6 @@
   import * as Table from "$components/ui/table";
   import type { AuditConfigVO } from "$api/types";
   import { Checkbox } from "$components/ui/checkbox";
-  import { useNotifications } from "$stores/notifications.svelte";
-
-  const notifications = useNotifications();
 
   interface Props {
     open: boolean;
@@ -16,7 +13,6 @@
     configs: AuditConfigVO[];
     loadingConfigs: boolean;
     onRefreshConfigs: () => void;
-    onSaveConfig: (config: AuditConfigVO) => Promise<void>;
     // 异常检测
     anomalies: Record<string, unknown> | null;
     checkingAnomalies: boolean;
@@ -35,7 +31,6 @@
     configs,
     loadingConfigs,
     onRefreshConfigs,
-    onSaveConfig,
     anomalies,
     checkingAnomalies,
     onCheckAnomalies,
@@ -48,42 +43,11 @@
 
   let activeSection = $state<"configs" | "anomaly" | "backup">("configs");
 
-  // 配置编辑
-  let configDialogOpen = $state(false);
-  let editingConfig = $state<AuditConfigVO | null>(null);
-  let editingConfigValue = $state("");
-  let savingConfig = $state(false);
-
   // 备份设置
   let backupDays = $state(180);
   let backupDeleteAfter = $state(false);
 
-  function openEditConfig(cfg: AuditConfigVO) {
-    editingConfig = cfg;
-    editingConfigValue = cfg.configValue;
-    configDialogOpen = true;
-  }
-
-  async function handleSaveConfig() {
-    if (!editingConfig) return;
-    savingConfig = true;
-    try {
-      await onSaveConfig({
-        ...editingConfig,
-        configValue: editingConfigValue,
-      });
-      configDialogOpen = false;
-      editingConfig = null;
-    } catch (err) {
-      notifications.error(
-        "保存配置失败",
-        err instanceof Error ? err.message : "请稍后重试",
-      );
-    } finally {
-      savingConfig = false;
-    }
-  }
-
+  /** Starts the existing tenant log backup with the selected options. */
   function handleBackup() {
     onBackup(backupDays, backupDeleteAfter);
   }
@@ -114,7 +78,9 @@
         </svg>
         审计设置
       </Dialog.Title>
-      <Dialog.Description>管理审计配置、异常检查和日志备份</Dialog.Description>
+      <Dialog.Description
+        >查看审计配置、执行异常检查和日志备份</Dialog.Description
+      >
     </Dialog.Header>
 
     <div class="bg-muted/50 mt-4 flex gap-1 rounded-lg p-1">
@@ -150,7 +116,9 @@
     {#if activeSection === "configs"}
       <div class="mt-4 space-y-4">
         <div class="flex items-center justify-between">
-          <p class="text-muted-foreground text-sm">配置审计系统参数</p>
+          <p class="text-muted-foreground text-sm">
+            全局配置仅供查看，修改请联系平台管理员。
+          </p>
           <Button
             variant="outline"
             size="sm"
@@ -178,11 +146,10 @@
                 <Table.Row>
                   <Table.Head>配置项</Table.Head>
                   <Table.Head>值</Table.Head>
-                  <Table.Head class="text-right">操作</Table.Head>
                 </Table.Row>
               </Table.Header>
               <Table.Body>
-                {#each configs as cfg (cfg.id)}
+                {#each configs as cfg (cfg.configKey)}
                   <Table.Row>
                     <Table.Cell>
                       <div>
@@ -197,15 +164,6 @@
                     <Table.Cell class="font-mono text-xs"
                       >{cfg.configValue}</Table.Cell
                     >
-                    <Table.Cell class="text-right">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onclick={() => openEditConfig(cfg)}
-                      >
-                        编辑
-                      </Button>
-                    </Table.Cell>
                   </Table.Row>
                 {/each}
               </Table.Body>
@@ -280,33 +238,5 @@
         </div>
       </div>
     {/if}
-  </Dialog.Content>
-</Dialog.Root>
-
-<!-- 配置编辑对话框 -->
-<Dialog.Root bind:open={configDialogOpen}>
-  <Dialog.Content class="max-w-md">
-    <Dialog.Header>
-      <Dialog.Title>编辑配置</Dialog.Title>
-      {#if editingConfig}
-        <Dialog.Description class="font-mono text-xs"
-          >{editingConfig.configKey}</Dialog.Description
-        >
-      {/if}
-    </Dialog.Header>
-    <div class="space-y-4">
-      {#if editingConfig?.description}
-        <p class="text-muted-foreground text-sm">{editingConfig.description}</p>
-      {/if}
-      <Input bind:value={editingConfigValue} placeholder="配置值" />
-      <div class="flex justify-end gap-2">
-        <Button variant="secondary" onclick={() => (configDialogOpen = false)}
-          >取消</Button
-        >
-        <Button onclick={handleSaveConfig} disabled={savingConfig}>
-          {savingConfig ? "保存中..." : "保存"}
-        </Button>
-      </div>
-    </div>
   </Dialog.Content>
 </Dialog.Root>

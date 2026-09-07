@@ -142,7 +142,6 @@ describe("system endpoints", () => {
     clientMocks.api.post
       .mockResolvedValueOnce({ records: [], total: 0 })
       .mockResolvedValueOnce("backup-id");
-    clientMocks.api.put.mockResolvedValue(true);
 
     await systemApi.getAuditLogs({ pageNum: 1, pageSize: 20, module: "files" });
     await systemApi.getAuditLog("log-1");
@@ -152,11 +151,6 @@ describe("system endpoints", () => {
     await systemApi.getErrorOperationStats();
     await systemApi.getUserTimeDistribution();
     await systemApi.getAuditConfigs();
-    await systemApi.updateAuditConfig({
-      id: 1,
-      configKey: "k",
-      configValue: "v",
-    });
     await systemApi.checkAuditAnomalies();
     await systemApi.backupAuditLogs({ days: 7, deleteAfterBackup: false });
 
@@ -196,11 +190,6 @@ describe("system endpoints", () => {
       7,
       "/system/audit/configs",
     );
-    expect(clientMocks.api.put).toHaveBeenCalledWith("/system/audit/configs", {
-      id: 1,
-      configKey: "k",
-      configValue: "v",
-    });
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(
       2,
       "/system/audit/anomalies/check",

@@ -1,6 +1,15 @@
 import { goto } from "$app/navigation";
 import { browser } from "$app/environment";
 import { env } from "$env/dynamic/public";
+import type { AuthScope } from "$api/types/auth";
+import {
+  getStoredScopeHint,
+  getStoredToken,
+  TOKEN_KEY,
+  TOKEN_EXPIRE_KEY,
+  REMEMBER_ME_KEY,
+  SCOPE_KEY,
+} from "$utils/authSession";
 import {
   type ErrorPayload,
   type Result,
@@ -19,16 +28,19 @@ const DEFAULT_RETRY_DELAY_BASE = 1000;
 
 // ===== Token Management =====
 
-export const TOKEN_KEY = "auth_token";
-export const TOKEN_EXPIRE_KEY = "auth_token_expire";
-export const REMEMBER_ME_KEY = "auth_remember_me";
+export { TOKEN_KEY, TOKEN_EXPIRE_KEY, REMEMBER_ME_KEY, SCOPE_KEY };
 
-function _getStorage(): Storage | null {
-  if (!browser) return null;
-  const rememberMe = localStorage.getItem(REMEMBER_ME_KEY) === "true";
-  return rememberMe ? localStorage : sessionStorage;
+export interface CredentialSnapshot {
+  readonly token: string | null;
+  readonly generation: number;
+  readonly scope: AuthScope | null;
+  readonly rememberMe: boolean;
 }
 
+let credentialGeneration = 0;
+const credentialListeners = new Set<(snapshot: CredentialSnapshot) => void>();
+
+/** Read the active token and invalidate an expired or malformed expiry. */
 export function getToken(): string | null {
   if (!browser) return null;
 
@@ -42,7 +54,8 @@ export function getToken(): string | null {
 
   if (!token || !expire) return null;
 
-  if (new Date(expire) <= new Date()) {
+  const expiresAt = Date.parse(expire);
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
     clearToken();
     return null;
   }
@@ -50,34 +63,114 @@ export function getToken(): string | null {
   return token;
 }
 
+/** Capture the credential identity used to guard asynchronous session work. */
+export function getCredentialSnapshot(): CredentialSnapshot {
+  const token = getToken();
+  return Object.freeze({
+    token,
+    generation: credentialGeneration,
+    scope: token ? getStoredScopeHint() : null,
+    rememberMe: wasRememberMeSelected(),
+  });
+}
+
+/** Compare identity without clearing storage from a reactive getter or derived expression. */
+export function isCurrentCredential(snapshot: CredentialSnapshot): boolean {
+  const token = getStoredToken();
+  return (
+    snapshot.generation === credentialGeneration &&
+    snapshot.token === token &&
+    snapshot.scope === (token ? getStoredScopeHint() : null) &&
+    snapshot.rememberMe === wasRememberMeSelected()
+  );
+}
+
+/** Invalidate earlier work and synchronously notify the session owner. */
+export function beginCredentialChange(): CredentialSnapshot {
+  getToken();
+  credentialGeneration += 1;
+  const snapshot = getCredentialSnapshot();
+  for (const listener of credentialListeners) {
+    try {
+      listener(snapshot);
+    } catch {
+      console.error("Credential change listener failed");
+    }
+  }
+  return snapshot;
+}
+
+/** Subscribe to replacements, removals and pending credential changes. */
+export function subscribeCredentialChanges(
+  listener: (snapshot: CredentialSnapshot) => void,
+): () => void {
+  if (browser && credentialListeners.size === 0) {
+    window.addEventListener("storage", handleCredentialStorageChange);
+  }
+  credentialListeners.add(listener);
+  return () => {
+    credentialListeners.delete(listener);
+    if (browser && credentialListeners.size === 0) {
+      window.removeEventListener("storage", handleCredentialStorageChange);
+    }
+  };
+}
+
+/** Invalidate reactive session owners when another document changes shared credentials. */
+function handleCredentialStorageChange(event: StorageEvent): void {
+  if (
+    (event.storageArea === localStorage ||
+      event.storageArea === sessionStorage) &&
+    (event.key === null ||
+      [TOKEN_KEY, TOKEN_EXPIRE_KEY, REMEMBER_ME_KEY, SCOPE_KEY].includes(
+        event.key,
+      ))
+  ) {
+    beginCredentialChange();
+  }
+}
+
+/** Replace the token and its routing hint in the selected persistence scope. */
 export function setToken(
   token: string,
   expire: string,
   rememberMe: boolean = true,
+  scope?: AuthScope | null,
 ): void {
   if (!browser) return;
 
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(TOKEN_EXPIRE_KEY);
+  localStorage.removeItem(SCOPE_KEY);
   sessionStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(TOKEN_EXPIRE_KEY);
+  sessionStorage.removeItem(SCOPE_KEY);
 
   const storage = rememberMe ? localStorage : sessionStorage;
   storage.setItem(TOKEN_KEY, token);
   storage.setItem(TOKEN_EXPIRE_KEY, expire);
+  if (scope === "tenant" || scope === "platform") {
+    storage.setItem(SCOPE_KEY, scope);
+  }
 
   localStorage.setItem(REMEMBER_ME_KEY, String(rememberMe));
+  beginCredentialChange();
 }
 
+/** Remove all credential persistence and invalidate every pending operation. */
 export function clearToken(): void {
   if (!browser) return;
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(TOKEN_EXPIRE_KEY);
   localStorage.removeItem(REMEMBER_ME_KEY);
+  localStorage.removeItem(SCOPE_KEY);
   sessionStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(TOKEN_EXPIRE_KEY);
+  sessionStorage.removeItem(SCOPE_KEY);
+  beginCredentialChange();
 }
 
+/** Return the persistence choice associated with the current browser session. */
 export function wasRememberMeSelected(): boolean {
   if (!browser) return false;
   return localStorage.getItem(REMEMBER_ME_KEY) === "true";
@@ -160,10 +253,11 @@ function buildUrl(
   return browser ? url.toString() : `${url.pathname}${url.search}`;
 }
 
+/** Build headers from the credential captured for this logical request. */
 function buildHeaders(
   config: RequestConfig | undefined,
   tenantId: string | undefined,
-  tokenGetter: () => string | null,
+  token: string | null,
 ): Headers {
   const headers = new Headers({
     "Content-Type": "application/json",
@@ -176,11 +270,10 @@ function buildHeaders(
     headers.set("X-Tenant-ID", tenantId);
   }
 
-  if (!config?.skipAuth) {
-    const token = tokenGetter();
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
-    }
+  if (config?.skipAuth) {
+    headers.delete("Authorization");
+  } else if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
   }
 
   return headers;
@@ -242,6 +335,7 @@ function resolveErrorMessage(fallback: string, detail: unknown): string {
 
 // ===== API Client Factory =====
 
+/** Create an API transport whose retries keep the original request identity. */
 export function createApiClient(clientConfig: ApiClientConfig = {}) {
   const {
     baseUrl = DEFAULT_API_BASE,
@@ -258,6 +352,32 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
     },
   } = clientConfig;
 
+  /** Capture credentials once without inspecting storage for anonymous calls. */
+  function captureCredential(
+    skipAuth: boolean | undefined,
+  ): Pick<CredentialSnapshot, "token" | "generation"> & { anonymous: boolean } {
+    const token = skipAuth ? null : tokenGetter();
+    return { token, generation: credentialGeneration, anonymous: !!skipAuth };
+  }
+
+  /** Invalidate only the still-current authenticated request's credential. */
+  async function handleUnauthorized(
+    snapshot: Pick<CredentialSnapshot, "token" | "generation"> & {
+      anonymous: boolean;
+    },
+  ): Promise<void> {
+    if (
+      snapshot.anonymous ||
+      snapshot.generation !== credentialGeneration ||
+      tokenGetter() !== snapshot.token ||
+      snapshot.generation !== credentialGeneration
+    ) {
+      return;
+    }
+    await onUnauthorized();
+  }
+
+  /** Send one immutable logical request, retaining its identity across retries. */
   async function request<T>(
     method: string,
     path: string,
@@ -265,6 +385,22 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
     config?: RequestConfig,
   ): Promise<T> {
     const requestMaxRetries = config?.retries ?? maxRetries;
+    const credential = captureCredential(config?.skipAuth);
+    const headers = buildHeaders(config, tenantId, credential.token);
+    const url = buildUrl(baseUrl, path, config?.params);
+    const requestBody =
+      body instanceof FormData || body instanceof URLSearchParams
+        ? body
+        : body
+          ? JSON.stringify(body)
+          : undefined;
+
+    if (body instanceof FormData) {
+      headers.delete("Content-Type");
+    } else if (body instanceof URLSearchParams) {
+      headers.set("Content-Type", "application/x-www-form-urlencoded");
+    }
+
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= requestMaxRetries; attempt++) {
@@ -273,30 +409,17 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
         const timeout = config?.timeout ?? 30000;
         const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-        const headers = buildHeaders(config, tenantId, tokenGetter);
-
-        if (body instanceof FormData) {
-          headers.delete("Content-Type");
-        } else if (body instanceof URLSearchParams) {
-          headers.set("Content-Type", "application/x-www-form-urlencoded");
-        }
-
-        const response = await fetchFn(
-          buildUrl(baseUrl, path, config?.params),
-          {
+        let response: Response;
+        try {
+          response = await fetchFn(url, {
             method,
             headers,
-            body:
-              body instanceof FormData || body instanceof URLSearchParams
-                ? body
-                : body
-                  ? JSON.stringify(body)
-                  : undefined,
+            body: requestBody,
             signal: controller.signal,
-          },
-        );
-
-        clearTimeout(timeoutId);
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
 
         const contentType = response.headers.get("Content-Type") || "";
         if (!contentType.includes("application/json")) {
@@ -322,7 +445,7 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
         const error = new ApiError(result.code, message, payload);
 
         if (error.isUnauthorized) {
-          await onUnauthorized();
+          await handleUnauthorized(credential);
           throw error;
         }
 
@@ -377,9 +500,10 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     const isAbsoluteUrl = isAbsoluteHttpUrl(url);
+    const credential = captureCredential(isAbsoluteUrl || config?.skipAuth);
     const headers = isAbsoluteUrl
       ? new Headers(config?.headers || {})
-      : buildHeaders(config, tenantId, tokenGetter);
+      : buildHeaders(config, tenantId, credential.token);
 
     if (body instanceof FormData) {
       headers.delete("Content-Type");
@@ -407,6 +531,9 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
+        if (response.status === 401) {
+          await handleUnauthorized(credential);
+        }
         throw new ApiError(response.status, `请求失败 (${response.status})`);
       }
 
