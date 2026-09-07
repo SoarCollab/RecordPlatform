@@ -313,7 +313,8 @@ responses and no new credential/signature value in text, JSON or audit log copie
 
 ## Distributed Tracing (OpenTelemetry)
 
-The project integrates OpenTelemetry Java Agent v2.26.1 for automatic trace and metrics collection across all three Java services.
+The three Java-service images and the FISCO exporter contract test pin the stable
+OpenTelemetry Java Agent **2.28.0** for automatic trace and metrics collection.
 
 ### Infrastructure
 
@@ -324,9 +325,26 @@ The project integrates OpenTelemetry Java Agent v2.26.1 for automatic trace and 
 
 ### Enabling
 
-**Docker deployment**: Set `OTEL_JAVAAGENT_ENABLED=true` (enabled by default)
+**Docker deployment**: Set `OTEL_JAVAAGENT_ENABLED=true` (enabled by default).
+Each Dockerfile downloads the pinned release and runs `sha256sum -c -` before making
+the JAR readable by the application user. A failed download or checksum mismatch
+fails the image build. The exporter contract test verifies the same agent bytes.
 
-**Local development**:
+**Host/JAR deployment and local development**: Provision the
+[pinned release JAR](https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.28.0/opentelemetry-javaagent.jar)
+as `$OTEL_AGENT_HOME/opentelemetry-javaagent.jar`. The default directory is
+`<project-root>/agent/otel`; `/opt/otel` is the fallback. The startup scripts only
+detect an existing file: they do not download, upgrade or verify it. Before starting,
+check the selected file with `sha256sum` on Linux or `shasum -a 256` on macOS and
+require this SHA-256:
+
+```text
+130606aed07f101458fe42b8f453ef3a2536f6bce8a7ae64f222f5688ada2500
+```
+
+This digest matches both the official GitHub release asset and
+[Maven Central's checksum](https://repo.maven.apache.org/maven2/io/opentelemetry/javaagent/opentelemetry-javaagent/2.28.0/opentelemetry-javaagent-2.28.0.jar.sha256).
+After verification, enable the agent:
 
 ```bash
 ./scripts/start.sh start --otel all
@@ -347,7 +365,7 @@ The project integrates OpenTelemetry Java Agent v2.26.1 for automatic trace and 
 The provider bridge is selected per service, not globally when sourcing `env.sh`.
 Explicit `true`/`false` overrides are preserved; empty script values use the default.
 Backend retains its native authenticated Actuator scrape and is not bridged by default.
-Agent 2.26.1 otherwise disables Micrometer instrumentation; see the official
+Agent 2.28.0 otherwise disables Micrometer instrumentation; see the official
 [instrumentation controls](https://opentelemetry.io/docs/zero-code/java/agent/disable/).
 
 The scripts and all three application images explicitly default to `grpc` with
@@ -561,7 +579,7 @@ Import `config/grafana/slo-dashboard.json` into Grafana. The dashboard includes:
 | API Error Rate | Error rate time series + top-5 error endpoints |
 | Resilience4j | Circuit breaker states + retry counts |
 
-> **Note:** Agent 2.26.1's default Micrometer bridge exports timers as histograms in seconds, not client-side quantile series, even if a timer calls `.publishPercentiles()`. Recording rules and dashboard scope `job="otel-collector",exported_job="record-platform-fisco",operation="storeFile"`, apply `rate` before summing by `le`, then estimate quantiles across instances. The existing 5m/30m/1h recording names now represent observations in each interval, not an upper envelope of client summaries. Bucket interpolation is an estimate, not an exact percentile; retain seconds and the 5-second threshold. See [Prometheus histogram functions](https://prometheus.io/docs/prometheus/latest/querying/functions/#histogram_quantile).
+> **Note:** The Agent 2.28.0 Micrometer bridge exports timers as histograms in seconds, not client-side quantile series, even if a timer calls `.publishPercentiles()`. Recording rules and dashboard scope `job="otel-collector",exported_job="record-platform-fisco",operation="storeFile"`, apply `rate` before summing by `le`, then estimate quantiles across instances. The existing 5m/30m/1h recording names now represent observations in each interval, not an upper envelope of client summaries. Bucket interpolation is an estimate, not an exact percentile; retain seconds and the 5-second threshold. See [Prometheus histogram functions](https://prometheus.io/docs/prometheus/latest/querying/functions/#histogram_quantile).
 
 FISCO timers must provide explicit `serviceLevelObjectives(Duration...)` boundaries,
 including the 5-second SLO. In the pinned bridge, client percentiles or

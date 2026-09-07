@@ -25,9 +25,12 @@ FROM eclipse-temurin:21-jre-noble AS runtime
 RUN groupadd -r app && useradd -r -g app -d /app -m -s /sbin/nologin app
 WORKDIR /app
 
-# Download OpenTelemetry Java Agent
-ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.26.1/opentelemetry-javaagent.jar /opt/otel/opentelemetry-javaagent.jar
-RUN chmod 644 /opt/otel/opentelemetry-javaagent.jar
+# Download and verify the agent bytes used by the exporter contract test.
+ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.28.0/opentelemetry-javaagent.jar /opt/otel/opentelemetry-javaagent.jar
+RUN printf '%s  %s\n' \
+    '130606aed07f101458fe42b8f453ef3a2536f6bce8a7ae64f222f5688ada2500' \
+    '/opt/otel/opentelemetry-javaagent.jar' | sha256sum -c - \
+    && chmod 644 /opt/otel/opentelemetry-javaagent.jar
 
 COPY --from=build /workspace/platform-fisco/target/platform-fisco-0.0.2-SNAPSHOT.jar app.jar
 

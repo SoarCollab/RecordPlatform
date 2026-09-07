@@ -26,9 +26,11 @@
 
     <properties>
         <java.version>21</java.version>
-        <tomcat.version>10.1.56</tomcat.version>
+        <tomcat.version>10.1.59</tomcat.version>
         <jackson-bom.version>2.21.5</jackson-bom.version>
+        <log4j2.version>2.25.5</log4j2.version>
         <commons-compress.version>1.28.0</commons-compress.version>
+        <commons-lang3.version>3.20.0</commons-lang3.version>
         <jacoco.version>0.8.14</jacoco.version>
         <verifier-sdk.line-coverage.minimum>0.70</verifier-sdk.line-coverage.minimum>
     </properties>
