@@ -24,9 +24,9 @@ import static org.assertj.core.api.Assertions.within;
 /** Runs the actual deployed Java agent and inspects its real OTLP JSON exporter, without network I/O. */
 class FiscoMetricsOtelExportTest {
 
-    // Pinned to Maven Central's opentelemetry-javaagent/2.26.1/*.jar.sha256 release checksum.
+    // Pinned to Maven Central's opentelemetry-javaagent/2.28.0/*.jar.sha256 release checksum.
     private static final String AGENT_SHA256 =
-            "cc4af5966ab72109cacc962ba3b9f99b3e88caf064c3144a451bcfe0f4950f19";
+            "130606aed07f101458fe42b8f453ef3a2536f6bce8a7ae64f222f5688ada2500";
     private static final List<String> OPERATIONS = List.of("storeFile", "queryFile", "deleteFile", "shareFile");
     private static final List<Double> EXPECTED_BOUNDS =
             List.of(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 7.5, 10.0, 30.0, 60.0);

@@ -290,7 +290,8 @@ groups:
 
 ## 分布式追踪 (OpenTelemetry)
 
-项目已集成 OpenTelemetry Java Agent v2.26.1，三个 Java 服务自动采集 traces 和 metrics。
+三个 Java 服务镜像和 FISCO 导出契约测试固定使用稳定版 OpenTelemetry Java Agent
+**2.28.0**，自动采集 traces 和 metrics。
 
 ### 基础设施
 
@@ -301,9 +302,24 @@ groups:
 
 ### 启用方式
 
-**Docker 部署**：设置 `OTEL_JAVAAGENT_ENABLED=true`（默认启用）
+**Docker 部署**：设置 `OTEL_JAVAAGENT_ENABLED=true`（默认启用）。
+每个 Dockerfile 下载固定版本后，先执行 `sha256sum -c -`，通过后才将 JAR 设为应用用户
+可读。下载失败或校验和不符会使镜像构建失败，导出契约测试也校验同一份 Agent 字节。
 
-**本地开发**：
+**主机/JAR 部署和本地开发**：将
+[固定版本的官方 JAR](https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.28.0/opentelemetry-javaagent.jar)
+放到 `$OTEL_AGENT_HOME/opentelemetry-javaagent.jar`。默认目录为
+`<project-root>/agent/otel`，备用目录为 `/opt/otel`。启动脚本只检查文件是否存在，
+不会下载、升级或校验该文件。启动前，在 Linux 使用 `sha256sum`、在 macOS 使用
+`shasum -a 256` 检查实际选中的文件，必须与以下 SHA-256 一致：
+
+```text
+130606aed07f101458fe42b8f453ef3a2536f6bce8a7ae64f222f5688ada2500
+```
+
+该摘要同时匹配官方 GitHub release 产物与
+[Maven Central 校验和](https://repo.maven.apache.org/maven2/io/opentelemetry/javaagent/opentelemetry-javaagent/2.28.0/opentelemetry-javaagent-2.28.0.jar.sha256)。
+校验通过后启用 Agent：
 
 ```bash
 ./scripts/start.sh start --otel all
@@ -323,7 +339,7 @@ groups:
 
 脚本在每次生成服务参数时选择 bridge 默认值，不会在 source `env.sh` 时全局开启。
 显式 `true`/`false` 原样保留，脚本中的空值使用默认值。后端默认仍使用原生、经过认证的
-Actuator scrape。Agent 2.26.1 自身默认关闭 Micrometer instrumentation，参见官方
+Actuator scrape。Agent 2.28.0 自身默认关闭 Micrometer instrumentation，参见官方
 [instrumentation 配置](https://opentelemetry.io/docs/zero-code/java/agent/disable/)。
 
 脚本和三个应用镜像均显式默认使用 `grpc` 与 4317 端口。镜像使用容器网络中的
@@ -534,7 +550,7 @@ rule_files:
 | API 错误率 | 错误率时序图 + Top-5 错误端点 |
 | Resilience4j | 断路器状态 + 重试次数 |
 
-> **注意**：Agent 2.26.1 默认 Micrometer bridge 将 Timer 导出为秒单位的直方图，而非客户端 quantile 序列，即使 Timer 调用了 `.publishPercentiles()`。规则和面板限定 `job="otel-collector",exported_job="record-platform-fisco",operation="storeFile"`，先对每条 counter 计算 `rate`，再按 `le` 求和并跨实例估算分位数。现有 5m/30m/1h recording 名称代表对应区间的观察值，不再是客户端分位数上包络。桶内插值是估算而非精确分位数；保留秒单位和 5 秒阈值。参见 [Prometheus 直方图函数](https://prometheus.io/docs/prometheus/latest/querying/functions/#histogram_quantile)。
+> **注意**：Agent 2.28.0 的 Micrometer bridge 将 Timer 导出为秒单位的直方图，而非客户端 quantile 序列，即使 Timer 调用了 `.publishPercentiles()`。规则和面板限定 `job="otel-collector",exported_job="record-platform-fisco",operation="storeFile"`，先对每条 counter 计算 `rate`，再按 `le` 求和并跨实例估算分位数。现有 5m/30m/1h recording 名称代表对应区间的观察值，不再是客户端分位数上包络。桶内插值是估算而非精确分位数；保留秒单位和 5 秒阈值。参见 [Prometheus 直方图函数](https://prometheus.io/docs/prometheus/latest/querying/functions/#histogram_quantile)。
 
 FISCO Timer 必须提供显式 `serviceLevelObjectives(Duration...)` 桶边界，包含5秒 SLO
 阈值。固定版本 bridge 中，仅配置客户端 percentiles 或
