@@ -21,6 +21,26 @@ Read `GET /api/v1/platform/session` for the platform identity and fixed capabili
 
 The [API index](../api/index.md) lists all routes. Platform APIs do not expose impersonation, file contents, downloads, raw Nacos/environment values, credentials, container controls or hard deletion.
 
+## Use the platform administration interface
+
+Choose the platform administration entry on the login page and sign in with a provisioned platform account. Platform identities enter `/platform`; tenant accounts enter the existing workspace. Ordinary administrators in legacy tenant `0` continue to use the tenant entry. The login form distinguishes these two identity contexts; management targets are selected inside the platform pages.
+
+| Page | Purpose |
+|---|---|
+| `/platform` | Inspect tenant and user counts and shared service status |
+| `/platform/tenants` | Search tenants, create a tenant and open its details |
+| `/platform/tenants/{tenantId}` | Change tenant name/status, manage members and invitations, and inspect tenant usage and quota |
+| `/platform/users` | Search user metadata by tenant, role and status |
+| `/platform/resources` | Inspect shared service health and a selected tenant's usage and quota |
+| `/platform/configuration` | Inspect and change allowlisted global configuration |
+| `/platform/audit` | Find platform operations and inspect their outcomes, reasons and change summaries |
+
+After creating a tenant, invite its first administrator from the detail page. The invitation link is delivered by email; the administration interface shows invitation status without exposing the one-time capability or a temporary password. The public acceptance page can preserve an existing signed-in account. Continuing with that account opens the workspace appropriate to its identity.
+
+For a mutation, enter the proposed change and reason, then review the target and change before confirming. Duplicate submissions are disabled while the request is pending. If the result is uncertain, retry the same operation. If another operation has changed the resource, reload it and review the current state before confirming again. A permission denial does not sign out the account. Unavailable measurements appear as unknown or failed, never as measured zero.
+
+The platform interface has independent navigation without tenant files, global file search or a download queue. Global configuration in the tenant audit page is read-only; configuration changes belong in the platform interface.
+
 ## Create and administer a tenant
 
 1. Send `POST /api/v1/platform/tenants` with a new UUID `Idempotency-Key`, a reason, immutable lower-case `code` and display `name`. Codes are 2–64 characters, begin with a letter and contain only letters, digits and hyphens. Optional `maxStorageBytes` and `maxFileCount` use the existing quota defaults when absent.

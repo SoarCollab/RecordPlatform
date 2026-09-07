@@ -9,19 +9,27 @@ import { describe, expect, it, vi } from "vitest";
 async function loadLayoutModule(options: {
   browser: boolean;
   token: string | null;
+  scope?: "tenant" | "platform";
+  failure?: Error;
 }) {
   vi.resetModules();
 
   const redirect = vi.fn((status: number, location: string) => {
-    return { __redirect: true, status, location };
+    throw { __redirect: true, status, location };
+  });
+  const initializeSession = vi.fn(async () => {
+    if (options.failure) throw options.failure;
   });
 
   vi.doMock("@sveltejs/kit", () => ({ redirect }));
   vi.doMock("$app/environment", () => ({ browser: options.browser }));
   vi.doMock("$api/client", () => ({ getToken: () => options.token }));
+  vi.doMock("$stores/auth.svelte", () => ({
+    useAuth: () => ({ scope: options.scope ?? "tenant", initializeSession }),
+  }));
 
   const mod = await import("./(app)/+layout");
-  return { mod, redirect };
+  return { mod, redirect, initializeSession };
 }
 
 describe("(app) +layout load", () => {
@@ -49,5 +57,27 @@ describe("(app) +layout load", () => {
     const { mod } = await loadLayoutModule({ browser: false, token: null });
 
     await expect(mod.load({} as never)).resolves.toEqual({});
+  });
+
+  it("redirects a validated platform identity before rendering the tenant shell", async () => {
+    const { mod, initializeSession } = await loadLayoutModule({
+      browser: true,
+      token: "platform",
+      scope: "platform",
+    });
+    await expect(mod.load({} as never)).rejects.toMatchObject({
+      status: 303,
+      location: "/platform",
+    });
+    expect(initializeSession).toHaveBeenCalledOnce();
+  });
+
+  it("does not admit a credential whose authoritative initialization fails", async () => {
+    const { mod } = await loadLayoutModule({
+      browser: true,
+      token: "invalid",
+      failure: new Error("Session unavailable"),
+    });
+    await expect(mod.load({} as never)).rejects.toThrow("Session unavailable");
   });
 });

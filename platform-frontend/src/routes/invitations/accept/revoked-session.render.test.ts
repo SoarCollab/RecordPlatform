@@ -5,7 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/svelte";
-import { goto } from "$app/navigation";
+import { goto, onNavigate } from "$app/navigation";
 import { ResultCode } from "$api/types";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -92,8 +92,9 @@ describe("public invitation route with a server-revoked session", () => {
     );
     // No auth, download, SSE, notification store, page, or layout is replaced in this regression.
     render(InvitationRoute);
-    await waitFor(() => expect(useDownload().initialized).toBe(true));
-    expect(screen.getByRole("heading", { name: "接受成员邀请" })).toBeTruthy();
+    await screen.findByRole("heading", { name: "接受成员邀请" });
+    expect(onNavigate).toHaveBeenCalledOnce();
+    expect(useDownload().initialized).toBe(false);
     expect(window.location.hash).toBe("");
     expect(protectedRequests).toEqual([]);
     expect(goto).not.toHaveBeenCalled();
@@ -123,9 +124,14 @@ describe("public invitation route with a server-revoked session", () => {
     expect(protectedRequests).toEqual([]);
     expect(goto).not.toHaveBeenCalled();
     expect(client.getToken()).toBe(oldToken);
+    expect(useDownload().initialized).toBe(false);
 
-    // Positive control: ordinary auth-store initialization still validates and rejects the same old session.
-    await import("$stores/auth.svelte");
+    // Import stays public; explicit destination initialization rejects the same old session.
+    const { useAuth } = await import("$stores/auth.svelte");
+    expect(protectedRequests).toEqual([]);
+    await expect(useAuth().initializeSession()).rejects.toMatchObject({
+      isUnauthorized: true,
+    });
     await waitFor(() =>
       expect(protectedRequests).toEqual([`Bearer ${oldToken}`]),
     );

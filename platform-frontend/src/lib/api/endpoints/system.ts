@@ -260,16 +260,6 @@ export async function getAuditConfigs(): Promise<AuditConfigVO[]> {
 }
 
 /**
- * 更新审计配置。
- *
- * @param data 配置参数
- * @returns 更新结果
- */
-export async function updateAuditConfig(data: AuditConfigVO): Promise<boolean> {
-  return api.put<boolean>(`${AUDIT_BASE}/configs`, data);
-}
-
-/**
  * 手动检查审计异常。
  *
  * @returns 检查结果

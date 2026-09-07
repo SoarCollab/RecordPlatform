@@ -26,7 +26,11 @@ const notifications = vi.hoisted(() => ({
   error: vi.fn(),
   dismiss: vi.fn(),
 }));
-const auth = vi.hoisted(() => ({ isAuthenticated: false, logout: vi.fn() }));
+const auth = vi.hoisted(() => ({
+  isAuthenticated: false,
+  scope: null as "tenant" | "platform" | null,
+  logout: vi.fn(),
+}));
 const download = vi.hoisted(() => ({
   tasks: [],
   activeTasks: [],
@@ -84,6 +88,7 @@ async function submitInvitation(): Promise<void> {
 describe("invitation acceptance page", () => {
   beforeEach(() => {
     auth.isAuthenticated = false;
+    auth.scope = null;
     auth.logout.mockReset().mockResolvedValue(undefined);
     history.replaceState(
       null,
@@ -110,6 +115,7 @@ describe("invitation acceptance page", () => {
     "renders the public route with an authenticated $session session and accepts without changing that identity",
     async ({ rememberMe }) => {
       auth.isAuthenticated = true;
+      auth.scope = "tenant";
       client.setToken("existing-session-token", "2099-01-01", rememberMe);
       const received = vi.fn();
       server.use(
@@ -208,6 +214,7 @@ describe("invitation acceptance page", () => {
 
   it("continues the current account only when explicitly chosen", async () => {
     auth.isAuthenticated = true;
+    auth.scope = "tenant";
     client.setToken("existing-session-token", "2099-01-01", true);
     server.use(
       http.post(acceptanceUrl, () =>
@@ -240,10 +247,12 @@ describe("invitation acceptance page", () => {
 
   it("uses the existing logout flow only after choosing to log in as the new account", async () => {
     auth.isAuthenticated = true;
+    auth.scope = "tenant";
     client.setToken("existing-session-token", "2099-01-01", true);
     auth.logout.mockImplementation(async () => {
       client.clearToken();
       auth.isAuthenticated = false;
+      auth.scope = null;
       await goto("/login");
     });
     server.use(
@@ -272,6 +281,7 @@ describe("invitation acceptance page", () => {
 
   it("reports a failed explicit account switch without replaying acceptance", async () => {
     auth.isAuthenticated = true;
+    auth.scope = "tenant";
     client.setToken("existing-session-token", "2099-01-01", true);
     auth.logout.mockRejectedValueOnce(new Error("switch unavailable"));
     const acceptance = vi.fn(() =>

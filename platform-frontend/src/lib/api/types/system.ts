@@ -190,7 +190,7 @@ export interface StorageCapacity {
 export type AuditOverview = Record<string, unknown>;
 
 export interface AuditConfigVO {
-  id: number;
+  id?: number;
   configKey: string;
   configValue: string;
   description?: string;

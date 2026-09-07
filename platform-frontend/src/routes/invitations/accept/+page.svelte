@@ -5,6 +5,7 @@
   import { Button } from "$components/ui/button";
   import { Input } from "$components/ui/input";
   import { getToken } from "$api/client";
+  import { getStoredScopeHint, landingForScope } from "$utils/authSession";
   import { acceptTenantInvitation } from "$api/endpoints/tenant-users";
   import { useNotifications } from "$stores/notifications.svelte";
   import { readInvitationTokenFromFragment } from "./invitation-token";
@@ -83,7 +84,7 @@
 
   /** Returns to the existing account's normal landing page without changing its session. */
   async function continueWithCurrentAccount() {
-    await goto("/dashboard", { replaceState: true });
+    await goto(landingForScope(getStoredScopeHint()), { replaceState: true });
   }
 </script>
 

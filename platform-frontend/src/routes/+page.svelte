@@ -1,15 +1,14 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { fly } from "svelte/transition";
-  import { useAuth } from "$stores/auth.svelte";
+  import { onMount } from "svelte";
+  import { getToken } from "$api/client";
+  import { getStoredScopeHint, landingForScope } from "$utils/authSession";
   import logo from "$lib/assets/logo.png";
 
-  const auth = useAuth();
-
-  $effect(() => {
-    if (auth.isAuthenticated) {
-      goto("/dashboard", { replaceState: true });
-    }
+  onMount(() => {
+    if (getToken())
+      void goto(landingForScope(getStoredScopeHint()), { replaceState: true });
   });
 
   const features = [
@@ -42,7 +41,7 @@
 
 <div class="flex min-h-screen flex-col">
   <!-- 页头 -->
-  <header class="border-b bg-card">
+  <header class="bg-card border-b">
     <div class="container mx-auto flex h-16 items-center justify-between px-4">
       <div class="flex items-center gap-2">
         <img src={logo} alt="Logo" class="h-8 w-8 rounded-lg" />
@@ -50,13 +49,13 @@
       </div>
       <nav class="flex items-center gap-4">
         <button
-          class="rounded-lg px-4 py-2 text-sm font-medium hover:bg-accent"
+          class="hover:bg-accent rounded-lg px-4 py-2 text-sm font-medium"
           onclick={() => goto("/login")}
         >
           登录
         </button>
         <button
-          class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          class="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg px-4 py-2 text-sm font-medium"
           onclick={() => goto("/register")}
         >
           注册
@@ -75,18 +74,18 @@
         <span class="text-primary">区块链存证</span>
         服务
       </h1>
-      <p class="mx-auto mb-8 max-w-2xl text-lg text-muted-foreground">
+      <p class="text-muted-foreground mx-auto mb-8 max-w-2xl text-lg">
         基于联盟链技术，为您的重要文件提供不可篡改的存证服务。上传即上链，安全永久保存。
       </p>
       <div class="flex justify-center gap-4">
         <button
-          class="rounded-lg bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          class="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg px-6 py-3 text-sm font-medium"
           onclick={() => goto("/register")}
         >
           立即开始
         </button>
         <button
-          class="rounded-lg border px-6 py-3 text-sm font-medium hover:bg-accent"
+          class="hover:bg-accent rounded-lg border px-6 py-3 text-sm font-medium"
           onclick={() =>
             document
               .getElementById("features")
@@ -98,17 +97,17 @@
     </section>
 
     <!-- 功能特性 -->
-    <section id="features" class="border-t bg-muted/50 py-20">
+    <section id="features" class="bg-muted/50 border-t py-20">
       <div class="container mx-auto px-4">
         <h2 class="mb-12 text-center text-3xl font-bold">核心功能</h2>
         <div class="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
           {#each features as feature, i}
             <div
-              class="rounded-lg border bg-card p-6"
+              class="bg-card rounded-lg border p-6"
               in:fly={{ y: 20, duration: 400, delay: i * 100 }}
             >
               <div
-                class="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary"
+                class="bg-primary/10 text-primary mb-4 flex h-12 w-12 items-center justify-center rounded-lg"
               >
                 <svg
                   class="h-6 w-6"
@@ -148,7 +147,7 @@
                 </svg>
               </div>
               <h3 class="mb-2 font-semibold">{feature.title}</h3>
-              <p class="text-sm text-muted-foreground">{feature.description}</p>
+              <p class="text-muted-foreground text-sm">{feature.description}</p>
             </div>
           {/each}
         </div>
@@ -159,7 +158,7 @@
   <!-- 页脚 -->
   <footer class="border-t py-8">
     <div
-      class="container mx-auto px-4 text-center text-sm text-muted-foreground"
+      class="text-muted-foreground container mx-auto px-4 text-center text-sm"
     >
       <p>&copy; {new Date().getFullYear()} 存证平台. All rights reserved.</p>
     </div>

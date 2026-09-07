@@ -1,3 +1,6 @@
+/** The two independently authorized application scopes. */
+export type AuthScope = "tenant" | "platform";
+
 /**
  * 认证响应
  * @see AuthorizeVO.java
@@ -5,7 +8,7 @@
 export interface AuthorizeVO {
   username: string;
   role: string;
-  scope: "tenant" | "platform";
+  scope: AuthScope;
   token: string;
   expire: string; // ISO datetime
 }
@@ -22,7 +25,7 @@ export interface AccountVO {
   email?: string;
   avatar?: string;
   role: string;
-  scope: "tenant" | "platform";
+  scope: AuthScope;
   /** 授权状态：1-启用，0-禁用 */
   status?: number;
   registerTime: string;

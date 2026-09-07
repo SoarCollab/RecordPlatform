@@ -2,7 +2,8 @@
   import type { Snippet } from "svelte";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
-  import { onMount, onDestroy } from "svelte";
+  import { onMount } from "svelte";
+  import { subscribeCredentialChanges } from "$api/client";
   import { useAuth } from "$stores/auth.svelte";
   import { useSSE } from "$stores/sse.svelte";
   import { useBadges } from "$stores/badges.svelte";
@@ -14,7 +15,9 @@
   import AppHeader from "$components/layout/AppHeader.svelte";
   import AppSidebar from "$components/layout/AppSidebar.svelte";
 
-  interface Props { children: Snippet }
+  interface Props {
+    children: Snippet;
+  }
   let { children }: Props = $props();
 
   const auth = useAuth();
@@ -23,26 +26,34 @@
   const notifications = useNotifications();
 
   let sidebarCollapsed = $state(sidebarStorage.get());
-  let unsubscribeSSE: (() => void) | null = null;
-
   onMount(() => {
-    badges.startAutoRefresh();
-    unsubscribeSSE = sse.subscribe(handleSSEMessage);
+    void auth.initializeSession().catch(() => {});
+    return subscribeCredentialChanges(() => {
+      void auth.initializeSession().catch(() => {});
+    });
   });
 
-  onDestroy(() => {
-    badges.stopAutoRefresh();
-    sse.cleanup();
-    unsubscribeSSE?.();
-  });
-
-  // 用户可用时初始化 SSE（处理首次加载与用户变更）
+  // Start tenant services only while a validated tenant identity owns the shell.
   $effect(() => {
-    if (auth.user?.id && auth.initialized) {
-      sse.init(auth.user.id);
-    }
+    if (auth.scope !== "tenant" || !auth.user?.id) return;
+    badges.startAutoRefresh();
+    const unsubscribe = sse.subscribe(handleSSEMessage);
+    sse.init(auth.user.id);
+    return () => {
+      badges.stopAutoRefresh();
+      sse.cleanup();
+      unsubscribe();
+    };
   });
 
+  $effect(() => {
+    if (auth.scope === "platform")
+      void goto("/platform", { replaceState: true });
+    else if (auth.initialized && !auth.isAuthenticated && !auth.error)
+      void goto("/login", { replaceState: true });
+  });
+
+  /** Route events only for the mounted tenant shell. */
   function handleSSEMessage(message: SSEMessage) {
     handleSseMessage(message, {
       pathname: $page.url.pathname,
@@ -122,7 +133,7 @@
       </div>
     </div>
   </div>
-{:else}
+{:else if auth.scope === "tenant"}
   <div class="flex h-screen">
     <AppSidebar
       collapsed={sidebarCollapsed}

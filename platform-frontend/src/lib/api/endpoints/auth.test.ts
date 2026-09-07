@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const clientMocks = vi.hoisted(() => {
+  const snapshot = {
+    token: "old-token",
+    generation: 0,
+    scope: "tenant",
+    rememberMe: true,
+  };
   return {
     api: {
       get: vi.fn(),
@@ -13,6 +19,9 @@ const clientMocks = vi.hoisted(() => {
     setToken: vi.fn(),
     clearToken: vi.fn(),
     wasRememberMeSelected: vi.fn(),
+    beginCredentialChange: vi.fn(() => snapshot),
+    getCredentialSnapshot: vi.fn(() => snapshot),
+    isCurrentCredential: vi.fn(() => true),
   };
 });
 
@@ -21,6 +30,18 @@ vi.mock("../client", () => ({
   setToken: clientMocks.setToken,
   clearToken: clientMocks.clearToken,
   wasRememberMeSelected: clientMocks.wasRememberMeSelected,
+  createApiClient: vi.fn(() => clientMocks.api),
+  beginCredentialChange: clientMocks.beginCredentialChange,
+  getCredentialSnapshot: clientMocks.getCredentialSnapshot,
+  isCurrentCredential: clientMocks.isCurrentCredential,
+  ApiError: class extends Error {
+    constructor(
+      public code: number,
+      message: string,
+    ) {
+      super(message);
+    }
+  },
 }));
 
 import type { AccountVO } from "../types";
@@ -31,6 +52,7 @@ function createAccount(overrides: Partial<AccountVO> = {}): AccountVO {
     id: "user-1",
     username: "alice",
     role: "user",
+    scope: "tenant",
     registerTime: "2025-01-01",
     ...overrides,
   } as AccountVO;
@@ -48,6 +70,7 @@ describe("auth endpoints", () => {
       expire: "2099-01-01",
       username: "alice",
       role: "user",
+      scope: "tenant",
     });
 
     const result = await authApi.login({ username: "alice", password: "p" });
@@ -55,12 +78,13 @@ describe("auth endpoints", () => {
     expect(clientMocks.api.post).toHaveBeenCalledWith(
       "/auth/login",
       { username: "alice", password: "p" },
-      { skipAuth: true },
+      { skipAuth: true, retries: 0 },
     );
     expect(clientMocks.setToken).toHaveBeenCalledWith(
       "token-1",
       "2099-01-01",
       true,
+      "tenant",
     );
     expect(result.username).toBe("alice");
   });
@@ -71,6 +95,7 @@ describe("auth endpoints", () => {
       expire: "2099-01-01",
       username: "alice",
       role: "user",
+      scope: "tenant",
     });
 
     await authApi.login({ username: "alice", password: "p" }, false);
@@ -79,6 +104,7 @@ describe("auth endpoints", () => {
       "token-2",
       "2099-01-01",
       false,
+      "tenant",
     );
   });
 
@@ -138,11 +164,16 @@ describe("auth endpoints", () => {
 
     const result = await authApi.refreshToken();
 
-    expect(clientMocks.api.post).toHaveBeenCalledWith("/auth/tokens/refresh");
+    expect(clientMocks.api.post).toHaveBeenCalledWith(
+      "/auth/tokens/refresh",
+      undefined,
+      { retries: 0 },
+    );
     expect(clientMocks.setToken).toHaveBeenCalledWith(
       "refresh-token",
       "2099-12-31",
       true,
+      "tenant",
     );
     expect(result.token).toBe("refresh-token");
   });

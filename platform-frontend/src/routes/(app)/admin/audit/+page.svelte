@@ -6,7 +6,6 @@
   import {
     exportAuditLogs,
     getAuditConfigs,
-    updateAuditConfig,
     checkAuditAnomalies,
     backupAuditLogs,
   } from "$api/endpoints/system";
@@ -95,23 +94,6 @@
       );
     } finally {
       loadingConfigs = false;
-    }
-  }
-
-  async function handleSaveConfig(config: AuditConfigVO) {
-    try {
-      const ok = await updateAuditConfig(config);
-      if (!ok) {
-        notifications.error("更新失败", "配置保存失败，请稍后重试");
-        return;
-      }
-      auditConfigs = auditConfigs.map((c) => (c.id === config.id ? config : c));
-      notifications.success("更新成功");
-    } catch (err) {
-      notifications.error(
-        "更新失败",
-        err instanceof Error ? err.message : "请稍后重试",
-      );
     }
   }
 
@@ -224,7 +206,6 @@
   configs={auditConfigs}
   {loadingConfigs}
   onRefreshConfigs={loadConfigs}
-  onSaveConfig={handleSaveConfig}
   {anomalies}
   {checkingAnomalies}
   onCheckAnomalies={handleCheckAnomalies}

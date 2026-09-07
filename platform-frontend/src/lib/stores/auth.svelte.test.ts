@@ -1,26 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { AccountVO, AuthScope, LoginRequest } from "$api/types";
 
-const mocks = vi.hoisted(() => {
-  return {
-    getToken: vi.fn(),
-    goto: vi.fn(),
-    login: vi.fn(),
-    register: vi.fn(),
-    logout: vi.fn(),
-    getCurrentUser: vi.fn(),
-    updateUser: vi.fn(),
-    clearAllDownloads: vi.fn(),
-  };
-});
-
-vi.mock("$api/client", () => ({
-  getToken: mocks.getToken,
+const mocks = vi.hoisted(() => ({
+  login: vi.fn(),
+  register: vi.fn(),
+  logout: vi.fn(),
+  getCurrentUser: vi.fn(),
+  updateUser: vi.fn(),
+  getPlatformSession: vi.fn(),
+  clearAllDownloads: vi.fn(),
+  resetBadges: vi.fn(),
+  goto: vi.fn(),
 }));
-
-vi.mock("$app/navigation", () => ({
-  goto: mocks.goto,
-}));
-
 vi.mock("$api/endpoints/auth", () => ({
   login: mocks.login,
   register: mocks.register,
@@ -28,336 +19,423 @@ vi.mock("$api/endpoints/auth", () => ({
   getCurrentUser: mocks.getCurrentUser,
   updateUser: mocks.updateUser,
 }));
-
-vi.mock("$stores/download.svelte", () => ({
-  useDownload: () => ({
-    clearAllDownloads: mocks.clearAllDownloads,
-  }),
+vi.mock("$api/endpoints/platform", () => ({
+  getPlatformSession: mocks.getPlatformSession,
 }));
+vi.mock("$stores/download.svelte", () => ({
+  useDownload: () => ({ clearAllDownloads: mocks.clearAllDownloads }),
+}));
+vi.mock("$stores/badges.svelte", () => ({
+  useBadges: () => ({ reset: mocks.resetBadges }),
+}));
+vi.mock("$app/navigation", () => ({ goto: mocks.goto }));
 
-/**
- * 等待一次微任务队列，用于等待模块初始化异步逻辑完成。
- */
-async function flushPromises(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-}
+let client: typeof import("$api/client");
+const expiry = "2099-01-01T00:00:00Z";
 
-/**
- * 每次用例重新导入 auth store，隔离单例状态。
- *
- * @returns auth store 对象。
- */
-async function loadAuthStore() {
-  vi.resetModules();
-  const mod = await import("./auth.svelte");
-  await flushPromises();
-  return mod.useAuth();
-}
-
-/**
- * 构造用户对象，便于在不同角色分支复用。
- *
- * @param role 用户角色。
- * @returns 标准用户对象。
- */
-function createUser(role: string = "user") {
+/** Build a complete ordinary profile without inventing platform profile fields. */
+function profile(overrides: Partial<AccountVO> = {}): AccountVO {
   return {
-    id: "u1",
+    id: "user-a",
     username: "alice",
     nickname: "Alice",
-    role,
-    registerTime: "2025-01-01",
+    scope: "tenant",
+    role: "user",
+    registerTime: "2026-01-01T00:00:00Z",
+    ...overrides,
   };
 }
-
-/**
- * 构造最小化用户对象，用于覆盖 displayName/username 的回退分支。
- *
- * @param options 用户名与昵称覆盖项。
- * @returns 可注入 authApi.getCurrentUser 的用户对象。
- */
-function createUserWithNameFallback(options: {
-  username?: string;
-  nickname?: string;
-  role?: string;
-}) {
-  return {
-    id: "u-fallback",
-    username: options.username ?? "fallback-user",
-    nickname: options.nickname,
-    role: options.role ?? "user",
-    registerTime: "2025-01-01",
-  };
-}
-
-describe("auth store", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.getToken.mockReturnValue(null);
-    mocks.login.mockResolvedValue({ username: "alice", role: "user" });
-    mocks.register.mockResolvedValue(undefined);
-    mocks.logout.mockResolvedValue(undefined);
-    mocks.getCurrentUser.mockResolvedValue(createUser("user"));
-    mocks.updateUser.mockResolvedValue(createUser("user"));
-    mocks.clearAllDownloads.mockResolvedValue(undefined);
+/** Control profile and command races without timing assumptions. */
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  let reject: (reason: unknown) => void = () => {};
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
   });
+  return { promise, resolve, reject };
+}
+/** Load one isolated store while retaining the real credential lifecycle. */
+async function store() {
+  return (await import("./auth.svelte")).useAuth();
+}
 
-  it("无 token 初始化时应标记 initialized 且保持未登录", async () => {
-    const auth = await loadAuthStore();
+beforeEach(async () => {
+  vi.resetModules();
+  vi.clearAllMocks();
+  client = await import("$api/client");
+  mocks.getCurrentUser.mockResolvedValue(profile());
+  mocks.getPlatformSession.mockResolvedValue({
+    actorId: "platform-actor",
+    username: "operator",
+    scope: "platform",
+    systemTenantId: 0,
+    capabilities: ["platform:tenant:read", "platform:overview:read"],
+  });
+  mocks.login.mockImplementation(
+    async (data: LoginRequest, remember: boolean, scope: AuthScope) => {
+      client.setToken(data.username, expiry, remember, scope);
+      return {
+        token: data.username,
+        expire: expiry,
+        scope,
+        role: scope === "platform" ? "platform_admin" : "user",
+        username: data.username,
+      };
+    },
+  );
+  mocks.register.mockResolvedValue(undefined);
+  mocks.logout.mockImplementation(async () => {
+    client.clearToken();
+  });
+  mocks.updateUser.mockResolvedValue(profile({ nickname: "Updated" }));
+  mocks.clearAllDownloads.mockResolvedValue(undefined);
+});
 
-    expect(auth.initialized).toBe(true);
-    expect(auth.user).toBeNull();
+describe("explicit scope-aware authentication store", () => {
+  it("does not initialize a protected session when imported", async () => {
+    client.setToken("remembered", expiry, true, "platform");
+    const auth = await store();
+    expect(auth.initialized).toBe(false);
     expect(auth.isAuthenticated).toBe(false);
+    expect(mocks.getCurrentUser).not.toHaveBeenCalled();
+    expect(mocks.getPlatformSession).not.toHaveBeenCalled();
   });
 
-  it("fetchUser 成功时应更新用户与派生字段", async () => {
-    mocks.getToken.mockReturnValue("jwt");
-    mocks.getCurrentUser.mockResolvedValue(createUser("admin"));
-
-    const auth = await loadAuthStore();
-    await auth.fetchUser();
-
-    expect(auth.user?.username).toBe("alice");
-    expect(auth.user?.role).toBe("admin");
-    expect(auth.error).toBeNull();
-  });
-
-  it("fetchUser 失败时应清空用户并记录错误", async () => {
-    mocks.getToken.mockReturnValue("jwt");
-    mocks.getCurrentUser.mockRejectedValue(new Error("load fail"));
-
-    const auth = await loadAuthStore();
-    await auth.fetchUser();
-
-    expect(auth.user).toBeNull();
-    expect(auth.error).toBe("load fail");
+  it("completes explicit anonymous initialization without requests", async () => {
+    const auth = await store();
+    await auth.initializeSession();
     expect(auth.initialized).toBe(true);
+    expect(auth.isLoading).toBe(false);
+    expect(auth.scope).toBeNull();
+    expect(auth.user).toBeNull();
+    expect(auth.displayName).toBe("");
+    expect(auth.username).toBe("");
+    expect(mocks.getCurrentUser).not.toHaveBeenCalled();
   });
 
-  it("login 成功后应拉取用户详情", async () => {
-    mocks.getToken.mockReturnValue("jwt");
-    mocks.getCurrentUser.mockResolvedValue(createUser("monitor"));
+  it.each(["user", "admin", "monitor"])(
+    "retains tenant-only role getters for %s",
+    async (role) => {
+      client.setToken("tenant-zero-or-business", expiry, false, "tenant");
+      mocks.getCurrentUser.mockResolvedValue(profile({ role }));
+      const auth = await store();
+      await auth.initializeSession();
+      expect(auth.scope).toBe("tenant");
+      expect(auth.isAuthenticated).toBe(true);
+      expect(auth.isAdmin).toBe(role === "admin");
+      expect(auth.isMonitor).toBe(role === "monitor");
+      expect(auth.isAdminOrMonitor).toBe(role !== "user");
+      expect(auth.isPlatformAdmin).toBe(false);
+      expect(auth.hasPlatformCapability("platform:tenant:read")).toBe(false);
+      expect(auth.platformSession).toBeNull();
+      expect(auth.displayName).toBe("Alice");
+      expect(mocks.getPlatformSession).not.toHaveBeenCalled();
+    },
+  );
 
-    const auth = await loadAuthStore();
-    await auth.login(
-      { username: "alice", password: "pass" },
-      { rememberMe: false },
-    );
-
-    expect(mocks.login).toHaveBeenCalledWith(
-      { username: "alice", password: "pass" },
-      false,
-    );
-    expect(mocks.getCurrentUser).toHaveBeenCalled();
-    expect(auth.user?.role).toBe("monitor");
-    expect(auth.error).toBeNull();
+  it("stores platform session separately and grants only validated capabilities", async () => {
+    client.setToken("platform", expiry, true, "platform");
+    const auth = await store();
+    await auth.initializeSession();
+    expect(auth.isPlatformAdmin).toBe(true);
+    expect(auth.scope).toBe("platform");
+    expect(auth.user).toBeNull();
+    expect(auth.isAdminOrMonitor).toBe(false);
+    expect(auth.displayName).toBe("operator");
+    expect(auth.username).toBe("operator");
+    expect(auth.hasPlatformCapability("platform:tenant:read")).toBe(true);
+    expect(auth.hasPlatformCapability("platform:tenant:write")).toBe(false);
+    expect(mocks.getCurrentUser).not.toHaveBeenCalled();
+    await auth.initializeSession();
+    expect(mocks.getPlatformSession).toHaveBeenCalledOnce();
   });
 
-  it("login 失败时应透传异常并写入错误状态", async () => {
-    mocks.login.mockRejectedValue(new Error("bad credentials"));
-
-    const auth = await loadAuthStore();
-
-    await expect(
-      auth.login({ username: "alice", password: "bad" }, { rememberMe: true }),
-    ).rejects.toThrow("bad credentials");
-
-    expect(auth.error).toBe("bad credentials");
+  it("deduplicates overlapping initialization and validates the same credential once", async () => {
+    client.setToken("tenant", expiry, false, "tenant");
+    const pending = deferred<AccountVO>();
+    mocks.getCurrentUser.mockReturnValue(pending.promise);
+    const auth = await store();
+    const first = auth.initializeSession();
+    const second = auth.initializeSession();
+    expect(mocks.getCurrentUser).toHaveBeenCalledOnce();
+    expect(auth.isLoading).toBe(true);
+    pending.resolve(profile());
+    await Promise.all([first, second]);
+    expect(auth.isAuthenticated).toBe(true);
     expect(auth.isLoading).toBe(false);
   });
 
-  it("login 在 rememberMe 未传时应默认传 true", async () => {
-    mocks.getToken.mockReturnValue("jwt");
-    mocks.getCurrentUser.mockResolvedValue(createUser("user"));
+  it.each(["success", "failure"])(
+    "ignores a stale profile %s after another identity is validated",
+    async (outcome) => {
+      client.setToken("old", expiry, true, "tenant");
+      const old = deferred<AccountVO>();
+      mocks.getCurrentUser.mockReturnValueOnce(old.promise);
+      const auth = await store();
+      const first = auth.initializeSession().catch((error: unknown) => error);
+      client.setToken("new", expiry, false, "tenant");
+      mocks.getCurrentUser.mockResolvedValue(profile({ username: "new-user" }));
+      await auth.initializeSession();
+      if (outcome === "success")
+        old.resolve(profile({ username: "stale-user" }));
+      else old.reject(new Error("stale failure"));
+      await first;
+      expect(auth.username).toBe("new-user");
+      expect(auth.error).toBeNull();
+      expect(auth.isLoading).toBe(false);
+    },
+  );
 
-    const auth = await loadAuthStore();
-    await auth.login({ username: "alice", password: "pass" });
+  it("does not restore a delayed profile after logout", async () => {
+    client.setToken("old", expiry, false, "tenant");
+    const old = deferred<AccountVO>();
+    mocks.getCurrentUser.mockReturnValue(old.promise);
+    const auth = await store();
+    const first = auth.initializeSession().catch((error: unknown) => error);
+    await auth.logout();
+    old.resolve(profile());
+    await first;
+    expect(auth.user).toBeNull();
+    expect(auth.platformSession).toBeNull();
+    expect(auth.isAuthenticated).toBe(false);
+  });
 
-    expect(mocks.login).toHaveBeenCalledWith(
-      { username: "alice", password: "pass" },
-      true,
+  it("passes named scope and persistence through login before session restoration", async () => {
+    const auth = await store();
+    await auth.login(
+      { username: "operator", password: "fixture" },
+      { mode: "platform", rememberMe: false },
     );
+    expect(mocks.login).toHaveBeenCalledWith(
+      { username: "operator", password: "fixture" },
+      false,
+      "platform",
+    );
+    expect(auth.isPlatformAdmin).toBe(true);
+    expect(mocks.getCurrentUser).not.toHaveBeenCalled();
   });
 
-  it("login 捕获非 Error 异常时应设置默认错误文案", async () => {
-    mocks.login.mockRejectedValue("network-down");
-
-    const auth = await loadAuthStore();
-    await expect(
-      auth.login({ username: "alice", password: "pass" }),
-    ).rejects.toBe("network-down");
-
-    expect(auth.error).toBe("登录失败");
-  });
-
-  it("register 成功后应走自动登录链路", async () => {
-    mocks.getToken.mockReturnValue("jwt");
-    mocks.getCurrentUser.mockResolvedValue(createUser("user"));
-
-    const auth = await loadAuthStore();
+  it("defaults login and registration to tenant scope", async () => {
+    const auth = await store();
+    await auth.login({ username: "alice", password: "fixture" });
+    expect(mocks.login).toHaveBeenLastCalledWith(
+      { username: "alice", password: "fixture" },
+      true,
+      "tenant",
+    );
     await auth.register(
       {
-        username: "new-user",
-        password: "pwd",
-        nickname: "N",
-        email: "n@test.com",
+        username: "registered",
+        password: "fixture",
+        email: "fixture@example.invalid",
         code: "123456",
       },
-      { rememberMe: false },
+      { rememberMe: false, mode: "platform" },
     );
-
-    expect(mocks.register).toHaveBeenCalledWith(
-      expect.objectContaining({ username: "new-user" }),
-    );
-    expect(mocks.login).toHaveBeenCalledWith(
-      { username: "new-user", password: "pwd" },
+    expect(mocks.register).toHaveBeenCalledOnce();
+    expect(mocks.login).toHaveBeenLastCalledWith(
+      { username: "registered", password: "fixture" },
       false,
+      "tenant",
     );
   });
 
-  it("register 失败时应设置错误并抛出异常", async () => {
-    mocks.register.mockRejectedValue(new Error("register failed"));
+  it.each([new Error("bad credentials"), "unavailable"])(
+    "exposes a current login error without fabricating identity",
+    async (failure) => {
+      mocks.login.mockRejectedValue(failure);
+      const auth = await store();
+      await expect(
+        auth.login({ username: "alice", password: "fixture" }),
+      ).rejects.toBe(failure);
+      expect(auth.error).toBe(
+        failure instanceof Error ? failure.message : "登录失败",
+      );
+      expect(auth.isLoading).toBe(false);
+      expect(auth.isAuthenticated).toBe(false);
+      auth.clearError();
+      expect(auth.error).toBeNull();
+    },
+  );
 
-    const auth = await loadAuthStore();
-    await expect(
-      auth.register({
-        username: "u",
-        password: "p",
-        nickname: "n",
-        email: "e@test.com",
-        code: "1",
-      }),
-    ).rejects.toThrow("register failed");
-
-    expect(auth.error).toBe("register failed");
-  });
-
-  it("register 在 rememberMe 未传时应默认传 true", async () => {
-    mocks.getToken.mockReturnValue("jwt");
-    mocks.getCurrentUser.mockResolvedValue(createUser("user"));
-
-    const auth = await loadAuthStore();
-    await auth.register({
-      username: "default-remember",
-      password: "p",
-      nickname: "n",
-      email: "n@test.com",
-      code: "123456",
-    });
-
-    expect(mocks.login).toHaveBeenCalledWith(
-      { username: "default-remember", password: "p" },
-      true,
-    );
-  });
-
-  it("register 捕获非 Error 异常时应设置默认错误文案", async () => {
-    mocks.register.mockRejectedValue("register-timeout");
-
-    const auth = await loadAuthStore();
-    await expect(
-      auth.register({
-        username: "u",
-        password: "p",
-        nickname: "n",
-        email: "e@test.com",
-        code: "1",
-      }),
-    ).rejects.toBe("register-timeout");
-
-    expect(auth.error).toBe("注册失败");
-  });
-
-  it("logout 即使接口失败也应清空用户并跳转登录页", async () => {
-    mocks.logout.mockRejectedValue(new Error("logout failed"));
-    mocks.getToken.mockReturnValue("jwt");
-
-    const auth = await loadAuthStore();
-    await auth.fetchUser();
-
-    await auth.logout();
-
-    expect(auth.user).toBeNull();
-    expect(mocks.clearAllDownloads).toHaveBeenCalledTimes(1);
-    expect(mocks.goto).toHaveBeenCalledWith("/login");
-  });
-
-  it("updateProfile 成功应更新用户；失败应设置错误", async () => {
-    mocks.getToken.mockReturnValue("jwt");
-    const auth = await loadAuthStore();
-
-    mocks.updateUser.mockResolvedValue(createUser("user"));
-    await auth.updateProfile({ nickname: "new nick" });
-    expect(auth.user?.nickname).toBe("Alice");
-
-    mocks.updateUser.mockRejectedValue(new Error("update failed"));
-    await expect(auth.updateProfile({ nickname: "bad" })).rejects.toThrow(
-      "update failed",
-    );
-    expect(auth.error).toBe("update failed");
-
-    auth.clearError();
+  it("prevents an anonymous registration completion from replacing a newer session", async () => {
+    const registration = deferred<void>();
+    mocks.register.mockReturnValue(registration.promise);
+    const auth = await store();
+    const pending = auth
+      .register({
+        username: "registered",
+        password: "fixture",
+        email: "fixture@example.invalid",
+        code: "123456",
+      })
+      .catch((error: unknown) => error);
+    client.setToken("new", expiry, false, "tenant");
+    registration.resolve();
+    expect(await pending).toMatchObject({ name: "AbortError" });
+    expect(mocks.login).not.toHaveBeenCalled();
     expect(auth.error).toBeNull();
   });
 
-  it("fetchUser/updateProfile 捕获非 Error 异常时应走默认文案分支", async () => {
-    mocks.getToken.mockReturnValue("jwt");
-    mocks.getCurrentUser.mockRejectedValue({ reason: "non-error" });
-
-    const auth = await loadAuthStore();
-    await auth.fetchUser();
-
-    expect(auth.error).toBe("获取用户信息失败");
-
-    mocks.updateUser.mockRejectedValue({ reason: "non-error" });
-    await expect(auth.updateProfile({ nickname: "x" })).rejects.toEqual({
-      reason: "non-error",
-    });
-    expect(auth.error).toBe("更新失败");
+  it("does not surface an old login failure over a newer restored credential", async () => {
+    const request = deferred<never>();
+    mocks.login.mockReturnValue(request.promise);
+    const auth = await store();
+    const pending = auth
+      .login({ username: "old", password: "fixture" })
+      .catch((error: unknown) => error);
+    client.setToken("new-platform", expiry, true, "platform");
+    await auth.initializeSession();
+    request.reject(new Error("old login failure"));
+    await pending;
+    expect(auth.isPlatformAdmin).toBe(true);
+    expect(auth.error).toBeNull();
   });
 
-  it("派生字段 getter 与 displayName 回退分支应可访问", async () => {
-    mocks.getToken.mockReturnValue("jwt");
+  it("does not surface an old login's profile failure over a newer restored credential", async () => {
+    const request = deferred<AccountVO>();
+    mocks.getCurrentUser.mockReturnValueOnce(request.promise);
+    const auth = await store();
+    const pending = auth
+      .login({ username: "old", password: "fixture" })
+      .catch((error: unknown) => error);
+    await vi.waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledOnce());
+    client.setToken("new-platform", expiry, true, "platform");
+    await auth.initializeSession();
+    request.reject(new Error("old profile failure"));
+    await pending;
+    expect(auth.isPlatformAdmin).toBe(true);
+    expect(auth.error).toBeNull();
+  });
 
-    const auth = await loadAuthStore();
-
-    mocks.getCurrentUser.mockResolvedValue(
-      createUserWithNameFallback({
-        username: "admin-user",
-        nickname: "Admin Nick",
-        role: "admin",
+  it("records registration failures and retains the anonymous state", async () => {
+    mocks.register.mockRejectedValue(new Error("registration failed"));
+    const auth = await store();
+    await expect(
+      auth.register({
+        username: "registered",
+        password: "fixture",
+        email: "fixture@example.invalid",
+        code: "123456",
       }),
-    );
-    await auth.fetchUser();
-    expect(auth.user?.role).toBe("admin");
-    expect(typeof auth.isAdmin).toBe("boolean");
-    expect(typeof auth.isMonitor).toBe("boolean");
-    expect(typeof auth.isAdminOrMonitor).toBe("boolean");
-    expect(typeof auth.username).toBe("string");
-    expect(typeof auth.displayName).toBe("string");
+    ).rejects.toThrow("registration failed");
+    expect(auth.error).toBe("registration failed");
+    expect(auth.isLoading).toBe(false);
+  });
 
-    mocks.getCurrentUser.mockResolvedValue(
-      createUserWithNameFallback({
-        username: "monitor-user",
-        nickname: "",
-        role: "monitor",
-      }),
-    );
-    await auth.fetchUser();
-    expect(auth.user?.role).toBe("monitor");
-    expect(typeof auth.displayName).toBe("string");
+  it("cleans tenant caches only for the ended tenant session", async () => {
+    client.setToken("tenant", expiry, false, "tenant");
+    const auth = await store();
+    await auth.initializeSession();
+    await auth.logout();
+    expect(mocks.clearAllDownloads).toHaveBeenCalledOnce();
+    expect(mocks.resetBadges).toHaveBeenCalledOnce();
+    expect(mocks.goto).toHaveBeenCalledWith("/login");
+    expect(auth.initialized).toBe(true);
+  });
 
-    mocks.getCurrentUser.mockResolvedValue(
-      createUserWithNameFallback({
-        username: "",
-        nickname: "",
-        role: "user",
-      }),
+  it("platform logout clears local caches without fetching a tenant profile", async () => {
+    client.setToken("platform", expiry, false, "platform");
+    const auth = await store();
+    await auth.initializeSession();
+    await auth.logout();
+    expect(mocks.clearAllDownloads).toHaveBeenCalledOnce();
+    expect(mocks.resetBadges).toHaveBeenCalledOnce();
+    expect(mocks.getCurrentUser).not.toHaveBeenCalled();
+    expect(auth.isLoading).toBe(false);
+  });
+
+  it("a newer login wins over asynchronous old-session cleanup", async () => {
+    client.setToken("tenant", expiry, false, "tenant");
+    const auth = await store();
+    await auth.initializeSession();
+    const cleanup = deferred<void>();
+    mocks.clearAllDownloads.mockReturnValue(cleanup.promise);
+    const logout = auth.logout();
+    await vi.waitFor(() =>
+      expect(mocks.clearAllDownloads).toHaveBeenCalledOnce(),
     );
+    await auth.login(
+      { username: "new-login", password: "fixture" },
+      { mode: "platform" },
+    );
+    cleanup.resolve();
+    await logout;
+    expect(auth.isPlatformAdmin).toBe(true);
+    expect(mocks.goto).not.toHaveBeenCalled();
+  });
+
+  it("supports profile changes and display-name fallback only in tenant scope", async () => {
+    client.setToken("tenant", expiry, false, "tenant");
+    const auth = await store();
+    await auth.initializeSession();
+    await auth.updateProfile({ nickname: "Updated" });
+    expect(auth.displayName).toBe("Updated");
+    mocks.getCurrentUser.mockResolvedValue(profile({ nickname: "" }));
     await auth.fetchUser();
-    expect(auth.user?.role).toBe("user");
-    expect(typeof auth.username).toBe("string");
-    expect(typeof auth.displayName).toBe("string");
+    expect(auth.displayName).toBe("alice");
+    client.setToken("platform", expiry, false, "platform");
+    await auth.initializeSession();
+    await expect(
+      auth.updateProfile({ nickname: "forbidden" }),
+    ).rejects.toMatchObject({ code: 70002 });
+  });
+
+  it("does not apply a stale profile edit to a new identity", async () => {
+    client.setToken("tenant", expiry, false, "tenant");
+    const auth = await store();
+    await auth.initializeSession();
+    const edit = deferred<AccountVO>();
+    mocks.updateUser.mockReturnValue(edit.promise);
+    const pending = auth
+      .updateProfile({ nickname: "old" })
+      .catch((error: unknown) => error);
+    client.setToken("platform", expiry, false, "platform");
+    await auth.initializeSession();
+    edit.resolve(profile({ nickname: "stale" }));
+    expect(await pending).toMatchObject({ name: "AbortError" });
+    expect(auth.displayName).toBe("operator");
+    expect(auth.error).toBeNull();
+  });
+
+  it("rejects malformed tenant scope and recovers from explicit initialization errors", async () => {
+    client.setToken("tenant", expiry, false, "tenant");
+    mocks.getCurrentUser.mockResolvedValue(
+      profile({ scope: "platform", role: "platform_admin" }),
+    );
+    const auth = await store();
+    await expect(auth.initializeSession()).rejects.toMatchObject({
+      code: 70002,
+    });
+    expect(auth.isAuthenticated).toBe(false);
+    expect(client.getToken()).toBe("tenant");
+    mocks.getCurrentUser.mockResolvedValue(profile());
+    await auth.initializeSession();
+    expect(auth.error).toBeNull();
+    mocks.getCurrentUser.mockRejectedValue(new Error("profile unavailable"));
+    await auth.fetchUser();
+    expect(auth.error).toBe("profile unavailable");
+    expect(auth.isAuthenticated).toBe(false);
+  });
+
+  it("platform guards reject anonymous, tenant and missing-capability identities before page work", async () => {
+    const guards = await import("$utils/platformAccess");
+    await expect(guards.requirePlatformSession()).rejects.toMatchObject({
+      status: 303,
+      location: "/login?mode=platform",
+    });
+    client.setToken("tenant", expiry, false, "tenant");
+    await expect(guards.requirePlatformSession()).rejects.toMatchObject({
+      status: 303,
+      location: "/dashboard",
+    });
+    client.setToken("platform", expiry, false, "platform");
+    await expect(
+      guards.requirePlatformCapability("platform:tenant:write"),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      guards.requirePlatformCapability("platform:tenant:read"),
+    ).resolves.toMatchObject({ systemTenantId: 0 });
   });
 });

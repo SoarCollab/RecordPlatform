@@ -1,9 +1,13 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { landingForScope } from "$utils/authSession";
   import { useAuth } from "$stores/auth.svelte";
   import { useNotifications } from "$stores/notifications.svelte";
   import { wasRememberMeSelected } from "$api/client";
   import { fly } from "svelte/transition";
+  import { page } from "$app/stores";
+  import { onMount } from "svelte";
+  import type { AuthScope } from "$api/types";
   import * as Card from "$components/ui/card";
   import { Button } from "$components/ui/button";
   import { Input } from "$components/ui/input";
@@ -13,6 +17,11 @@
   const auth = useAuth();
   const notifications = useNotifications();
 
+  let loginMode = $state<AuthScope>("tenant");
+  onMount(() => {
+    loginMode =
+      $page.url.searchParams.get("mode") === "platform" ? "platform" : "tenant";
+  });
   let username = $state("");
   let password = $state("");
   let rememberMe = $state(wasRememberMeSelected());
@@ -20,12 +29,14 @@
 
   $effect(() => {
     if (auth.initialized && auth.isAuthenticated) {
-      goto("/dashboard", { replaceState: true });
+      goto(landingForScope(auth.scope), { replaceState: true });
     }
   });
 
+  /** Authenticate with a named context and route the validated identity. */
   async function handleSubmit(e: Event) {
     e.preventDefault();
+    if (isSubmitting) return;
 
     if (!username || !password) {
       notifications.warning("请填写完整", "用户名和密码不能为空");
@@ -35,9 +46,9 @@
     isSubmitting = true;
 
     try {
-      await auth.login({ username, password }, { rememberMe });
+      await auth.login({ username, password }, { rememberMe, mode: loginMode });
       notifications.success("登录成功", `欢迎回来，${auth.displayName}`);
-      await goto("/dashboard");
+      await goto(landingForScope(auth.scope));
     } catch (err) {
       notifications.error(
         "登录失败",
@@ -78,6 +89,27 @@
     </Card.Header>
     <Card.Content>
       <form onsubmit={handleSubmit} class="space-y-4">
+        <fieldset class="grid grid-cols-2 gap-2" disabled={isSubmitting}>
+          <legend class="sr-only">登录入口</legend>
+          <label
+            class="border-input flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm"
+            ><input
+              type="radio"
+              name="login-mode"
+              value="tenant"
+              bind:group={loginMode}
+            />租户工作台</label
+          >
+          <label
+            class="border-input flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm"
+            ><input
+              type="radio"
+              name="login-mode"
+              value="platform"
+              bind:group={loginMode}
+            />平台管理</label
+          >
+        </fieldset>
         <div class="space-y-2">
           <Label for="username">用户名</Label>
           <Input
@@ -104,7 +136,11 @@
 
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-2">
-            <Checkbox bind:checked={rememberMe} disabled={isSubmitting} />
+            <Checkbox
+              id="remember"
+              bind:checked={rememberMe}
+              disabled={isSubmitting}
+            />
             <Label for="remember" class="cursor-pointer text-sm font-normal"
               >记住我</Label
             >
@@ -142,13 +178,15 @@
         </Button>
       </form>
     </Card.Content>
-    <Card.Footer class="justify-center border-t p-4">
-      <div class="text-muted-foreground text-sm">
-        还没有账户？
-        <a href="/register" class="text-primary font-medium hover:underline"
-          >立即注册</a
-        >
-      </div>
-    </Card.Footer>
+    {#if loginMode === "tenant"}
+      <Card.Footer class="justify-center border-t p-4">
+        <div class="text-muted-foreground text-sm">
+          还没有账户？
+          <a href="/register" class="text-primary font-medium hover:underline"
+            >立即注册</a
+          >
+        </div>
+      </Card.Footer>
+    {/if}
   </Card.Root>
 </div>

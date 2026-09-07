@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { landingForScope } from "$utils/authSession";
   import { useAuth } from "$stores/auth.svelte";
   import { useNotifications } from "$stores/notifications.svelte";
   import * as validation from "$utils/validation";
@@ -21,7 +22,7 @@
 
   $effect(() => {
     if (auth.initialized && auth.isAuthenticated) {
-      goto("/dashboard", { replaceState: true });
+      goto(landingForScope(auth.scope), { replaceState: true });
     }
   });
 
@@ -51,7 +52,7 @@
     } catch (err) {
       notifications.error(
         "发送失败",
-        err instanceof Error ? err.message : "请稍后重试"
+        err instanceof Error ? err.message : "请稍后重试",
       );
     } finally {
       sendingCode = false;
@@ -102,11 +103,11 @@
         code: verifyCode,
       });
       notifications.success("注册成功", "欢迎使用存证平台");
-      await goto("/dashboard");
+      await goto(landingForScope(auth.scope));
     } catch (err) {
       notifications.error(
         "注册失败",
-        err instanceof Error ? err.message : "请稍后重试"
+        err instanceof Error ? err.message : "请稍后重试",
       );
     } finally {
       isSubmitting = false;
@@ -119,12 +120,12 @@
 </svelte:head>
 
 <div
-  class="rounded-lg border bg-card p-8 shadow-sm"
+  class="bg-card rounded-lg border p-8 shadow-sm"
   in:fly={{ y: 20, duration: 400, delay: 100 }}
 >
   <div class="mb-6 text-center">
     <div
-      class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary text-primary-foreground"
+      class="bg-primary text-primary-foreground mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg"
     >
       <svg
         class="h-6 w-6"
@@ -141,7 +142,7 @@
       </svg>
     </div>
     <h1 class="text-2xl font-bold">创建账户</h1>
-    <p class="text-sm text-muted-foreground">注册成为存证平台用户</p>
+    <p class="text-muted-foreground text-sm">注册成为存证平台用户</p>
   </div>
 
   <form onsubmit={handleSubmit} class="space-y-4">
@@ -153,7 +154,7 @@
         type="text"
         id="username"
         bind:value={username}
-        class="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        class="bg-background focus:border-primary focus:ring-primary w-full rounded-lg border px-3 py-2 text-sm focus:ring-1 focus:outline-none"
         placeholder="4-20位字母、数字或下划线"
         disabled={isSubmitting}
       />
@@ -167,7 +168,7 @@
         type="email"
         id="email"
         bind:value={email}
-        class="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        class="bg-background focus:border-primary focus:ring-primary w-full rounded-lg border px-3 py-2 text-sm focus:ring-1 focus:outline-none"
         placeholder="用于接收验证码"
         disabled={isSubmitting}
         required
@@ -183,7 +184,7 @@
           type="text"
           id="verifyCode"
           bind:value={verifyCode}
-          class="flex-1 rounded-lg border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          class="bg-background focus:border-primary focus:ring-primary flex-1 rounded-lg border px-3 py-2 text-sm focus:ring-1 focus:outline-none"
           placeholder="输入邮箱验证码"
           disabled={isSubmitting}
           required
@@ -191,7 +192,7 @@
         <button
           type="button"
           onclick={handleSendCode}
-          class="rounded-lg border bg-background px-4 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50"
+          class="bg-background hover:bg-accent rounded-lg border px-4 py-2 text-sm font-medium disabled:opacity-50"
           disabled={sendingCode || countdown > 0 || !email}
         >
           {#if sendingCode}
@@ -211,7 +212,7 @@
         type="text"
         id="nickname"
         bind:value={nickname}
-        class="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        class="bg-background focus:border-primary focus:ring-primary w-full rounded-lg border px-3 py-2 text-sm focus:ring-1 focus:outline-none"
         placeholder="可选，用于显示"
         disabled={isSubmitting}
       />
@@ -225,7 +226,7 @@
         type="password"
         id="password"
         bind:value={password}
-        class="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        class="bg-background focus:border-primary focus:ring-primary w-full rounded-lg border px-3 py-2 text-sm focus:ring-1 focus:outline-none"
         placeholder="至少8位，包含字母和数字"
         disabled={isSubmitting}
       />
@@ -239,7 +240,7 @@
         type="password"
         id="confirmPwd"
         bind:value={confirmPwd}
-        class="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        class="bg-background focus:border-primary focus:ring-primary w-full rounded-lg border px-3 py-2 text-sm focus:ring-1 focus:outline-none"
         placeholder="再次输入密码"
         disabled={isSubmitting}
       />
@@ -247,13 +248,24 @@
 
     <button
       type="submit"
-      class="flex w-full items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+      class="bg-primary text-primary-foreground hover:bg-primary/90 flex w-full items-center justify-center rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50"
       disabled={isSubmitting}
     >
       {#if isSubmitting}
         <svg class="mr-2 h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          <circle
+            class="opacity-25"
+            cx="12"
+            cy="12"
+            r="10"
+            stroke="currentColor"
+            stroke-width="4"
+          ></circle>
+          <path
+            class="opacity-75"
+            fill="currentColor"
+            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+          ></path>
         </svg>
         注册中...
       {:else}
