@@ -2,7 +2,7 @@
 
 本项目采用"单元测试优先 + 少量高价值集成测试"的策略，目标是在 CI 中尽早发现回归，同时保持本地开发的执行成本足够低。
 
-## 当前测试文件快照（384 files）
+## 当前测试文件快照（385 files）
 
 > 2026-09-08 按 canonical source tree 中的 `*Test.java` / `*IT.java` / `*.test.ts` / `*.spec.ts` / `test_*.py` / `*_test.py` 统计。该数字是文件快照，不等同 test case 数；以下长表只说明代表性覆盖。`tools/docs/check_consistency.py --check-evidence` 会从 exact tree 重新计算并核对本表。
 
@@ -11,8 +11,8 @@
 | `platform-backend/backend-common` | 15 |
 | `platform-backend/backend-api` | 1 |
 | `platform-backend/backend-service` | 111 |
-| `platform-backend/backend-web` | 121 |
-| `platform-backend` | 248 |
+| `platform-backend/backend-web` | 122 |
+| `platform-backend` | 249 |
 | `platform-storage` | 28 |
 | `platform-frontend` | 64 |
 | `platform-verifier` | 15 |
@@ -22,7 +22,7 @@
 | `tools/contracts` | 4 |
 | `tools/docs` | 1 |
 | `tools` | 12 |
-| `total` | 384 |
+| `total` | 385 |
 
 ### 后端单元测试（backend-common，代表性测试类）
 
@@ -118,6 +118,7 @@
 | SysAuditControllerTest | 审计控制器单元测试 |
 | SystemControllerIntegrationTest | 系统监控端点 |
 | SseControllerIntegrationTest | SSE 连接/断开 |
+| SseEmitterMvcTest | 真实 MVC 转换器下的完整心跳、空载荷、多连接隔离与序列化失败 |
 | FileAdminControllerIntegrationTest | 管理员文件管理端点 |
 | AdminAndTransactionControllerTest | 管理员与交易端点 |
 | ControllerCoverageBoostTest | 控制器覆盖补充 |

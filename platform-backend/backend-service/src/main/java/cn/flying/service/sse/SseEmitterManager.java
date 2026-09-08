@@ -1,6 +1,8 @@
 package cn.flying.service.sse;
 
+import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.constant.UserRole;
+import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.mapper.AccountMapper;
@@ -244,10 +246,25 @@ public class SseEmitterManager {
         try {
             emitter.send(SseEmitter.event()
                     .name(event.getType())
-                    .data(JsonConverter.toJson(event.getPayload())));
+                    .data(serializeEventPayload(event.getPayload())));
         } catch (IOException e) {
             log.warn("SSE 发送到连接失败: error={}", e.getMessage());
         }
+    }
+
+    /**
+     * Encodes explicit null payloads as JSON data and rejects serialization failures before sending.
+     * Spring MVC requires a non-null data object even for events whose JSON payload is null.
+     */
+    private String serializeEventPayload(Object payload) {
+        if (payload == null) {
+            return "null";
+        }
+        String eventData = JsonConverter.toJson(payload);
+        if (eventData == null) {
+            throw new GeneralException(ResultEnum.JSON_PARSE_ERROR, "SSE event payload serialization failed");
+        }
+        return eventData;
     }
 
     /**
@@ -270,7 +287,7 @@ public class SseEmitterManager {
             uc.lock().unlock();
         }
 
-        String eventData = JsonConverter.toJson(event.getPayload());
+        String eventData = serializeEventPayload(event.getPayload());
         List<String> failedConnections = new ArrayList<>();
 
         // 发送到用户的所有连接（使用快照）
@@ -302,7 +319,7 @@ public class SseEmitterManager {
         Map<Long, UserConnections> tenantEmitters = emittersByTenant.get(tenantId);
         if (tenantEmitters == null || tenantEmitters.isEmpty()) return;
 
-        String eventData = JsonConverter.toJson(event.getPayload());
+        String eventData = serializeEventPayload(event.getPayload());
         List<String[]> failedConnections = new ArrayList<>();
 
         // 遍历所有用户
@@ -409,12 +426,13 @@ public class SseEmitterManager {
         new ArrayList<>(tenantEmitters.keySet()).forEach(userId -> closeUserConnections(tenantId, userId));
     }
 
+    /** Sends complete named heartbeat frames to every registered connection. */
     @Scheduled(fixedRate = 30000)
     public void sendHeartbeat() {
         if (emittersByTenant.isEmpty()) return;
 
         SseEvent heartbeat = SseEvent.heartbeat();
-        String eventData = JsonConverter.toJson(heartbeat.getPayload());
+        String eventData = serializeEventPayload(heartbeat.getPayload());
         List<Object[]> failedConnections = new ArrayList<>();
 
         // 遍历所有租户和用户
