@@ -191,7 +191,7 @@
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
-                <version>3.1.5</version>
+                <version>3.1.6</version>
             </dependency>
             <!-- Override transitive okhttp/okio from web3j to fix CVE (certificate validation + conversion error) -->
             <dependency>
