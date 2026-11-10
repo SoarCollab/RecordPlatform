@@ -144,9 +144,11 @@
         </dependency>
 
         <!-- Flyway 数据库迁移 -->
+        <!-- Boot 4 起 Flyway 自动配置拆到 spring-boot-flyway，必须经由 starter 引入，
+             否则迁移不会执行（表现为测试库缺表）。 -->
         <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-core</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
         </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>
