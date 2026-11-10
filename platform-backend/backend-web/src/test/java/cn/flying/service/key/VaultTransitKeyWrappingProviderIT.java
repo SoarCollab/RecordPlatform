@@ -1,6 +1,6 @@
 package cn.flying.service.key;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.Container;
@@ -25,7 +25,7 @@ class VaultTransitKeyWrappingProviderIT {
     private static final String ROOT_TOKEN = "record-platform-vault-it-root";
     private static final String POLICY_NAME = "record-platform-file-key";
     private static final String DENY_POLICY_NAME = "record-platform-file-key-deny";
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final JsonMapper OBJECT_MAPPER = JsonMapper.builder().build();
     private static final AtomicInteger KEY_SEQUENCE = new AtomicInteger();
 
     @org.testcontainers.junit.jupiter.Container

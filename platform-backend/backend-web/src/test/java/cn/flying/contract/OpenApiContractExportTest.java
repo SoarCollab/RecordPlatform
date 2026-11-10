@@ -94,10 +94,10 @@ import cn.flying.service.platform.PlatformTenantCommandService;
 import cn.flying.service.platform.PlatformTenantQueryService;
 import cn.flying.service.platform.PlatformUserService;
 import cn.flying.security.TrustedClientIpResolver;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -157,7 +157,7 @@ class OpenApiContractExportTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private ObjectMapper objectMapper;
+    private JsonMapper objectMapper;
 
     @MockitoBean
     private AccountService accountService;
@@ -533,7 +533,7 @@ class OpenApiContractExportTest {
                 .path("content").path("*/*").path("schema").path("$ref").asText())
                 .isEqualTo("#/components/schemas/ResultFileDownloadMetadataVO");
         List<String> downloadMetadataHeaders = downloadMetadataOperation.path("parameters")
-                .findValuesAsText("name");
+                .findValuesAsString("name");
         assertThat(downloadMetadataHeaders)
                 .contains("X-Key-Delivery-Protocol", "X-Download-Session-ID");
         JsonNode grantRequestSchema = rootNode.path("components").path("schemas")
@@ -723,7 +723,7 @@ class OpenApiContractExportTest {
         assertThat(operation.path("security")).isEmpty();
         assertThat(operation.path("description").asText()).contains("X-Tenant-ID", "owner tenant");
 
-        List<String> allParameterNames = operation.path("parameters").findValuesAsText("name");
+        List<String> allParameterNames = operation.path("parameters").findValuesAsString("name");
         assertThat(allParameterNames).noneMatch(name -> "X-Tenant-ID".equalsIgnoreCase(name));
 
         List<String> actualPathParameters = new ArrayList<>();
@@ -751,7 +751,7 @@ class OpenApiContractExportTest {
         assertThat(operation.isMissingNode()).isFalse();
         assertThat(operation.path("security").isArray()).isTrue();
         assertThat(operation.path("security")).isEmpty();
-        assertThat(operation.path("parameters").findValuesAsText("name"))
+        assertThat(operation.path("parameters").findValuesAsString("name"))
                 .noneMatch(name -> "X-Tenant-ID".equalsIgnoreCase(name))
                 .noneMatch(name -> "grantReference".equalsIgnoreCase(name));
         assertThat(operation.path("requestBody").path("content").path("application/json")
@@ -777,11 +777,11 @@ class OpenApiContractExportTest {
     /** Keeps every platform route in the exported contract with required mutation headers and safe schemas. */
     private void assertPlatformOperationContracts(JsonNode rootNode) {
         List<JsonNode> operations = new ArrayList<>();
-        rootNode.path("paths").fields().forEachRemaining(path -> {
+        rootNode.path("paths").properties().forEach(path -> {
             if (!path.getKey().startsWith("/api/v1/platform/")) {
                 return;
             }
-            path.getValue().fields().forEachRemaining(method -> {
+            path.getValue().properties().forEach(method -> {
                 if (!List.of("get", "post", "put", "delete").contains(method.getKey())) {
                     return;
                 }
@@ -816,15 +816,16 @@ class OpenApiContractExportTest {
         assertRequiredFields(configuration, "key", "type", "value", "version", "minimum", "maximum",
                 "description", "scope", "source", "mutable", "restartRequired", "state");
         assertNullableFields(configuration, "value", "version");
-        assertThat(configuration.path("properties").path("value").path("type").asText()).isEqualTo("integer");
+        assertThat(schemaTypes(configuration.path("properties").path("value"))).contains("integer");
         JsonNode mutation = rootNode.path("components").path("schemas").path("PlatformMutationVO");
         assertRequiredFields(mutation, "operationId", "resourceId", "version");
         assertNullableFields(mutation, "version");
-        assertThat(mutation.path("properties").path("version").path("type").asText()).isEqualTo("integer");
+        assertThat(schemaTypes(mutation.path("properties").path("version"))).contains("integer");
         JsonNode auditResult = rootNode.path("components").path("schemas").path("PlatformAuditVO")
                 .path("properties").path("result");
-        assertThat(auditResult.path("nullable").asBoolean()).isTrue();
-        assertThat(auditResult.path("allOf")).hasSize(1).anySatisfy(reference ->
+        // OpenAPI 3.1 用 anyOf($ref, type=null) 表达可空引用
+        assertThat(isNullableSchema(auditResult)).as("auditResult 可空").isTrue();
+        assertThat(auditResult.path("anyOf")).hasSize(2).anySatisfy(reference ->
                 assertThat(reference.path("$ref").asText()).isEqualTo("#/components/schemas/PlatformMutationVO"));
         for (String schemaName : List.of("PlatformUserVO", "PlatformTenantVO", "PlatformAuditVO")) {
             JsonNode properties = rootNode.path("components").path("schemas").path(schemaName).path("properties");
@@ -881,12 +882,58 @@ class OpenApiContractExportTest {
     private void assertNullableFields(JsonNode schema, String... expectedFields) {
         List<String> actualFields = new ArrayList<>();
         schema.path("properties").properties().forEach(entry -> {
-            if (entry.getValue().path("nullable").asBoolean(false)) {
+            // OpenAPI 3.1（springdoc 3.x）用 type 联合类型表达可空，不再输出 nullable 布尔值
+            if (isNullableSchema(entry.getValue())) {
                 actualFields.add(entry.getKey());
             }
         });
 
         assertThat(actualFields).containsExactlyInAnyOrder(expectedFields);
+    }
+
+    /**
+     * 提取 OpenAPI 3.1 schema 的 type 集合（可能是单个字符串或联合类型数组）。
+     *
+     * @param schema 目标 schema
+     * @return 类型名称列表
+     */
+    private List<String> schemaTypes(JsonNode schema) {
+        JsonNode type = schema.path("type");
+        List<String> types = new ArrayList<>();
+        if (type.isArray()) {
+            type.forEach(node -> types.add(node.asText()));
+        } else if (!type.isMissingNode() && !type.isNull()) {
+            types.add(type.asText());
+        }
+        return types;
+    }
+
+    /**
+     * 判断 OpenAPI 3.1 schema 是否显式可空（type 数组包含 null，或 anyOf/oneOf 中存在 null 分支）。
+     *
+     * @param schema 待判断的 schema
+     * @return 显式可空时返回 true
+     */
+    private boolean isNullableSchema(JsonNode schema) {
+        JsonNode type = schema.path("type");
+        if (type.isArray()) {
+            for (JsonNode typeNode : type) {
+                if ("null".equals(typeNode.asText())) {
+                    return true;
+                }
+            }
+        }
+        if ("null".equals(type.asText())) {
+            return true;
+        }
+        for (String combinator : List.of("anyOf", "oneOf")) {
+            for (JsonNode branch : schema.path(combinator)) {
+                if (isNullableSchema(branch)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -928,7 +975,7 @@ class OpenApiContractExportTest {
         if (node.isObject()) {
             ObjectNode sortedNode = objectMapper.createObjectNode();
             List<String> fieldNames = new ArrayList<>();
-            node.fieldNames().forEachRemaining(fieldNames::add);
+            node.propertyNames().forEach(fieldNames::add);
             Collections.sort(fieldNames);
             for (String childFieldName : fieldNames) {
                 sortedNode.set(childFieldName, normalizeOpenApiDocument(node.get(childFieldName), childFieldName));

@@ -1,7 +1,7 @@
 package cn.flying.test.support;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
@@ -32,7 +32,7 @@ public abstract class BaseControllerIntegrationTest extends BaseIntegrationTest 
     protected MockMvc mockMvc;
 
     @Autowired
-    protected ObjectMapper objectMapper;
+    protected JsonMapper objectMapper;
 
     @MockitoBean
     protected AuthorizationStateService authorizationStateService;

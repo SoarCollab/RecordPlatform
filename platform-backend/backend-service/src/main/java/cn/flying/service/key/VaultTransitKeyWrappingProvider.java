@@ -1,7 +1,8 @@
 package cn.flying.service.key;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -37,14 +38,14 @@ public class VaultTransitKeyWrappingProvider implements KeyWrappingProvider {
 
     private final FileKeyEnvelopeProperties properties;
     private final VaultTransitTransport transport;
-    private final ObjectMapper objectMapper;
+    private final JsonMapper objectMapper;
 
     /**
-     * 创建 Vault provider 并复用项目 ObjectMapper 与 JDK transport。
+     * 创建 Vault provider 并复用项目 JsonMapper 与 JDK transport。
      */
     public VaultTransitKeyWrappingProvider(FileKeyEnvelopeProperties properties,
                                            VaultTransitTransport transport,
-                                           ObjectMapper objectMapper) {
+                                           JsonMapper objectMapper) {
         this.properties = properties;
         this.transport = transport;
         this.objectMapper = objectMapper;
@@ -259,6 +260,9 @@ public class VaultTransitKeyWrappingProvider implements KeyWrappingProvider {
                 return failure(KeyWrappingFailureCategory.INVALID_RESPONSE, false);
             }
             return KeyWrappingResult.success(root);
+        } catch (JacksonException exception) {
+            // Jackson 3 的解析失败是受检之外的非受检异常，必须显式归类为响应异常
+            return failure(KeyWrappingFailureCategory.INVALID_RESPONSE, false);
         } catch (RuntimeException exception) {
             return failure(KeyWrappingFailureCategory.CONFIGURATION, false);
         } catch (Exception exception) {

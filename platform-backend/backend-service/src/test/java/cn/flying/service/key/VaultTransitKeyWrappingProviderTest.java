@@ -1,8 +1,8 @@
 package cn.flying.service.key;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +23,7 @@ import static org.mockito.Mockito.when;
 
 class VaultTransitKeyWrappingProviderTest {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final JsonMapper objectMapper = JsonMapper.builder().build();
     private FileKeyEnvelopeProperties properties;
     private StubTransport transport;
     private VaultTransitKeyWrappingProvider provider;
@@ -508,23 +508,23 @@ class VaultTransitKeyWrappingProviderTest {
      * 验证 JSON 序列化的运行时与受检失败不会逃逸 provider 结果边界。
      */
     @Test
-    void shouldContainObjectMapperFailures() throws Exception {
-        ObjectMapper runtimeMapper = mock(ObjectMapper.class);
+    void shouldContainJsonMapperFailures() throws Exception {
+        JsonMapper runtimeMapper = mock(JsonMapper.class);
         when(runtimeMapper.writeValueAsBytes(any())).thenThrow(new IllegalStateException("runtime"));
         VaultTransitKeyWrappingProvider runtimeProvider = new VaultTransitKeyWrappingProvider(
                 validProperties(), new StubTransport(), runtimeMapper);
         assertThat(runtimeProvider.wrap(validWrapRequest()).failure().category())
                 .isEqualTo(KeyWrappingFailureCategory.CONFIGURATION);
 
-        ObjectMapper checkedMapper = mock(ObjectMapper.class);
-        when(checkedMapper.writeValueAsBytes(any())).thenThrow(new JsonProcessingException("json") {
+        JsonMapper checkedMapper = mock(JsonMapper.class);
+        when(checkedMapper.writeValueAsBytes(any())).thenThrow(new JacksonException("json") {
         });
         VaultTransitKeyWrappingProvider checkedProvider = new VaultTransitKeyWrappingProvider(
                 validProperties(), new StubTransport(), checkedMapper);
         assertThat(checkedProvider.wrap(validWrapRequest()).failure().category())
                 .isEqualTo(KeyWrappingFailureCategory.INVALID_RESPONSE);
 
-        ObjectMapper emptyMapper = mock(ObjectMapper.class);
+        JsonMapper emptyMapper = mock(JsonMapper.class);
         when(emptyMapper.writeValueAsBytes(any())).thenReturn(new byte[0]);
         VaultTransitKeyWrappingProvider emptyProvider = new VaultTransitKeyWrappingProvider(
                 validProperties(), new StubTransport(), emptyMapper);

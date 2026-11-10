@@ -26,7 +26,7 @@ import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import cn.flying.service.remote.FileRemoteClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.core.type.TypeReference;
+import tools.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

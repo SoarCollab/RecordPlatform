@@ -14,9 +14,9 @@ import cn.flying.service.manifest.ChunkManifestDraft;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.remote.FileRemoteClient;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -47,7 +47,7 @@ public class ManifestEvidenceResolver {
     private static final Pattern SHA256_PATTERN = Pattern.compile("^sha256:[0-9a-f]{64}$");
     private static final Pattern TENANT_PATH_PATTERN = Pattern.compile(
             "^(?:storage|minio)/tenant/([0-9]+)/(?:(?:chunk/)|(?:node/[^/]+/))(.+)$");
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final JsonMapper OBJECT_MAPPER = JsonMapper.builder().build();
 
     private final ChunkManifestService chunkManifestService;
     private final FileRemoteClient fileRemoteClient;
@@ -171,7 +171,7 @@ public class ManifestEvidenceResolver {
                 return null;
             }
             return OBJECT_MAPPER.treeToValue(root.path("snapshot"), ManifestBackfillEvidenceSnapshot.class);
-        } catch (JsonProcessingException invalidPayload) {
+        } catch (JacksonException invalidPayload) {
             return null;
         }
     }
@@ -223,7 +223,7 @@ public class ManifestEvidenceResolver {
                         stableFileDigest(file), null, null);
             }
             return resolveOrderedPointer(file, detail, root);
-        } catch (JsonProcessingException invalidPointer) {
+        } catch (JacksonException invalidPointer) {
             return terminal(ManifestBackfillClassification.FAILED,
                     ManifestBackfillReason.MALFORMED_POINTER, false, false,
                     stableFileDigest(file), null, null);
@@ -459,7 +459,7 @@ public class ManifestEvidenceResolver {
             return OBJECT_MAPPER.writeValueAsString(Map.of(
                     "schema", SNAPSHOT_SCHEMA,
                     "snapshot", snapshot));
-        } catch (JsonProcessingException serializationFailure) {
+        } catch (JacksonException serializationFailure) {
             throw new IllegalStateException("manifest evidence serialization failed", serializationFailure);
         }
     }
@@ -568,7 +568,7 @@ public class ManifestEvidenceResolver {
      * Converts a JSON object field iterator into an iterable for deterministic traversal.
      */
     private Iterable<Map.Entry<String, JsonNode>> iterableFields(JsonNode node) {
-        return node::fields;
+        return node.properties();
     }
 
     /**

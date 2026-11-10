@@ -1,7 +1,7 @@
 package cn.flying.dao.vo.platform;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import tools.jackson.databind.annotation.JsonSerialize;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /** Authenticated platform identity and code-owned capabilities. */
@@ -14,7 +14,7 @@ public record PlatformSessionVO(
         String username,
         @Schema(description = "Fixed platform scope", allowableValues = {"platform"}, requiredMode = Schema.RequiredMode.REQUIRED)
         String scope,
-        @Schema(description = "Fixed system tenant identity", allowableValues = {"0"}, requiredMode = Schema.RequiredMode.REQUIRED, minimum = "0", maximum = "9007199254740991")
+        @Schema(description = "Fixed system tenant identity; always 0", requiredMode = Schema.RequiredMode.REQUIRED, minimum = "0", maximum = "9007199254740991")
         @JsonSerialize(using = PlatformSafeLongSerializer.class)
         Long systemTenantId,
         @Schema(description = "Deterministically ordered platform permissions", requiredMode = Schema.RequiredMode.REQUIRED)

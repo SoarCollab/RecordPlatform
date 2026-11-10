@@ -1,7 +1,7 @@
 package cn.flying.service.key;
 
 import cn.flying.common.exception.GeneralException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
@@ -109,7 +109,7 @@ class KeyWrappingConfigurationValidatorTest {
                 VaultTransitHttpResult.failure(KeyWrappingFailure.of(
                         KeyWrappingFailureCategory.UNAVAILABLE, true));
         KeyWrappingProviderRegistry registry = registry(properties,
-                new VaultTransitKeyWrappingProvider(properties, transport, new ObjectMapper()));
+                new VaultTransitKeyWrappingProvider(properties, transport, JsonMapper.builder().build()));
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles("prod");
 

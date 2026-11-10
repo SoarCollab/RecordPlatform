@@ -40,7 +40,7 @@ import cn.flying.service.platform.PlatformQueryService;
 import cn.flying.service.platform.PlatformTenantCommandService;
 import cn.flying.service.platform.PlatformTenantQueryService;
 import cn.flying.service.platform.PlatformUserService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,8 +53,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
-import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
-import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.security.access.expression.method.MethodSecurityExpressionHandler;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -120,9 +119,8 @@ class PlatformControlPlaneMvcTest {
     @Autowired private PermissionService permissions;
     @Autowired private LocalValidatorFactoryBean validator;
 
-    private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
-    private final ObjectMapper productionJson = new IdSecurityConfiguration()
-            .objectMapper(Jackson2ObjectMapperBuilder.json());
+    private final JsonMapper json = JsonMapper.builder().build();
+    private final JsonMapper productionJson = IdSecurityConfiguration.productionJsonMapper();
     private MockMvc mvc;
     private Object previousCodec;
 
@@ -139,7 +137,7 @@ class PlatformControlPlaneMvcTest {
                         configurationController, auditController)
                 .setValidator(validator)
                 .setControllerAdvice(new GlobalExceptionHandler())
-                .setMessageConverters(new MappingJackson2HttpMessageConverter(productionJson))
+                .setMessageConverters(new JacksonJsonHttpMessageConverter(productionJson))
                 .build();
     }
 
@@ -219,7 +217,7 @@ class PlatformControlPlaneMvcTest {
     @MethodSource("mutations")
     void rejectsBlankReasonForEveryMutation(Route route) throws Exception {
         var body = json.valueToTree(route.body());
-        ((com.fasterxml.jackson.databind.node.ObjectNode) body).put("reason", " ");
+        ((tools.jackson.databind.node.ObjectNode) body).put("reason", " ");
 
         mvc.perform(request(route).content(json.writeValueAsString(body)))
                 .andExpect(status().isBadRequest())

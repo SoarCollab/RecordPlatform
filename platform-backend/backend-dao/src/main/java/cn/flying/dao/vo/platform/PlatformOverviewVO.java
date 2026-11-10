@@ -1,7 +1,7 @@
 package cn.flying.dao.vo.platform;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import tools.jackson.databind.annotation.JsonSerialize;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /** Platform metadata counts from successful database measurements. */

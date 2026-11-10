@@ -17,7 +17,7 @@ import cn.flying.dao.dto.SysOperationLog;
 import cn.flying.filter.handler.GlobalExceptionHandler;
 import cn.flying.security.TrustedClientIpResolver;
 import cn.flying.service.SysOperationLogService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.junit.jupiter.api.AfterEach;
@@ -190,7 +190,7 @@ class PresignedUploadLoggingTest {
         ArgumentCaptor<SysOperationLog> audit = ArgumentCaptor.forClass(SysOperationLog.class);
         verify(service).saveOperationLog(audit.capture());
         assertEquals(1, audit.getValue().getStatus());
-        assertFalse(new ObjectMapper().findAndRegisterModules().writeValueAsString(audit.getValue()).contains(SIGNATURE));
+        assertFalse(JsonMapper.builder().build().writeValueAsString(audit.getValue()).contains(SIGNATURE));
         assertCleanLogs();
         assertTrue(original.getMessage().contains(SIGNATURE));
     }
@@ -324,7 +324,7 @@ class PresignedUploadLoggingTest {
         for (ILoggingEvent event : appender.list) {
             String throwable = event.getThrowableProxy() == null ? "" : ThrowableProxyUtil.asString(event.getThrowableProxy());
             String arguments = Arrays.toString(event.getArgumentArray());
-            String json = new ObjectMapper().writeValueAsString(Map.of("message", event.getFormattedMessage(),
+            String json = JsonMapper.builder().build().writeValueAsString(Map.of("message", event.getFormattedMessage(),
                     "template", event.getMessage(), "arguments", arguments, "throwable", throwable));
             for (String copy : List.of(event.getFormattedMessage(), arguments, throwable, json)) {
                 assertFalse(copy.contains(SIGNATURE), copy);

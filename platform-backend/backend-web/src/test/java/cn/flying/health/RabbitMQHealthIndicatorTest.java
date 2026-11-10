@@ -38,7 +38,12 @@ class RabbitMQHealthIndicatorTest {
         RabbitTemplate template = mock(RabbitTemplate.class);
         RabbitMQHealthIndicator custom = new RabbitMQHealthIndicator(template, new SynchronousExecutorService());
         ReflectionTestUtils.setField(custom, "healthQueue", "file.stored.queue");
-        assertThatThrownBy(() -> custom.health(false)).isInstanceOf(NullPointerException.class);
+        // Boot 4 起 health(boolean) 是接口默认方法：继承来的 mock 故障不再抛 NullPointerException，
+        // 而是以 null 或非 UP 的健康值返回；关键是绝不能报告为健康。
+        Health inheritedFailure = custom.health(false);
+        assertThat(inheritedFailure == null || inheritedFailure.getStatus() != Status.UP)
+                .as("inherited mock failure must not report UP")
+                .isTrue();
 
         ConnectionFactory factory = mock(ConnectionFactory.class);
         Connection connection = mock(Connection.class);

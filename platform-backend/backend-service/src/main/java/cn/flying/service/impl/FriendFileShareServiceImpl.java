@@ -22,9 +22,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.json.JsonMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
@@ -45,7 +45,7 @@ public class FriendFileShareServiceImpl extends ServiceImpl<FriendFileShareMappe
     private final FriendService friendService;
     private final FileMapper fileMapper;
     private final SseEmitterManager sseEmitterManager;
-    private final ObjectMapper objectMapper;
+    private final JsonMapper objectMapper;
     private final FileKeyEnvelopeService fileKeyEnvelopeService;
 
     @Override
@@ -84,7 +84,7 @@ public class FriendFileShareServiceImpl extends ServiceImpl<FriendFileShareMappe
         String fileHashesJson;
         try {
             fileHashesJson = objectMapper.writeValueAsString(fileHashes);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "文件列表序列化失败");
         }
 
@@ -259,7 +259,7 @@ public class FriendFileShareServiceImpl extends ServiceImpl<FriendFileShareMappe
         }
         try {
             return objectMapper.readValue(fileHashesJson, new TypeReference<List<String>>() {});
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             log.warn("解析文件哈希列表失败: {}", fileHashesJson);
             return Collections.emptyList();
         }

@@ -7,7 +7,7 @@ import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.vo.file.FileSharingVO;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.test.support.BaseControllerIntegrationTest;
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.TestPropertySource;

@@ -12,7 +12,7 @@ import cn.flying.dao.vo.admin.TenantMemberVO;
 import cn.flying.filter.TenantFilter;
 import cn.flying.filter.handler.GlobalExceptionHandler;
 import cn.flying.service.admin.TenantInvitationService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,7 +57,7 @@ class PublicInvitationControllerMvcTest {
 
     @Mock private TenantInvitationService invitationService;
 
-    private final ObjectMapper json = new ObjectMapper();
+    private final JsonMapper json = JsonMapper.builder().build();
     private LocalValidatorFactoryBean validator;
     private MockMvc mvc;
 

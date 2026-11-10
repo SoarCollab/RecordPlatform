@@ -19,7 +19,7 @@ import cn.flying.service.outbox.OutboxService;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.support.StoredObjectReference;
 import cn.flying.service.support.StoredObjectReferenceCodec;
-import com.fasterxml.jackson.core.type.TypeReference;
+import tools.jackson.core.type.TypeReference;
 import io.micrometer.core.instrument.Timer;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;

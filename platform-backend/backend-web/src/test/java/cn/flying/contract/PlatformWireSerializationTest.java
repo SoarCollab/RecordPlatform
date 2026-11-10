@@ -17,17 +17,15 @@ import cn.flying.dao.vo.platform.PlatformUsageVO;
 import cn.flying.dao.vo.platform.PlatformUserVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -46,21 +44,20 @@ class PlatformWireSerializationTest {
 
     private static final long JS_MAX_SAFE_INTEGER = 9_007_199_254_740_991L;
     private static final LocalDateTime STARTED_AT = LocalDateTime.of(2026, 9, 6, 12, 0);
-    private ObjectMapper mapper;
+    private JsonMapper mapper;
 
     /** Retains the actual global ID serializer while making nullable platform fields prove their local override. */
     @BeforeEach
     void useProductionMapper() {
-        Jackson2ObjectMapperBuilder builder = new Jackson2ObjectMapperBuilder()
-                .serializationInclusion(JsonInclude.Include.NON_NULL)
-                .modulesToInstall(new JavaTimeModule());
-        mapper = new IdSecurityConfiguration().objectMapper(builder);
+        mapper = IdSecurityConfiguration.productionJsonMapper().rebuild()
+                .changeDefaultPropertyInclusion(incl -> incl.withValueInclusion(JsonInclude.Include.NON_NULL))
+                .build();
     }
 
     /** Every business Long field emits exact JSON integers, including zero and the largest JavaScript-safe value. */
     @ParameterizedTest(name = "{0}")
     @MethodSource("businessNumberFields")
-    void serializesBusinessLongsAsExactNumbers(String name, NumberField field) throws JsonProcessingException {
+    void serializesBusinessLongsAsExactNumbers(String name, NumberField field) throws JacksonException {
         for (long value : new long[]{0L, 17L, JS_MAX_SAFE_INTEGER}) {
             JsonNode json = payload(field.create().apply(value));
 
@@ -75,7 +72,7 @@ class PlatformWireSerializationTest {
         for (long value : new long[]{-1L, JS_MAX_SAFE_INTEGER + 1L, Long.MAX_VALUE}) {
             Object response = field.create().apply(value);
 
-            JsonProcessingException failure = assertThrows(JsonProcessingException.class,
+            JacksonException failure = assertThrows(JacksonException.class,
                     () -> mapper.writeValueAsString(Result.success(response)), name);
 
             assertFalse(failure.getMessage().contains(Long.toString(value)),
@@ -87,7 +84,7 @@ class PlatformWireSerializationTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("nullablePayloads")
     void retainsLegalNullFields(String name, Object response, List<String> nullableFields)
-            throws JsonProcessingException {
+            throws JacksonException {
         JsonNode json = payload(response);
 
         for (String field : nullableFields) {
@@ -104,7 +101,7 @@ class PlatformWireSerializationTest {
 
     /** Integer statuses and error codes remain numbers alongside the locally serialized platform Long fields. */
     @Test
-    void preservesIntegerStatusesAndAuditErrorCode() throws JsonProcessingException {
+    void preservesIntegerStatusesAndAuditErrorCode() throws JacksonException {
         assertNumber(payload(tenant(3L, 4L)), "/status", 1L, "tenant status");
         assertNumber(payload(user()), "/status", 1L, "user status");
         JsonNode failedAudit = payload(audit(null, ResultEnum.SERVICE_UNAVAILABLE.getCode(), 5L));
@@ -117,7 +114,7 @@ class PlatformWireSerializationTest {
 
     /** The fixed system tenant is numeric zero while opaque identity and capability strings keep their wire types. */
     @Test
-    void serializesPlatformSessionWithNumericSystemIdentity() throws JsonProcessingException {
+    void serializesPlatformSessionWithNumericSystemIdentity() throws JacksonException {
         JsonNode json = payload(new PlatformSessionVO("user-public-id", "platform-operator", "platform", 0L,
                 List.of("platform:tenant:read", "platform:user:write")));
 
@@ -131,7 +128,7 @@ class PlatformWireSerializationTest {
 
     /** Health output preserves the required component map, including an empty map for an unknown measurement. */
     @Test
-    void preservesHealthStatusAndRequiredComponents() throws JsonProcessingException {
+    void preservesHealthStatusAndRequiredComponents() throws JacksonException {
         JsonNode known = payload(new PlatformHealthVO("UP", Map.of("storage", "UP")));
         JsonNode unknown = payload(new PlatformHealthVO("UNKNOWN", Map.of()));
 
@@ -146,7 +143,7 @@ class PlatformWireSerializationTest {
     /** Both platform page construction paths keep metadata and nested business counters numeric in a real Result body. */
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void serializesPlatformPageMetadataAsNumbers(boolean copyTenantPage) throws JsonProcessingException {
+    void serializesPlatformPageMetadataAsNumbers(boolean copyTenantPage) throws JacksonException {
         PlatformTenantVO tenant = tenant(3L, 4L);
         PlatformPage<PlatformTenantVO> page;
         if (copyTenantPage) {
@@ -171,7 +168,7 @@ class PlatformWireSerializationTest {
 
     /** The upper safe bound remains exact for both direct metadata and the derived page count. */
     @Test
-    void preservesMaximumSafePageMetadata() throws JsonProcessingException {
+    void preservesMaximumSafePageMetadata() throws JacksonException {
         JsonNode json = payload(new PlatformPage<>(JS_MAX_SAFE_INTEGER, 1L, JS_MAX_SAFE_INTEGER));
 
         assertNumber(json, "/total", JS_MAX_SAFE_INTEGER, "maximum total");
@@ -203,12 +200,12 @@ class PlatformWireSerializationTest {
             default -> throw new AssertionError("Unknown page metadata field");
         }
 
-        assertThrows(JsonProcessingException.class, () -> mapper.writeValueAsString(Result.success(page)));
+        assertThrows(JacksonException.class, () -> mapper.writeValueAsString(Result.success(page)));
     }
 
     /** Platform overrides do not alter ordinary boxed/primitive Long values or ordinary tenant page metadata. */
     @Test
-    void preservesOrdinaryTenantLongStringContract() throws JsonProcessingException {
+    void preservesOrdinaryTenantLongStringContract() throws JacksonException {
         OrdinaryTenantValues values = new OrdinaryTenantValues(Long.MAX_VALUE, JS_MAX_SAFE_INTEGER + 1L, null);
         JsonNode ordinary = payload(values);
         Page<OrdinaryTenantValues> tenantPage = new Page<>(2L, 2L, 5L);
@@ -227,7 +224,7 @@ class PlatformWireSerializationTest {
 
     /** A successful member command keeps its unversioned outcome explicit when nested inside platform audit. */
     @Test
-    void retainsNullMemberMutationVersionInsideAudit() throws JsonProcessingException {
+    void retainsNullMemberMutationVersionInsideAudit() throws JacksonException {
         PlatformMutationVO mutation = new PlatformMutationVO("operation-public-id", "user-public-id", null);
         JsonNode json = payload(audit(mutation, null, 7L));
 
@@ -335,7 +332,7 @@ class PlatformWireSerializationTest {
     }
 
     /** Serializes the actual Result envelope and parses emitted JSON instead of inspecting Java objects. */
-    private JsonNode payload(Object response) throws JsonProcessingException {
+    private JsonNode payload(Object response) throws JacksonException {
         JsonNode envelope = mapper.readTree(mapper.writeValueAsString(Result.success(response)));
         assertEquals(200, envelope.get("code").intValue());
         JsonNode data = envelope.get("data");

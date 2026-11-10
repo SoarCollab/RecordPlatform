@@ -88,10 +88,10 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-aspectj</artifactId>
         </dependency>
-        <!-- Jackson JSON处理 -->
+        <!-- Jackson 3（Boot 4 的默认 JSON 实现，groupId/包名为 tools.jackson） -->
         <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jackson</artifactId>
         </dependency>
 
         <!-- Test dependencies -->

@@ -855,7 +855,7 @@ export interface paths {
          * 获取公告列表
          * @description 获取已发布的公告列表（分页）
          */
-        get: operations["getList_1"];
+        get: operations["getList"];
         put?: never;
         /** 发布/保存公告（管理员） */
         post: operations["publish"];
@@ -927,12 +927,12 @@ export interface paths {
             cookie?: never;
         };
         /** 获取公告详情 */
-        get: operations["getDetail_2"];
+        get: operations["getDetail_1"];
         /** 编辑公告（管理员） */
         put: operations["update_1"];
         post?: never;
         /** 删除公告（管理员） */
-        delete: operations["delete_1"];
+        delete: operations["delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1194,7 +1194,7 @@ export interface paths {
          * 获取会话列表
          * @description 获取当前用户的所有会话（分页）
          */
-        get: operations["getList"];
+        get: operations["getList_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1231,11 +1231,11 @@ export interface paths {
          * 获取会话详情
          * @description 获取会话详情及消息列表
          */
-        get: operations["getDetail_1"];
+        get: operations["getDetail_2"];
         put?: never;
         post?: never;
         /** 删除会话 */
-        delete: operations["delete"];
+        delete: operations["delete_1"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4108,7 +4108,6 @@ export interface components {
              */
             total: number;
         };
-        /** @description 链上回执摘要 */
         ChainEvidence: {
             /** @description 批量根上链文件哈希 */
             batchChainFileHash: string;
@@ -4116,6 +4115,7 @@ export interface components {
             batchConfirmationSource?: string | null;
             /** @description 批量根上链交易哈希 */
             batchTransactionHash?: string | null;
+            /** @description 签发批次绑定的不可变合约注册表快照 */
             contractRegistry: components["schemas"]["ContractRegistryEvidence"];
             /** @description 文件上链交易哈希 */
             fileTransactionHash?: string | null;
@@ -4190,7 +4190,7 @@ export interface components {
         ComponentHealthVO: {
             /** @description 详细信息 */
             details?: {
-                [key: string]: Record<string, never>;
+                [key: string]: unknown;
             };
             /**
              * @description 健康状态
@@ -4202,10 +4202,12 @@ export interface components {
         ConfirmResetVO: {
             /** @description 验证码 */
             code?: string;
-            /** @description 邮箱 */
+            /**
+             * Format: email
+             * @description 邮箱
+             */
             email?: string;
         };
-        /** @description 签发批次绑定的不可变合约注册表快照 */
         ContractRegistryEvidence: {
             /** @description ABI 指纹算法 */
             abiFingerprintAlgorithm: string;
@@ -4247,9 +4249,11 @@ export interface components {
         };
         /** @description 会话详情 */
         ConversationDetailVO: {
+            /** @description 会话信息 */
             conversation?: components["schemas"]["ConversationVO"];
             /** @description 是否有更多消息 */
             hasMore?: boolean;
+            /** @description 消息分页数据 */
             messages?: components["schemas"]["IPageMessageVO"];
             /**
              * Format: int64
@@ -4302,6 +4306,7 @@ export interface components {
             reason: string;
         };
         CreateTenantInvitationRequest: {
+            /** Format: email */
             email: string;
             /** Format: int32 */
             expiresInHours: number;
@@ -4320,7 +4325,6 @@ export interface components {
              */
             fileSize: number;
         };
-        /** @description 结果数据 */
         CryptoAgilityDiagnosticsVO: {
             policy?: components["schemas"]["CryptoAgilityPolicyVO"];
             signingProviders?: components["schemas"]["CryptoProviderCapabilityVO"][];
@@ -4360,7 +4364,6 @@ export interface components {
              */
             wrappingProviderContract: number;
         };
-        /** @description 结果数据 */
         CryptoAgilityPolicyVO: {
             contentEncryptionSuite?: string;
             envelopeSignatureSuite?: string;
@@ -4586,7 +4589,10 @@ export interface components {
         EmailRegisterVO: {
             /** @description 验证码 */
             code: string;
-            /** @description 邮箱 */
+            /**
+             * Format: email
+             * @description 邮箱
+             */
             email: string;
             /** @description 昵称 */
             nickname?: string;
@@ -4599,7 +4605,10 @@ export interface components {
         EmailResetVO: {
             /** @description 验证码 */
             code?: string;
-            /** @description 邮箱 */
+            /**
+             * Format: email
+             * @description 邮箱
+             */
             email?: string;
             /** @description 新密码 */
             password?: string;
@@ -4653,6 +4662,7 @@ export interface components {
             fileSize?: number;
             /** @description 仅 plaintext-v0 兼容模式返回的初始密钥；grant-v1 下为空 */
             initialKey?: string;
+            /** @description grant-v1 短期密钥授权；未加密文件或 plaintext-v0 下为空 */
             keyGrant?: components["schemas"]["DownloadKeyGrantVO"];
         };
         /** @description 文件下载加密格式描述 */
@@ -4685,6 +4695,7 @@ export interface components {
         };
         /** @description 文件预签名分片下载元数据 */
         FileDownloadMetadataVO: {
+            /** @description 刷新预签名 URL 时必须保持完全一致的下载身份 */
             accessIdentity: components["schemas"]["DownloadAccessIdentityVO"];
             /** @description 不含密钥材料的 canonical manifest JSON */
             canonicalManifestJson?: string;
@@ -4695,6 +4706,7 @@ export interface components {
             chunkSize?: number;
             /** @description 文件 MIME 类型 */
             contentType?: string;
+            /** @description 版本化加密格式描述；历史 manifest 可为空 */
             encryption?: components["schemas"]["FileDownloadEncryptionVO"];
             /** @description 加密算法 */
             encryptionAlgorithm?: string;
@@ -4713,6 +4725,7 @@ export interface components {
             hashAlgorithm?: string;
             /** @description 仅 plaintext-v0 兼容模式返回的初始密钥；grant-v1 下为空 */
             initialKey?: string;
+            /** @description grant-v1 短期密钥授权；未加密文件或 plaintext-v0 下为空 */
             keyGrant?: components["schemas"]["DownloadKeyGrantVO"];
             /** @description Whether a bounded typed legacy download path is explicitly allowed */
             legacyDownloadAllowed?: boolean;
@@ -4778,7 +4791,6 @@ export interface components {
             /** @description 分片 storagePath */
             storagePath?: string;
         };
-        /** @description 文件公开元数据 */
         FileEvidence: {
             /**
              * Format: int32
@@ -5167,7 +5179,6 @@ export interface components {
             /** @description 用户名 */
             username?: string;
         };
-        /** @description 结果数据 */
         IPageAdminFileVO: {
             /** Format: int64 */
             current?: number;
@@ -5177,7 +5188,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPageAdminShareVO: {
             /** Format: int64 */
             current?: number;
@@ -5187,7 +5197,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPageAnnouncementVO: {
             /** Format: int64 */
             current?: number;
@@ -5197,7 +5206,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPageAuditLogVO: {
             /** Format: int64 */
             current?: number;
@@ -5207,7 +5215,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPageConversationVO: {
             /** Format: int64 */
             current?: number;
@@ -5217,7 +5224,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPageFileShareVO: {
             /** Format: int64 */
             current?: number;
@@ -5227,7 +5233,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPageFriendFileShareDetailVO: {
             /** Format: int64 */
             current?: number;
@@ -5237,7 +5242,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPageFriendRequestDetailVO: {
             /** Format: int64 */
             current?: number;
@@ -5247,7 +5251,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPageFriendVO: {
             /** Format: int64 */
             current?: number;
@@ -5257,7 +5260,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPageIntegrityAlertVO: {
             /** Format: int64 */
             current?: number;
@@ -5267,7 +5269,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 消息分页数据 */
         IPageMessageVO: {
             /** Format: int64 */
             current?: number;
@@ -5277,7 +5278,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPagePlatformAuditVO: {
             /** Format: int64 */
             current?: number;
@@ -5287,7 +5287,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPagePlatformTenantVO: {
             /** Format: int64 */
             current?: number;
@@ -5297,7 +5296,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPagePlatformUserVO: {
             /** Format: int64 */
             current?: number;
@@ -5307,7 +5305,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPageShareAccessLogVO: {
             /** Format: int64 */
             current?: number;
@@ -5317,7 +5314,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPageSysOperationLogVO: {
             /** Format: int64 */
             current?: number;
@@ -5327,7 +5323,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPageSysPermissionVO: {
             /** Format: int64 */
             current?: number;
@@ -5337,7 +5332,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPageTenantMemberVO: {
             /** Format: int64 */
             current?: number;
@@ -5347,7 +5341,6 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        /** @description 结果数据 */
         IPageTicketVO: {
             /** Format: int64 */
             current?: number;
@@ -5403,7 +5396,6 @@ export interface components {
              */
             status?: number;
         };
-        /** @description 结果数据 */
         IntegrityCheckStatsVO: {
             /** Format: int64 */
             errorsEncountered?: number;
@@ -5412,7 +5404,6 @@ export interface components {
             /** Format: int64 */
             totalChecked?: number;
         };
-        /** @description 签发方元数据 */
         IssuerEvidence: {
             /** @description 批次状态 */
             batchStatus?: string;
@@ -5594,7 +5585,6 @@ export interface components {
             mode: string;
             requestId: string;
         };
-        /** @description 证明包清单 */
         Manifest: {
             /** @description 批量存证号 */
             batchNo?: string;
@@ -5720,7 +5710,6 @@ export interface components {
             status?: string;
             storagePath?: string;
         };
-        /** @description Merkle 证明 */
         MerkleEvidence: {
             /** @description 叶子哈希 */
             leafHash?: string;
@@ -5764,20 +5753,25 @@ export interface components {
         ModifyEmailVO: {
             /** @description 验证码 */
             code?: string;
-            /** @description 邮箱 */
+            /**
+             * Format: email
+             * @description 邮箱
+             */
             email?: string;
         };
         /** @description 监控指标聚合信息 */
         MonitorMetricsVO: {
+            /** @description 区块链状态 */
             chainStatus?: components["schemas"]["ChainStatusVO"];
+            /** @description 系统健康状态 */
             health?: components["schemas"]["SystemHealthVO"];
+            /** @description 系统统计信息 */
             systemStats?: components["schemas"]["SystemStatsVO"];
         };
         OrderItem: {
             asc?: boolean;
             column?: string;
         };
-        /** @description 结果数据 */
         PageFileVO: {
             countId?: string;
             /** Format: int64 */
@@ -6012,10 +6006,9 @@ export interface components {
             scope: "platform";
             /**
              * Format: int64
-             * @description Fixed system tenant identity
-             * @enum {integer}
+             * @description Fixed system tenant identity; always 0
              */
-            systemTenantId: 0;
+            systemTenantId: number;
             /** @description Current principal name */
             username: string;
         };
@@ -6171,19 +6164,25 @@ export interface components {
         };
         /** @description 文件证明包 */
         ProofBundleVO: {
+            /** @description 链上回执摘要 */
             chain: components["schemas"]["ChainEvidence"];
             /** @description 证明包合同版本 */
             contractVersion: string;
+            /** @description 文件公开元数据 */
             file: components["schemas"]["FileEvidence"];
+            /** @description 签发方元数据 */
             issuer: components["schemas"]["IssuerEvidence"];
+            /** @description 证明包清单 */
             manifest: components["schemas"]["Manifest"];
+            /** @description Merkle 证明 */
             merkle: components["schemas"]["MerkleEvidence"];
+            /** @description 存储公开元数据 */
             storage: components["schemas"]["StorageEvidence"];
             /** @description 人工验证说明 */
             verificationGuide: string[];
+            /** @description 验证策略 */
             verificationPolicy: components["schemas"]["VerificationPolicy"];
         };
-        /** @description 证明路径 */
         ProofNode: {
             /** @description 兄弟节点哈希 */
             hash?: string;
@@ -6475,7 +6474,7 @@ export interface components {
              */
             code?: number;
             /** @description 结果数据 */
-            data?: Record<string, never>;
+            data?: unknown;
             /** @description 提示信息 */
             message?: string;
         };
@@ -6486,6 +6485,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["AccountVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6497,6 +6497,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["AdminFileDetailVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6508,6 +6509,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["AnnouncementVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6519,6 +6521,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["AttestationBatchProductionRunVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6530,6 +6533,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["AttestationBatchProductionStatusVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6553,6 +6557,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["ChainStatusVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6564,6 +6569,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["ConversationDetailVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6575,6 +6581,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["CryptoAgilityDiagnosticsVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6586,6 +6593,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["CryptoAgilityPolicyVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6597,6 +6605,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["DirectUploadCompleteVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6608,6 +6617,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["DirectUploadSessionVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6619,6 +6629,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["DownloadKeyMaterialVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6630,6 +6641,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["FileDecryptInfoVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6641,6 +6653,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["FileDownloadMetadataVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6652,6 +6665,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["FileProvenanceVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6663,6 +6677,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["FileUploadStatusVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6674,6 +6689,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["FileVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6685,6 +6701,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["FriendFileShareDetailVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6696,6 +6713,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["FriendRequestDetailVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6707,6 +6725,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageAdminFileVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6718,6 +6737,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageAdminShareVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6729,6 +6749,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageAnnouncementVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6740,6 +6761,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageAuditLogVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6751,6 +6773,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageConversationVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6762,6 +6785,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageFileShareVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6773,6 +6797,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageFriendFileShareDetailVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6784,6 +6809,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageFriendRequestDetailVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6795,6 +6821,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageFriendVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6806,6 +6833,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageIntegrityAlertVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6817,6 +6845,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPagePlatformAuditVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6828,6 +6857,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPagePlatformTenantVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6839,6 +6869,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPagePlatformUserVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6850,6 +6881,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageShareAccessLogVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6861,6 +6893,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageSysOperationLogVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6872,6 +6905,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageSysPermissionVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6883,6 +6917,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageTenantMemberVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6894,6 +6929,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IPageTicketVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6905,6 +6941,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["IntegrityCheckStatsVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6916,6 +6953,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["KeyEnvelopeRotationResultVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6927,6 +6965,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["KeyRotationItemPageVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6938,6 +6977,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["KeyRotationPolicyVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6949,6 +6989,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["KeyRotationRunVO"];
             /** @description 提示信息 */
             message?: string;
@@ -6985,7 +7026,7 @@ export interface components {
              */
             code?: number;
             /** @description 结果数据 */
-            data?: string[][];
+            data?: string[];
             /** @description 提示信息 */
             message?: string;
         };
@@ -7152,6 +7193,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["ManifestBackfillItemPageVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7163,6 +7205,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["ManifestBackfillRunVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7174,6 +7217,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["ManifestReferenceCensusVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7185,6 +7229,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["ManifestReferenceSweepMarkVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7212,7 +7257,7 @@ export interface components {
             code?: number;
             /** @description 结果数据 */
             data?: {
-                [key: string]: Record<string, never>;
+                [key: string]: unknown;
             };
             /** @description 提示信息 */
             message?: string;
@@ -7224,6 +7269,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["MessageVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7235,6 +7281,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["MonitorMetricsVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7246,6 +7293,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["PageFileVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7257,6 +7305,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["PlatformAuditVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7268,6 +7317,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["PlatformConfigurationVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7279,6 +7329,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["PlatformHealthVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7290,6 +7341,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["PlatformMutationVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7301,6 +7353,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["PlatformOverviewVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7312,6 +7365,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["PlatformQuotaVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7323,6 +7377,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["PlatformSessionVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7334,6 +7389,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["PlatformTenantVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7345,6 +7401,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["PlatformUsageVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7356,6 +7413,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["ProgressVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7367,6 +7425,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["ProofBundleVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7378,6 +7437,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["ProofSigningKeyVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7389,6 +7449,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["ProofStatusVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7400,6 +7461,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["QuotaRolloutAuditVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7411,6 +7473,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["QuotaStatusVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7422,6 +7485,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["RefreshTokenVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7433,6 +7497,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["ResumeUploadVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7456,6 +7521,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["ShareAccessStatsVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7467,6 +7533,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["ShareInfoVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7478,6 +7545,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["SseTokenVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7489,6 +7557,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["StartUploadVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7500,6 +7569,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["StorageCapacityVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7523,6 +7593,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["SysOperationLogVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7534,6 +7605,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["SysPermissionVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7545,6 +7617,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["SystemHealthVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7556,6 +7629,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["SystemStatsVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7567,6 +7641,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["TenantInvitationVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7578,6 +7653,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["TenantMemberVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7589,6 +7665,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["TicketDetailVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7600,6 +7677,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["TransactionVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7611,6 +7689,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["UploadPolicyVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7622,6 +7701,7 @@ export interface components {
              * @description 操作代码
              */
             code?: number;
+            /** @description 结果数据 */
             data?: components["schemas"]["UserFileStatsVO"];
             /** @description 提示信息 */
             message?: string;
@@ -7814,7 +7894,6 @@ export interface components {
             /** @description 已上传分片序号列表 */
             uploadedChunks?: number[];
         };
-        /** @description 结果数据 */
         StorageCapacityVO: {
             /** Format: int64 */
             availableCapacityBytes?: number;
@@ -7840,7 +7919,6 @@ export interface components {
             /** Format: int64 */
             usedCapacityBytes?: number;
         };
-        /** @description 存储公开元数据 */
         StorageEvidence: {
             /** @description 存储对象列表 */
             objects?: components["schemas"]["StorageObjectEvidence"][];
@@ -7856,7 +7934,6 @@ export interface components {
             /** Format: int64 */
             usedCapacityBytes?: number;
         };
-        /** @description 存储对象列表 */
         StorageObjectEvidence: {
             /** @description 校验算法 */
             checksumAlgorithm?: string;
@@ -8288,7 +8365,6 @@ export interface components {
              */
             updateTime?: string;
         };
-        /** @description 结果数据 */
         TransactionVO: {
             blockNumber?: string;
             chainId?: string;
@@ -8478,7 +8554,6 @@ export interface components {
              */
             operationCount?: number;
         };
-        /** @description 验证策略 */
         VerificationPolicy: {
             /** @description 内容加密算法套件 */
             algorithmSuite?: string;
@@ -9833,7 +9908,7 @@ export interface operations {
             };
         };
     };
-    getList_1: {
+    getList: {
         parameters: {
             query?: {
                 /** @description 页码 */
@@ -9945,7 +10020,7 @@ export interface operations {
             };
         };
     };
-    getDetail_2: {
+    getDetail_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -9995,7 +10070,7 @@ export interface operations {
             };
         };
     };
-    delete_1: {
+    delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -10177,7 +10252,7 @@ export interface operations {
             };
         };
     };
-    getList: {
+    getList_1: {
         parameters: {
             query?: {
                 /** @description 页码 */
@@ -10222,7 +10297,7 @@ export interface operations {
             };
         };
     };
-    getDetail_1: {
+    getDetail_2: {
         parameters: {
             query?: {
                 /** @description 消息页码 */
@@ -10250,7 +10325,7 @@ export interface operations {
             };
         };
     };
-    delete: {
+    delete_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -10335,7 +10410,7 @@ export interface operations {
         parameters: {
             query: {
                 /** @description 待删除文件标识列表（支持文件哈希或文件ID） */
-                identifiers: string;
+                identifiers: string[];
             };
             header?: never;
             path?: never;
@@ -11380,7 +11455,13 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": string;
+                "application/json": {
+                    /**
+                     * Format: binary
+                     * @description 头像文件
+                     */
+                    file: string;
+                };
             };
         };
         responses: {
@@ -11404,7 +11485,13 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": string;
+                "application/json": {
+                    /**
+                     * Format: binary
+                     * @description 图片文件
+                     */
+                    file: string;
+                };
             };
         };
         responses: {
@@ -13339,7 +13426,7 @@ export interface operations {
         parameters: {
             query: {
                 /** @description 分片大小 */
-                chunkSize: string;
+                chunkSize: number;
                 /** @description 客户端ID */
                 clientId?: string;
                 /** @description 文件类型；浏览器未提供时可为空 */
@@ -13349,9 +13436,9 @@ export interface operations {
                 /** @description 文件名 */
                 fileName: string;
                 /** @description 文件大小 */
-                fileSize: string;
+                fileSize: number;
                 /** @description 分片总数 */
-                totalChunks: string;
+                totalChunks: number;
             };
             header?: never;
             path?: never;

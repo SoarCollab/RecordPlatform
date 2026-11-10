@@ -1,7 +1,7 @@
 package cn.flying.filter;
 
 import cn.flying.common.util.Const;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.Getter;
@@ -21,14 +21,14 @@ import java.io.IOException;
  */
 public class JsonUsernamePasswordAuthenticationFilter extends UsernamePasswordAuthenticationFilter {
 
-    private final ObjectMapper objectMapper;
+    private final JsonMapper objectMapper;
 
     /**
-     * Create a JSON login authentication filter with an ObjectMapper.
+     * Create a JSON login authentication filter with an JsonMapper.
      *
      * @param objectMapper JSON parser
      */
-    public JsonUsernamePasswordAuthenticationFilter(ObjectMapper objectMapper) {
+    public JsonUsernamePasswordAuthenticationFilter(JsonMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 

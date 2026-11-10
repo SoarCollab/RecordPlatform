@@ -56,8 +56,8 @@ import cn.flying.verifier.resolver.Resolution;
 import cn.flying.verifier.resolver.ResolutionState;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -207,7 +207,7 @@ class SignedProofLifecycleConcurrencyIT extends BaseIntegrationTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private ObjectMapper objectMapper;
+    private JsonMapper objectMapper;
 
     @TempDir
     Path tempDirectory;

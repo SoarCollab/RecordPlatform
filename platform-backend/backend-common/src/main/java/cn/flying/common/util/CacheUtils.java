@@ -1,6 +1,6 @@
 package cn.flying.common.util;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import jakarta.annotation.Resource;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +24,7 @@ public class CacheUtils {
     private StringRedisTemplate stringRedisTemplate;
 
     @Resource
-    private ObjectMapper objectMapper;
+    private JsonMapper objectMapper;
 
     private static final String BYTES_PREFIX = "__BYTES__:";
 

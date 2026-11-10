@@ -10,7 +10,7 @@ import cn.flying.dao.vo.system.ComponentHealthVO;
 import cn.flying.dao.vo.system.MonitorMetricsVO;
 import cn.flying.dao.vo.system.SystemHealthVO;
 import cn.flying.dao.vo.system.SystemStatsVO;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.Date;
@@ -21,7 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class RecordJacksonSerializationTest {
 
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final JsonMapper objectMapper = JsonMapper.builder().build();
 
     @Test
     void systemStats_roundTrip() throws Exception {
