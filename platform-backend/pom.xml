@@ -66,6 +66,14 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- MyBatis-Plus 3.5.18 默认带 jsqlparser 5.4，而 5.4 把 FILE 解析为保留字，
+                 导致 `UPDATE file ...`（多租户插件会解析逻辑删除 UPDATE）抛 ParseException；
+                 5.3 之前的文法没有这个问题，这里锁回 5.3。 -->
+            <dependency>
+                <groupId>com.github.jsqlparser</groupId>
+                <artifactId>jsqlparser</artifactId>
+                <version>5.3</version>
+            </dependency>
             <!--    项目子模块    -->
             <dependency>
                 <groupId>cn.flying</groupId>

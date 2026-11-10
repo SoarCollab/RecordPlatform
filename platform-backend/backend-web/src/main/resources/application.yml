@@ -140,9 +140,6 @@ mybatis-plus:
     #控制台mybatis-plus标记
     banner: true
     db-config:
-      # 表名统一加反引号：MyBatis-Plus 3.5.18 起 jsqlparser 5.4 把 FILE 视为保留字，
-      # 未加引号的 `UPDATE file ...` 会导致多租户插件解析失败（500）。
-      table-format: "`%s`"
       logic-delete-field: deleted # 全局逻辑删除字段名
       logic-delete-value: 1 # 逻辑已删除值
       logic-not-delete-value: 0 # 逻辑未删除值
