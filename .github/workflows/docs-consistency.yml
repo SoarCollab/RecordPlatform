@@ -89,7 +89,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           cache-dependency-path: docs/pnpm-lock.yaml
 
@@ -99,7 +99,7 @@ jobs:
       - name: Audit docs production and development dependencies
         run: |
           for attempt in 1 2; do
-            if corepack pnpm@10.26.1 -C docs audit --audit-level high; then
+            if corepack pnpm@10.34.9 -C docs audit --audit-level high; then
               exit 0
             fi
             if [ "$attempt" -eq 2 ]; then
