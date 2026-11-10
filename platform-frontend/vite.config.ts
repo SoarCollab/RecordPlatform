@@ -1,3 +1,5 @@
+import adapter from "@sveltejs/adapter-static";
+import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, loadEnv } from "vite";
@@ -20,7 +22,26 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [tailwindcss(), sveltekit()],
+    plugins: [
+      tailwindcss(),
+      sveltekit({
+        preprocess: vitePreprocess(),
+        adapter: adapter({
+          pages: "dist",
+          assets: "dist",
+          fallback: "index.html" /* SPA 路由回退 */,
+          precompress: true /* 预压缩 .gz/.br */,
+        }),
+
+        alias: {
+          $components: "src/lib/components",
+          $stores: "src/lib/stores",
+          $api: "src/lib/api",
+          $services: "src/lib/services",
+          $utils: "src/lib/utils",
+        },
+      }),
+    ],
     server: {
       port: 5173,
       proxy: {

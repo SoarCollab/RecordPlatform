@@ -1,6 +1,6 @@
 import { goto } from "$app/navigation";
-import { browser } from "$app/environment";
-import { env } from "$env/dynamic/public";
+import { browser } from "$app/env";
+import { PUBLIC_API_BASE_URL, PUBLIC_TENANT_ID } from "$app/env/public";
 import type { AuthScope } from "$api/types/auth";
 import {
   getStoredScopeHint,
@@ -22,7 +22,7 @@ import {
 
 const DEFAULT_API_BASE = import.meta.env.DEV
   ? "/record-platform/api/v1"
-  : `${env.PUBLIC_API_BASE_URL || "/record-platform"}/api/v1`;
+  : `${PUBLIC_API_BASE_URL || "/record-platform"}/api/v1`;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_DELAY_BASE = 1000;
 
@@ -77,6 +77,7 @@ export function getCredentialSnapshot(): CredentialSnapshot {
 /** Compare identity without clearing storage from a reactive getter or derived expression. */
 export function isCurrentCredential(snapshot: CredentialSnapshot): boolean {
   const token = getStoredToken();
+
   return (
     snapshot.generation === credentialGeneration &&
     snapshot.token === token &&
@@ -339,7 +340,7 @@ function resolveErrorMessage(fallback: string, detail: unknown): string {
 export function createApiClient(clientConfig: ApiClientConfig = {}) {
   const {
     baseUrl = DEFAULT_API_BASE,
-    tenantId = env.PUBLIC_TENANT_ID || "0",
+    tenantId = PUBLIC_TENANT_ID || "0",
     maxRetries = DEFAULT_MAX_RETRIES,
     retryDelayBase = DEFAULT_RETRY_DELAY_BASE,
     fetch: fetchFn = globalThis.fetch,

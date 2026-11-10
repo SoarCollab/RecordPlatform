@@ -67,8 +67,9 @@ vi.mock("$api/client", () => ({
   getToken: mocks.apiClient.getToken,
   ApiError: mocks.MockApiError,
 }));
-vi.mock("$env/dynamic/public", () => ({
-  env: { PUBLIC_TENANT_ID: "0" },
+vi.mock("$app/env/public", () => ({
+  PUBLIC_TENANT_ID: "0",
+  PUBLIC_API_BASE_URL: "http://localhost:8000/record-platform",
 }));
 vi.mock("$utils/chunkDownloader", () => mocks.chunkDownloader);
 vi.mock("$utils/downloadStorage", () => mocks.downloadStorage);

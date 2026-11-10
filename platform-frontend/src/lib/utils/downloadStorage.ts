@@ -3,7 +3,7 @@
  * Enables resumable downloads by persisting task metadata and chunk data
  */
 
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 
 // ===== Types =====
 

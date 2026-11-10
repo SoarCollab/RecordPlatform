@@ -1,4 +1,4 @@
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 
 const PREFIX = "rp_"; // record platform prefix
 

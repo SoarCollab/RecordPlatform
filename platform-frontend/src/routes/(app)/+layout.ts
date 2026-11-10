@@ -1,5 +1,5 @@
 import { redirect } from "@sveltejs/kit";
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { getToken } from "$api/client";
 import { useAuth } from "$stores/auth.svelte";
 import type { LayoutLoad } from "./$types";

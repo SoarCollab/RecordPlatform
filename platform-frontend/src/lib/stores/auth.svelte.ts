@@ -1,4 +1,4 @@
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { goto } from "$app/navigation";
 import {
   ApiError,
@@ -34,6 +34,7 @@ let changingSession: {
   generation: number;
   snapshot: CredentialSnapshot;
 } | null = null;
+
 let pending: { snapshot: CredentialSnapshot; promise: Promise<void> } | null =
   null;
 

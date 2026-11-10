@@ -1,9 +1,9 @@
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import {
   requirePlatformCapability,
   requirePlatformSession,
 } from "$utils/platformAccess";
-import { platformCapabilityForPath } from "$lib/config/platformNavigation";
+import { platformCapabilityForPath } from "#lib/config/platformNavigation.ts";
 import type { LayoutLoad } from "./$types";
 
 /** Guard every platform navigation before the independent shell renders. */

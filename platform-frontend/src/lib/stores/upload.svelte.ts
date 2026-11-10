@@ -1,4 +1,4 @@
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { useSSE } from "$stores/sse.svelte";
 import * as uploadApi from "$api/endpoints/upload";
 import { ApiError } from "$api/client";
@@ -61,7 +61,10 @@ const CHUNK_CONFIG = {
     { maxFileSize: 10 * 1024 * 1024, chunkSize: 2 * 1024 * 1024 }, // < 10MB: 2MB
     { maxFileSize: 100 * 1024 * 1024, chunkSize: 5 * 1024 * 1024 }, // < 100MB: 5MB
     { maxFileSize: 500 * 1024 * 1024, chunkSize: 10 * 1024 * 1024 }, // < 500MB: 10MB
-    { maxFileSize: 2 * 1024 * 1024 * 1024, chunkSize: 20 * 1024 * 1024 }, // < 2GB: 20MB
+    {
+      maxFileSize: 2 * 1024 * 1024 * 1024,
+      chunkSize: 20 * 1024 * 1024,
+    }, // < 2GB: 20MB
     { maxFileSize: Infinity, chunkSize: 50 * 1024 * 1024 }, // >= 2GB: 50MB
   ],
 } as const;
@@ -250,6 +253,7 @@ function hasCompleteDirectUploadEvidence(task: UploadTask): boolean {
   }
 
   const indexes = new Set(task.directCompletedParts.map((part) => part.index));
+
   return (
     indexes.size === task.totalChunks &&
     Array.from(indexes).every(

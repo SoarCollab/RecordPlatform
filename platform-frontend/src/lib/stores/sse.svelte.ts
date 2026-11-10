@@ -1,4 +1,4 @@
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { getToken } from "$api/client";
 import {
   createSSEConnection,
@@ -110,6 +110,7 @@ function scheduleReconnect(): void {
    * - 但将基础延迟提升到 RECONNECT_MAX_DELAY，减少后台重连频率与资源占用
    */
   const baseDelay = isPageVisible ? RECONNECT_BASE_DELAY : RECONNECT_MAX_DELAY;
+
   const delay = Math.min(
     baseDelay * Math.pow(2, reconnectAttempts),
     RECONNECT_MAX_DELAY,

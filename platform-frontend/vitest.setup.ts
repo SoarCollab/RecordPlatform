@@ -10,8 +10,12 @@ declare global {
   var $derived: <T>(value: T) => T;
 }
 
+// SvelteKit's client runtime reads this global; without it any `$app/state` or
+// `$app/navigation` import throws under Vitest.
+globalThis.__SVELTEKIT_PAYLOAD__ = {} as never;
+
 // Mock SvelteKit modules
-vi.mock("$app/environment", () => ({
+vi.mock("$app/env", () => ({
   browser: true,
   dev: true,
   building: false,
@@ -29,36 +33,28 @@ vi.mock("$app/navigation", () => ({
   onNavigate: vi.fn(),
 }));
 
-vi.mock("$app/stores", () => {
-  const page = {
-    subscribe: vi.fn((fn: (value: unknown) => void) => {
-      fn({
-        url: new URL("http://localhost"),
-        params: {},
-        route: { id: null },
-        status: 200,
-        error: null,
-        data: {},
-        form: null,
-      });
-      return () => {};
-    }),
-  };
-  const navigating = {
-    subscribe: vi.fn((fn: (value: unknown) => void) => {
-      fn(null);
-      return () => {};
-    }),
-  };
-  const updated = {
-    subscribe: vi.fn((fn: (value: unknown) => void) => {
-      fn(false);
-      return () => {};
-    }),
-    check: vi.fn(),
-  };
-  return { page, navigating, updated };
-});
+vi.mock("$app/state", () => ({
+  page: {
+    url: new URL("http://localhost"),
+    params: {},
+    route: { id: null },
+    status: 200,
+    error: null,
+    data: {},
+    form: null,
+    state: {},
+    shallow: null,
+  },
+  navigating: {
+    to: null,
+    from: null,
+    type: null,
+    delta: null,
+    willUnload: false,
+    complete: null,
+  },
+  updated: { current: false, check: vi.fn(async () => false) },
+}));
 
 vi.mock("$env/static/public", () => ({
   PUBLIC_API_BASE_URL: "http://localhost:8000/record-platform",

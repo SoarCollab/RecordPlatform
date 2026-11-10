@@ -1,23 +1,23 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { useAuth } from "$stores/auth.svelte";
   import { subscribeCredentialChanges } from "$api/client";
   import {
     platformNavigation,
     platformCapabilityForPath,
-  } from "$lib/config/platformNavigation";
+  } from "#lib/config/platformNavigation.ts";
   import { requirePlatformSession } from "$utils/platformAccess";
   import { Button } from "$components/ui/button";
   import { toggleMode } from "mode-watcher";
-  import logo from "$lib/assets/logo.png";
+  import logo from "#lib/assets/logo.png";
 
   let { children }: { children: Snippet } = $props();
   const auth = useAuth();
   let validationError = $state("");
   let validationGeneration = 0;
-  const capability = $derived(platformCapabilityForPath($page.url.pathname));
+  const capability = $derived(platformCapabilityForPath(page.url.pathname));
   const allowed = $derived(
     auth.isPlatformAdmin &&
       (!capability || auth.hasPlatformCapability(capability)),
@@ -66,13 +66,11 @@
       <div
         class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4"
       >
-        <a href="/platform" class="flex items-center gap-3 font-semibold"
-          ><img
-            src={logo}
-            alt="存证平台"
-            class="h-8 w-8 rounded-lg"
-          />平台管理</a
-        >
+        <a href="/platform" class="flex items-center gap-3 font-semibold">
+          <img src={logo} alt="存证平台" class="h-8 w-8 rounded-lg" />
+          平台管理
+        </a>
+
         <div class="flex items-center gap-3 text-sm">
           <span class="text-muted-foreground">{auth.displayName}</span><Button
             variant="ghost"

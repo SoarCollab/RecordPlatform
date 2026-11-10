@@ -2,7 +2,7 @@
   import "../app.css";
   import { ModeWatcher } from "mode-watcher";
   import { onNavigate } from "$app/navigation";
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
   import { subscribeCredentialChanges } from "$api/client";
   import { getStoredScopeHint } from "$utils/authSession";
   import { useNotifications } from "$stores/notifications.svelte";
@@ -13,13 +13,13 @@
   import DownloadManager from "$components/DownloadManager.svelte";
   import type { Snippet } from "svelte";
   import { LoadingBar } from "$components/ui/loading-bar";
-  import logo from "$lib/assets/logo.png";
+  import logo from "#lib/assets/logo.png";
 
   interface Props {
     children: Snippet;
   }
-  let { children }: Props = $props();
 
+  let { children }: Props = $props();
   const notifications = useNotifications();
   const sse = useSSE();
   const download = useDownload();
@@ -28,11 +28,11 @@
   let scopeHint = $state(getStoredScopeHint());
   const showDownloads = $derived(
     scopeHint !== "platform" &&
-      (auth.scope === "tenant" || $page.url.pathname.startsWith("/share/")) &&
-      !$page.url.pathname.startsWith("/platform") &&
+      (auth.scope === "tenant" || page.url.pathname.startsWith("/share/")) &&
+      !page.url.pathname.startsWith("/platform") &&
       !(
-        $page.url.pathname === "/login" &&
-        $page.url.searchParams.get("mode") === "platform"
+        page.url.pathname === "/login" &&
+        page.url.searchParams.get("mode") === "platform"
       ),
   );
 
@@ -53,6 +53,7 @@
 
   // 页面切换动画 — 使用浏览器原生 View Transitions API
   onNavigate((navigation) => {
+    if (navigation.shallow && navigation.type === "goto") return;
     if (!document.startViewTransition) return;
 
     return new Promise((resolve) => {
@@ -110,7 +111,7 @@
               stroke-linejoin="round"
               stroke-width="2"
               d="M6 18L18 6M6 6l12 12"
-            />
+            ></path>
           </svg>
         </button>
       </div>
