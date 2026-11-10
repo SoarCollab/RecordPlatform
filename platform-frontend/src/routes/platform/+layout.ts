@@ -3,7 +3,7 @@ import {
   requirePlatformCapability,
   requirePlatformSession,
 } from "$utils/platformAccess";
-import { platformCapabilityForPath } from "#lib/config/platformNavigation.ts";
+import { platformCapabilityForPath } from "$lib/config/platformNavigation";
 import type { LayoutLoad } from "./$types";
 
 /** Guard every platform navigation before the independent shell renders. */

@@ -7,11 +7,11 @@
   import {
     platformNavigation,
     platformCapabilityForPath,
-  } from "#lib/config/platformNavigation.js";
+  } from "$lib/config/platformNavigation";
   import { requirePlatformSession } from "$utils/platformAccess";
   import { Button } from "$components/ui/button";
   import { toggleMode } from "mode-watcher";
-  import logo from "#lib/assets/logo.png";
+  import logo from "$lib/assets/logo.png";
 
   let { children }: { children: Snippet } = $props();
   const auth = useAuth();

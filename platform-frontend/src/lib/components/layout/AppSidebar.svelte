@@ -1,9 +1,9 @@
 <script lang="ts">
   import { AppIcon } from "$components/ui/app-icon";
-  import { adminItems, menuItems, type BadgeKey } from "#lib/config/navigation.js";
-  import logo from "#lib/assets/logo.png";
+  import { adminItems, menuItems, type BadgeKey } from "$lib/config/navigation";
+  import logo from "$lib/assets/logo.png";
 
-  // Svelte 5.57 起 $props 不再接受类型参数，改为对解构结果做类型标注。
+  // Svelte 5.57 起 $props 不再接受类型参数，改为标注解构结果的类型。
   let {
     collapsed,
     onToggle,

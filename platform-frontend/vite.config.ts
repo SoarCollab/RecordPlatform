@@ -34,6 +34,9 @@ export default defineConfig(({ mode }) => {
         }),
 
         alias: {
+          // kit 3 已移除内置 `$lib` 别名，这里按原语义补回，
+          // 使既有 $lib/... 引用无需全量改写。
+          $lib: "src/lib",
           $components: "src/lib/components",
           $stores: "src/lib/stores",
           $api: "src/lib/api",

@@ -13,7 +13,7 @@
   import DownloadManager from "$components/DownloadManager.svelte";
   import type { Snippet } from "svelte";
   import { LoadingBar } from "$components/ui/loading-bar";
-  import logo from "#lib/assets/logo.png";
+  import logo from "$lib/assets/logo.png";
 
   interface Props {
     children: Snippet;

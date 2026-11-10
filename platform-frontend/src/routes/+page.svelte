@@ -4,7 +4,7 @@
   import { onMount } from "svelte";
   import { getToken } from "$api/client";
   import { getStoredScopeHint, landingForScope } from "$utils/authSession";
-  import logo from "#lib/assets/logo.png";
+  import logo from "$lib/assets/logo.png";
 
   onMount(() => {
     if (getToken())

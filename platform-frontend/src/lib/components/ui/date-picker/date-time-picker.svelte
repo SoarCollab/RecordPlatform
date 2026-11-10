@@ -10,7 +10,7 @@
     type DateValue,
     today,
   } from "@internationalized/date";
-  import { cn } from "#lib/utils.js";
+  import { cn } from "$lib/utils";
   import { Button } from "$components/ui/button";
   import { Calendar } from "$components/ui/calendar";
   import * as Popover from "$components/ui/popover";
