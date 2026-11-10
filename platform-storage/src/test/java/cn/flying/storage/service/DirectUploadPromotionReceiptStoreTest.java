@@ -1,8 +1,8 @@
 package cn.flying.storage.service;
 
 import cn.flying.storage.config.StorageProperties;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -50,7 +50,7 @@ class DirectUploadPromotionReceiptStoreTest {
     @Mock
     private ValueOperations<String, String> valueOperations;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final JsonMapper objectMapper = JsonMapper.builder().build();
     private final Map<String, String> redisValues = new ConcurrentHashMap<>();
     private final List<ScriptCall> scriptCalls = new CopyOnWriteArrayList<>();
     private final AtomicBoolean expireReceiptBeforeNextCas = new AtomicBoolean(false);

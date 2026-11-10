@@ -3,11 +3,11 @@ package cn.flying.fisco_bcos.deploy;
 import cn.flying.fisco_bcos.config.LocalFiscoSigner;
 import cn.flying.fisco_bcos.registry.ContractArtifactCatalog;
 import cn.flying.fisco_bcos.registry.ContractFingerprintService;
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.StreamReadFeature;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.json.JsonFactory;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import org.fisco.bcos.sdk.v3.BcosSDK;
 import org.fisco.bcos.sdk.v3.client.Client;
 import org.fisco.bcos.sdk.v3.config.ConfigOption;
@@ -34,9 +34,11 @@ import java.util.concurrent.TimeUnit;
 /** Submits only captured catalog-bound creation bytes; never loads Console sources or wrappers. */
 public final class VerifiedContractSubmitter {
     static final int MAX_BYTES = 5 * 1024 * 1024;
-    private static final ObjectMapper JSON = new ObjectMapper(JsonFactory.builder()
-            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build())
-            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+    // Jackson 3 起 mapper 不可变：特性在 builder 上一次配置完成。
+    private static final JsonMapper JSON = JsonMapper.builder(JsonFactory.builder()
+                    .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build())
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .build();
 
     /** Runs one explicit deployment and emits only a bounded non-secret machine record. */
     public static void main(String[] args) {

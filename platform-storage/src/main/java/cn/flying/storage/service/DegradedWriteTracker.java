@@ -3,8 +3,8 @@ package cn.flying.storage.service;
 import cn.flying.storage.config.StorageProperties;
 import cn.flying.storage.core.FaultDomainManager;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 import jakarta.annotation.Resource;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -228,7 +228,7 @@ public class DegradedWriteTracker {
     }
 
     @Resource
-    private ObjectMapper objectMapper;
+    private JsonMapper objectMapper;
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
@@ -1376,7 +1376,7 @@ public class DegradedWriteTracker {
     private <T> T readRequiredJsonValue(String json, Class<T> valueType, String valueName) {
         try {
             return objectMapper.readValue(json, valueType);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new IllegalStateException("failed to deserialize " + valueName, e);
         }
     }
@@ -1390,7 +1390,7 @@ public class DegradedWriteTracker {
         }
         try {
             return objectMapper.readValue(json, valueType);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             log.warn("Failed to deserialize {}: {}", valueName, json, e);
             return null;
         }
@@ -1505,7 +1505,7 @@ public class DegradedWriteTracker {
     private String serializeJson(Object value, String valueName, String field) {
         try {
             return objectMapper.writeValueAsString(value);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             log.error("Failed to serialize {}: field={}", valueName, field, e);
             throw new IllegalStateException("failed to serialize " + valueName, e);
         }

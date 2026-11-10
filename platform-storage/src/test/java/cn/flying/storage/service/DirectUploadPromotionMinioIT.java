@@ -6,7 +6,7 @@ import cn.flying.storage.core.FaultDomainManager;
 import cn.flying.storage.core.S3ClientManager;
 import cn.flying.storage.core.S3ClientManager.TopologyLease;
 import cn.flying.storage.core.S3Monitor;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterAll;
@@ -234,12 +234,12 @@ class DirectUploadPromotionMinioIT {
         );
         realFirstReceiptStore = new DirectUploadPromotionReceiptStore(
                 firstRedisTemplate,
-                new ObjectMapper(),
+                JsonMapper.builder().build(),
                 storageProperties
         );
         realSecondReceiptStore = new DirectUploadPromotionReceiptStore(
                 secondRedisTemplate,
-                new ObjectMapper(),
+                JsonMapper.builder().build(),
                 storageProperties
         );
     }
@@ -770,7 +770,7 @@ class DirectUploadPromotionMinioIT {
             FaultDomainManager faultDomainManager
     ) {
         DegradedWriteTracker tracker = new DegradedWriteTracker();
-        ReflectionTestUtils.setField(tracker, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(tracker, "objectMapper", JsonMapper.builder().build());
         ReflectionTestUtils.setField(tracker, "stringRedisTemplate", firstRedisTemplate);
         ReflectionTestUtils.setField(tracker, "redissonClient", firstRedisson);
         ReflectionTestUtils.setField(tracker, "faultDomainManager", faultDomainManager);

@@ -2,7 +2,7 @@ package cn.flying.storage.service;
 
 import cn.flying.storage.config.StorageProperties;
 import cn.flying.storage.core.FaultDomainManager;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -81,7 +81,7 @@ class DegradedWriteTrackerTest {
     @Mock
     private RLock updateLock;
 
-    private ObjectMapper objectMapper;
+    private JsonMapper objectMapper;
     private DegradedWriteTracker tracker;
     private StorageProperties storageProperties;
     private Deque<List<Object>> claimResults;
@@ -96,7 +96,7 @@ class DegradedWriteTrackerTest {
      */
     @BeforeEach
     void setUp() throws Exception {
-        objectMapper = new ObjectMapper();
+        objectMapper = JsonMapper.builder().build();
         tracker = new DegradedWriteTracker();
         ReflectionTestUtils.setField(tracker, "objectMapper", objectMapper);
         ReflectionTestUtils.setField(tracker, "stringRedisTemplate", redisTemplate);

@@ -1,7 +1,7 @@
 package cn.flying.storage.service;
 
 import cn.flying.storage.config.StorageProperties;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -352,12 +352,12 @@ class DirectUploadRedisLifecycleIT {
     void shouldMergePromotionReceiptAcrossRealRedisClients() throws Exception {
         DirectUploadPromotionReceiptStore firstStore = new DirectUploadPromotionReceiptStore(
                 firstTemplate,
-                new ObjectMapper(),
+                JsonMapper.builder().build(),
                 storageProperties
         );
         DirectUploadPromotionReceiptStore secondStore = new DirectUploadPromotionReceiptStore(
                 secondTemplate,
-                new ObjectMapper(),
+                JsonMapper.builder().build(),
                 storageProperties
         );
         DirectUploadPartDescriptor firstTopology = receiptDescriptor(

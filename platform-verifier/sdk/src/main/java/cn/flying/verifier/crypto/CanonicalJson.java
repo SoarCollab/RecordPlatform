@@ -1,14 +1,14 @@
 package cn.flying.verifier.crypto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.StreamReadConstraints;
-import com.fasterxml.jackson.core.StreamReadFeature;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
+import tools.jackson.core.json.JsonFactory;
+import tools.jackson.core.StreamReadConstraints;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -23,7 +23,7 @@ public final class CanonicalJson {
     public static final int MAX_STRING_LENGTH = 256 * 1024;
     public static final int MAX_NUMBER_LENGTH = 128;
 
-    private final ObjectMapper mapper;
+    private final JsonMapper mapper;
 
     /**
      * Creates a canonical mapper with duplicate, depth, length, unknown-field, and trailing-token checks.
@@ -99,7 +99,7 @@ public final class CanonicalJson {
      *
      * @return independent mapper copy
      */
-    public ObjectMapper mapperCopy() {
+    public JsonMapper mapperCopy() {
         return mapper.copy();
     }
 }

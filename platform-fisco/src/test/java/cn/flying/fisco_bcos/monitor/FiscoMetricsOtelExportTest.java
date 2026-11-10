@@ -2,8 +2,8 @@ package cn.flying.fisco_bcos.monitor;
 
 import cn.flying.fisco_bcos.adapter.BlockChainAdapter;
 import cn.flying.fisco_bcos.adapter.model.ChainType;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import io.micrometer.core.instrument.Metrics;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -98,7 +98,7 @@ class FiscoMetricsOtelExportTest {
             assertThat(Files.size(output)).isLessThan(2 * 1024 * 1024);
             String text = Files.readString(output);
             assertThat(process.exitValue()).as(text).isZero();
-            ObjectMapper mapper = new ObjectMapper();
+            JsonMapper mapper = JsonMapper.builder().build();
             List<JsonNode> metrics = new ArrayList<>();
             for (String line : text.lines().toList()) {
                 int start = line.indexOf("{\"resource\"");

@@ -25,22 +25,20 @@ import static org.junit.jupiter.api.Assertions.fail;
  */
 class RuntimeDependencyOwnershipTest {
 
-    private static final String JACKSON_GROUP = "com.fasterxml.jackson.core";
-    private static final Set<String> REQUIRED_JACKSON_ARTIFACTS = Set.of(
-            "jackson-annotations",
-            "jackson-core",
-            "jackson-databind"
-    );
+    // Boot 4 起 JSON 实现统一为 Jackson 3（tools.jackson），由 spring-boot-starter-jackson 统一管理；
+    // 生产代码不再直接引入 Jackson 2 模块，因此这里改为守护 Jackson 3 的 starter 依赖。
+    private static final String JACKSON_GROUP = "org.springframework.boot";
+    private static final Set<String> REQUIRED_JACKSON_ARTIFACTS = Set.of("spring-boot-starter-jackson");
 
     /**
-     * Verifies every Jackson 2 module imported by storage production code is direct and BOM-managed.
+     * Verifies the Jackson 3 starter backing storage production JSON access is declared directly and BOM-managed.
      */
     @Test
-    void shouldDeclareJackson2ProductionDependenciesDirectly() throws Exception {
+    void shouldDeclareJacksonStarterDirectly() throws Exception {
         Map<String, DependencyDeclaration> directJacksonDependencies = readDirectJacksonDependencies(locateStoragePom());
 
         assertEquals(REQUIRED_JACKSON_ARTIFACTS, directJacksonDependencies.keySet(),
-                "Storage must own every Jackson 2 module imported by production code");
+                "Storage must declare the Jackson starter it depends on");
         directJacksonDependencies.forEach((artifactId, declaration) -> {
             assertTrue(declaration.scope().isBlank() || "compile".equals(declaration.scope()),
                     () -> artifactId + " must be a production dependency");
@@ -87,6 +85,9 @@ class RuntimeDependencyOwnershipTest {
                 continue;
             }
             String artifactId = directChildText(dependency, "artifactId");
+            if (!REQUIRED_JACKSON_ARTIFACTS.contains(artifactId)) {
+                continue;
+            }
             DependencyDeclaration previous = declarations.put(artifactId, new DependencyDeclaration(
                     directChildText(dependency, "scope"),
                     directChildText(dependency, "version")

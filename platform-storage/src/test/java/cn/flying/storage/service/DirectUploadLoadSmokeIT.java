@@ -5,7 +5,7 @@ import cn.flying.storage.config.StorageProperties;
 import cn.flying.storage.core.S3ClientManager;
 import cn.flying.storage.core.S3ClientManager.TopologyLease;
 import cn.flying.storage.core.S3Monitor;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -209,7 +209,7 @@ class DirectUploadLoadSmokeIT {
         DirectUploadStagingTracker stagingTracker = new DirectUploadStagingTracker(
                 redisTemplate, storageProperties, lockManager, operationIntentStore);
         DirectUploadPromotionReceiptStore receiptStore = new DirectUploadPromotionReceiptStore(
-                redisTemplate, new ObjectMapper(), storageProperties);
+                redisTemplate, JsonMapper.builder().build(), storageProperties);
         promotionExecutor = Executors.newFixedThreadPool(CONCURRENCY);
         meterRegistry = new SimpleMeterRegistry();
         promotionService = new DirectUploadPromotionService(
@@ -460,7 +460,7 @@ class DirectUploadLoadSmokeIT {
     private void writeReport(LoadSmokeReport report) throws Exception {
         Path reportDirectory = Path.of("target", "direct-upload-load-smoke");
         Files.createDirectories(reportDirectory);
-        ObjectMapper objectMapper = new ObjectMapper();
+        JsonMapper objectMapper = JsonMapper.builder().build();
         objectMapper.writerWithDefaultPrettyPrinter()
                 .writeValue(reportDirectory.resolve("report.json").toFile(), report);
         String markdown = """

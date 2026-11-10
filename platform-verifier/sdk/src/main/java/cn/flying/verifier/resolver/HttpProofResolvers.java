@@ -5,7 +5,7 @@ import cn.flying.verifier.model.ChainQuery;
 import cn.flying.verifier.model.ChainRootEvidence;
 import cn.flying.verifier.model.PublicProofStatus;
 import cn.flying.verifier.model.PublicSigningKey;
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;

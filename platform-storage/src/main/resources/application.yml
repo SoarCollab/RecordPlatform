@@ -1,6 +1,20 @@
 spring:
   application:
     name: platform-storage # 应用名称
+  # Nacos 配置中心（Boot 4 / SCA 2025.1 起 bootstrap.yml 不再生效，统一用 spring.config.import）
+  cloud:
+    nacos:
+      server-addr: ${NACOS_HOST:localhost}:${NACOS_PORT:8848}
+      username: ${NACOS_USERNAME}
+      password: ${NACOS_PASSWORD}
+      config:
+        group: DEFAULT_GROUP
+        file-extension: yaml
+        refresh-enabled: true # 实时刷新配置
+  config:
+    import:
+      # optional: 前缀表示 Nacos 中不存在该 Data ID 时应用仍可启动
+      - optional:nacos:platform-storage.yaml?group=DEFAULT_GROUP
   data:
     redis:
       host: ${REDIS_HOST:localhost}

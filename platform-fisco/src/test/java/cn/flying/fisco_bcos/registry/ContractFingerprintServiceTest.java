@@ -1,8 +1,8 @@
 package cn.flying.fisco_bcos.registry;
 
 import cn.flying.fisco_bcos.constants.ContractConstants;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
@@ -23,7 +23,7 @@ class ContractFingerprintServiceTest {
         JsonNode fixture;
         try (InputStream inputStream = getClass().getResourceAsStream(
                 "/contract-registry/fingerprint-vectors.json")) {
-            fixture = new ObjectMapper().readTree(inputStream);
+            fixture = JsonMapper.builder().build().readTree(inputStream);
         }
         for (JsonNode testCase : fixture.path("abiCases")) {
             for (JsonNode document : testCase.path("documents")) {
