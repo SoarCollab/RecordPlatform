@@ -9,7 +9,26 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     groups:
+      # 这些依赖在 patch 级别就可能破坏编译/运行（包移动、API 移除），必须单独评审。
+      breaking-at-patch:
+        patterns:
+          - "com.baomidou:mybatis-plus*"
+          - "org.springframework.boot:*"
+          - "org.springframework.cloud:*"
+          - "com.alibaba.cloud:*"
+          - "org.apache.dubbo:*"
+          - "org.web3j:*"
+        update-types:
+          - minor
+          - patch
       minor-and-patch:
+        exclude-patterns:
+          - "com.baomidou:mybatis-plus*"
+          - "org.springframework.boot:*"
+          - "org.springframework.cloud:*"
+          - "com.alibaba.cloud:*"
+          - "org.apache.dubbo:*"
+          - "org.web3j:*"
         update-types:
           - minor
           - patch
@@ -22,7 +41,26 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     groups:
+      # 这些依赖在 patch 级别就可能破坏编译/运行（包移动、API 移除），必须单独评审。
+      breaking-at-patch:
+        patterns:
+          - "com.baomidou:mybatis-plus*"
+          - "org.springframework.boot:*"
+          - "org.springframework.cloud:*"
+          - "com.alibaba.cloud:*"
+          - "org.apache.dubbo:*"
+          - "org.web3j:*"
+        update-types:
+          - minor
+          - patch
       minor-and-patch:
+        exclude-patterns:
+          - "com.baomidou:mybatis-plus*"
+          - "org.springframework.boot:*"
+          - "org.springframework.cloud:*"
+          - "com.alibaba.cloud:*"
+          - "org.apache.dubbo:*"
+          - "org.web3j:*"
         update-types:
           - minor
           - patch
@@ -35,7 +73,26 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     groups:
+      # 这些依赖在 patch 级别就可能破坏编译/运行（包移动、API 移除），必须单独评审。
+      breaking-at-patch:
+        patterns:
+          - "com.baomidou:mybatis-plus*"
+          - "org.springframework.boot:*"
+          - "org.springframework.cloud:*"
+          - "com.alibaba.cloud:*"
+          - "org.apache.dubbo:*"
+          - "org.web3j:*"
+        update-types:
+          - minor
+          - patch
       minor-and-patch:
+        exclude-patterns:
+          - "com.baomidou:mybatis-plus*"
+          - "org.springframework.boot:*"
+          - "org.springframework.cloud:*"
+          - "com.alibaba.cloud:*"
+          - "org.apache.dubbo:*"
+          - "org.web3j:*"
         update-types:
           - minor
           - patch
@@ -48,7 +105,26 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     groups:
+      # 这些依赖在 patch 级别就可能破坏编译/运行（包移动、API 移除），必须单独评审。
+      breaking-at-patch:
+        patterns:
+          - "com.baomidou:mybatis-plus*"
+          - "org.springframework.boot:*"
+          - "org.springframework.cloud:*"
+          - "com.alibaba.cloud:*"
+          - "org.apache.dubbo:*"
+          - "org.web3j:*"
+        update-types:
+          - minor
+          - patch
       minor-and-patch:
+        exclude-patterns:
+          - "com.baomidou:mybatis-plus*"
+          - "org.springframework.boot:*"
+          - "org.springframework.cloud:*"
+          - "com.alibaba.cloud:*"
+          - "org.apache.dubbo:*"
+          - "org.web3j:*"
         update-types:
           - minor
           - patch
@@ -61,7 +137,26 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     groups:
+      # 这些依赖在 patch 级别就可能破坏编译/运行（包移动、API 移除），必须单独评审。
+      breaking-at-patch:
+        patterns:
+          - "com.baomidou:mybatis-plus*"
+          - "org.springframework.boot:*"
+          - "org.springframework.cloud:*"
+          - "com.alibaba.cloud:*"
+          - "org.apache.dubbo:*"
+          - "org.web3j:*"
+        update-types:
+          - minor
+          - patch
       minor-and-patch:
+        exclude-patterns:
+          - "com.baomidou:mybatis-plus*"
+          - "org.springframework.boot:*"
+          - "org.springframework.cloud:*"
+          - "com.alibaba.cloud:*"
+          - "org.apache.dubbo:*"
+          - "org.web3j:*"
         update-types:
           - minor
           - patch
@@ -74,7 +169,26 @@ updates:
       day: monday
     open-pull-requests-limit: 10
     groups:
+      # SvelteKit 的 minor/patch 会带来 Node/Vite/TS 的连锁最低版本要求，单独成组评审。
+      framework:
+        patterns:
+          - "@sveltejs/*"
+          - "svelte"
+          - "vite"
+          - "vitest"
+          - "@vitest/*"
+          - "typescript"
+        update-types:
+          - minor
+          - patch
       minor-and-patch:
+        exclude-patterns:
+          - "@sveltejs/*"
+          - "svelte"
+          - "vite"
+          - "vitest"
+          - "@vitest/*"
+          - "typescript"
         update-types:
           - minor
           - patch
@@ -86,7 +200,26 @@ updates:
       interval: monthly
     open-pull-requests-limit: 5
     groups:
+      # 这些依赖在 patch 级别就可能破坏编译/运行（包移动、API 移除），必须单独评审。
+      breaking-at-patch:
+        patterns:
+          - "com.baomidou:mybatis-plus*"
+          - "org.springframework.boot:*"
+          - "org.springframework.cloud:*"
+          - "com.alibaba.cloud:*"
+          - "org.apache.dubbo:*"
+          - "org.web3j:*"
+        update-types:
+          - minor
+          - patch
       minor-and-patch:
+        exclude-patterns:
+          - "com.baomidou:mybatis-plus*"
+          - "org.springframework.boot:*"
+          - "org.springframework.cloud:*"
+          - "com.alibaba.cloud:*"
+          - "org.apache.dubbo:*"
+          - "org.web3j:*"
         update-types:
           - minor
           - patch
