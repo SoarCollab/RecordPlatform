@@ -123,7 +123,6 @@ class DirectUploadFaultMatrixMinioIT {
             .withExposedPorts(MINIO_PORT)
             .withEnv("MINIO_ROOT_USER", ACCESS_KEY)
             .withEnv("MINIO_ROOT_PASSWORD", SECRET_KEY)
-            .withCommand("server", "/data")
             .waitingFor(Wait.forHttp("/minio/health/ready")
                     .forPort(MINIO_PORT)
                     .forStatusCode(200)
