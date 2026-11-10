@@ -5,7 +5,7 @@ import cn.flying.dao.vo.announcement.AnnouncementCreateVO;
 import cn.flying.dao.vo.announcement.AnnouncementVO;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.baomidou.mybatisplus.extension.service.IService;
+import com.baomidou.mybatisplus.spring.service.IService;
 
 import java.util.List;
 

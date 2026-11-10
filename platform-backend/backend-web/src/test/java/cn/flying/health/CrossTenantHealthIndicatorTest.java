@@ -9,9 +9,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.aop.aspectj.annotation.AspectJProxyFactory;
-import org.springframework.boot.actuate.health.Health;
-import org.springframework.boot.actuate.health.HealthIndicator;
-import org.springframework.boot.actuate.health.Status;
+import org.springframework.boot.health.contributor.Health;
+import org.springframework.boot.health.contributor.HealthIndicator;
+import org.springframework.boot.health.contributor.Status;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -56,7 +56,7 @@ class CrossTenantHealthIndicatorTest {
         List<Boolean> observedIsolation = new ArrayList<>();
         HealthIndicator indicator = proxy(outbox, classProxy, observedIsolation, false);
 
-        Health health = indicator.getHealth(details);
+        Health health = indicator.health(details);
 
         assertThat(observedIsolation).hasSize(outbox ? 3 : 4).containsOnly(true);
         assertThat(health.getStatus()).isEqualTo(Status.UP);
@@ -75,7 +75,7 @@ class CrossTenantHealthIndicatorTest {
         List<Boolean> observedIsolation = new ArrayList<>();
         HealthIndicator indicator = proxy(outbox, classProxy, observedIsolation, true);
 
-        Health health = indicator.getHealth(details);
+        Health health = indicator.health(details);
 
         assertThat(observedIsolation).containsExactly(true);
         assertThat(health.getStatus()).isEqualTo(Status.DOWN);

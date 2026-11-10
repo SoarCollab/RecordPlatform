@@ -6,7 +6,7 @@ import cn.flying.dao.entity.TicketReply;
 import cn.flying.dao.vo.ticket.*;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.baomidou.mybatisplus.extension.service.IService;
+import com.baomidou.mybatisplus.spring.service.IService;
 
 /**
  * 工单服务接口

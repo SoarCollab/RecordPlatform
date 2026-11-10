@@ -13,10 +13,10 @@
 
     <properties>
         <java.version>21</java.version>
-        <knife4j.version>4.5.0</knife4j.version>
-        <springdoc.version>2.8.16</springdoc.version>
-        <java-jwt.version>4.5.2</java-jwt.version>
-        <redisson.version>4.3.1</redisson.version>
+        <springdoc-ui.version>3.2.0</springdoc-ui.version>
+        
+        <java-jwt.version>4.6.2</java-jwt.version>
+        <redisson.version>4.8.0</redisson.version>
     </properties>
 
     <dependencies>
@@ -41,11 +41,11 @@
             <groupId>cn.hutool</groupId>
             <artifactId>hutool-all</artifactId>
         </dependency>
-        <!--    knife4j依赖   -->
+        <!-- OpenAPI / Swagger UI (knife4j has no Spring Boot 4 release; springdoc 3.x is the Boot 4 line) -->
         <dependency>
-            <groupId>com.github.xiaoymin</groupId>
-            <artifactId>knife4j-openapi3-jakarta-spring-boot-starter</artifactId>
-            <version>${knife4j.version}</version>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>${springdoc-ui.version}</version>
         </dependency>
         <!--    Jwt令牌生成校验框架    -->
         <dependency>
@@ -83,10 +83,10 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
-        <!-- 添加Spring AOP依赖 -->
+        <!-- Spring AOP（Boot 4 将 starter-aop 更名为 starter-aspectj） -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-aop</artifactId>
+            <artifactId>spring-boot-starter-aspectj</artifactId>
         </dependency>
         <!-- Jackson JSON处理 -->
         <dependency>
@@ -102,27 +102,6 @@
         </dependency>
 
     </dependencies>
-
-    <!-- Override springdoc versions to fix Knife4j 4.5.0 + Spring Boot 3.5 compatibility -->
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>org.springdoc</groupId>
-                <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-                <version>${springdoc.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.springdoc</groupId>
-                <artifactId>springdoc-openapi-starter-webmvc-api</artifactId>
-                <version>${springdoc.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.springdoc</groupId>
-                <artifactId>springdoc-openapi-starter-common</artifactId>
-                <version>${springdoc.version}</version>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
 
     <build>
         <plugins>

@@ -10,7 +10,7 @@ import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.DirectMultipartCompletedPartVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.baomidou.mybatisplus.extension.service.IService;
+import com.baomidou.mybatisplus.spring.service.IService;
 
 import java.util.List;
 

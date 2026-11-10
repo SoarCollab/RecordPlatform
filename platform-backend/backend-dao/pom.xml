@@ -25,7 +25,7 @@
         <!--    mybatisPlus    -->
         <dependency>
             <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <artifactId>mybatis-plus-spring-boot4-starter</artifactId>
         </dependency>
         <!--    mybatisPlus-jsqlparser    -->
         <dependency>
@@ -46,7 +46,7 @@
         <!-- 数据库连接池 -->
         <dependency>
             <groupId>com.alibaba</groupId>
-            <artifactId>druid-spring-boot-3-starter</artifactId>
+            <artifactId>druid-spring-boot-4-starter</artifactId>
             <version>${druid.version}</version>
         </dependency>
     </dependencies>

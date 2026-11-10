@@ -102,7 +102,7 @@ import org.junit.jupiter.api.Test;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
@@ -139,15 +139,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
                 "spring.cloud.nacos.discovery.enabled=false",
                 "spring.task.scheduling.enabled=false",
                 "spring.autoconfigure.exclude="
-                        + "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,"
-                        + "org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration,"
-                        + "com.alibaba.druid.spring.boot3.autoconfigure.DruidDataSourceAutoConfigure,"
-                        + "org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration,"
-                        + "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,"
-                        + "org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration,"
-                        + "org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration,"
-                        + "org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration,"
-                        + "org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration"
+                        + "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
+                        + "org.springframework.boot.jdbc.autoconfigure.DataSourceTransactionManagerAutoConfiguration,"
+                        + "com.alibaba.druid.spring.boot4.autoconfigure.DruidDataSourceAutoConfigure,"
+                        + "org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration,"
+                        + "org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration,"
+                        + "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration,"
+                        + "org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration,"
+                        + "org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration,"
+                        + "org.springframework.boot.security.autoconfigure.actuate.web.servlet.ManagementWebSecurityAutoConfiguration"
         }
 )
 @AutoConfigureMockMvc(addFilters = false)

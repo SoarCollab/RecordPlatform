@@ -2,7 +2,7 @@ package cn.flying.service;
 
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.vo.auth.*;
-import com.baomidou.mybatisplus.extension.service.IService;
+import com.baomidou.mybatisplus.spring.service.IService;
 import org.springframework.security.core.userdetails.UserDetailsService;
 
 import java.util.Collection;

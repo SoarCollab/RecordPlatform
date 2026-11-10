@@ -1,7 +1,7 @@
 package cn.flying.service;
 
 import cn.flying.dao.dto.ImageStore;
-import com.baomidou.mybatisplus.extension.service.IService;
+import com.baomidou.mybatisplus.spring.service.IService;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;

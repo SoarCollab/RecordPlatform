@@ -32,7 +32,7 @@ public class CustomMethodSecurityExpressionRoot extends SecurityExpressionRoot
      * @param authenticationSupplier 认证信息提供者
      * @param permissionService 权限服务
      */
-    public CustomMethodSecurityExpressionRoot(Supplier<Authentication> authenticationSupplier,
+    public CustomMethodSecurityExpressionRoot(Supplier<? extends Authentication> authenticationSupplier,
                                                PermissionService permissionService) {
         super(authenticationSupplier);
         this.permissionService = permissionService;

@@ -5,7 +5,7 @@ import cn.flying.dao.vo.friend.FriendFileShareDetailVO;
 import cn.flying.dao.vo.friend.FriendShareVO;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.baomidou.mybatisplus.extension.service.IService;
+import com.baomidou.mybatisplus.spring.service.IService;
 
 /**
  * 好友文件分享服务接口
