@@ -2,22 +2,26 @@ package cn.flying.dao.config;
 
 import com.baomidou.mybatisplus.core.plugins.IgnoreStrategy;
 import com.baomidou.mybatisplus.core.plugins.InterceptorIgnoreHelper;
+import com.baomidou.mybatisplus.core.toolkit.PluginUtils;
 import com.baomidou.mybatisplus.extension.plugins.handler.TenantLineHandler;
 import com.baomidou.mybatisplus.extension.plugins.inner.TenantLineInnerInterceptor;
 import org.apache.ibatis.executor.Executor;
+import org.apache.ibatis.executor.statement.StatementHandler;
 import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.session.ResultHandler;
 import org.apache.ibatis.session.RowBounds;
 
+import java.sql.Connection;
+
 /**
  * Tenant interceptor that honours {@code @InterceptorIgnore(tenantLine)} on auto-count statements.
  * <p>
- * MyBatis-Plus rewrites a paged query into {@code <id>_mpCount} before executing the count SQL and
- * looks the ignore strategy up by that rewritten id, which never matches the mapper method. Paged
- * statements that deliberately read global rows (for example {@code tenant_id = 0} permission
- * definitions) therefore lost those rows in {@code page.getTotal()}. This subclass resolves the
- * strategy from the originating statement id instead.
+ * MyBatis-Plus rewrites a paged query into {@code <id>_mpCount} before running the count SQL and
+ * resolves the ignore strategy by that rewritten id, which never matches the mapper method. Paged
+ * statements that read global rows on purpose (for example {@code tenant_id = 0} permission
+ * definitions) therefore lost those rows in {@code page.getTotal()}. This subclass falls back to the
+ * originating statement id, so both the page query and its count stay unfiltered.
  */
 public class CountAwareTenantLineInnerInterceptor extends TenantLineInnerInterceptor {
 
@@ -42,10 +46,20 @@ public class CountAwareTenantLineInnerInterceptor extends TenantLineInnerInterce
         super.beforeQuery(executor, ms, parameter, rowBounds, resultHandler, boundSql);
     }
 
+    @Override
+    public void beforePrepare(StatementHandler sh, Connection connection, Integer transactionTimeout) {
+        PluginUtils.MPStatementHandler mpSh = PluginUtils.mpStatementHandler(sh);
+        MappedStatement ms = mpSh.mappedStatement();
+        if (ms != null && inheritsTenantLineIgnore(ms.getId())) {
+            return;
+        }
+        super.beforePrepare(sh, connection, transactionTimeout);
+    }
+
     /**
-     * Reports whether the statement (or the paged statement it was derived from) opts out of tenant filtering.
+     * Reports whether the statement, or the paged statement it was derived from, opts out of tenant filtering.
      *
-     * @param statementId MyBatis statement id, possibly with the auto-count suffix
+     * @param statementId MyBatis statement id, possibly carrying the auto-count suffix
      * @return true when the tenant condition must not be appended
      */
     private boolean inheritsTenantLineIgnore(String statementId) {
