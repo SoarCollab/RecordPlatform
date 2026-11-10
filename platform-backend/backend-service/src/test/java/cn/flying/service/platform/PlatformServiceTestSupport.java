@@ -10,7 +10,7 @@ import cn.flying.dao.entity.platform.PlatformOperationLog;
 import cn.flying.dao.mapper.AccountMemberAuditMapper;
 import cn.flying.dao.mapper.platform.PlatformOperationMapper;
 import cn.flying.service.admin.TenantMemberAuditService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
 import org.mockito.MockedStatic;
@@ -48,7 +48,7 @@ import static org.mockito.Mockito.when;
 /** Observable service-boundary fixture; SQL, isolation and rollback correctness require the separate MySQL IT. */
 final class PlatformServiceTestSupport implements AutoCloseable {
 
-    final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
+    final JsonMapper json = JsonMapper.builder().build();
     final PlatformOperationMapper operations = mock(PlatformOperationMapper.class);
     final TenantMemberAuditService sanitizer = new TenantMemberAuditService(mock(AccountMemberAuditMapper.class));
     final Map<Long, PlatformOperationLog> rows = new LinkedHashMap<>();

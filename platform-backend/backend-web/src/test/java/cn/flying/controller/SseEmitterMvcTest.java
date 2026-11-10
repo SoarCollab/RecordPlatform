@@ -20,7 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.MDC;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.StringHttpMessageConverter;
-import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -69,7 +69,7 @@ class SseEmitterMvcTest {
         manager = new SseEmitterManager();
         mvc = MockMvcBuilders.standaloneSetup(new SseController(manager, jwtUtils, authorizationStateService))
                 .setMessageConverters(new StringHttpMessageConverter(StandardCharsets.UTF_8),
-                        new MappingJackson2HttpMessageConverter())
+                        new JacksonJsonHttpMessageConverter())
                 .build();
     }
 

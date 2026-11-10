@@ -1,7 +1,7 @@
 package cn.flying.filter;
 
 import cn.flying.common.util.Const;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -22,7 +22,7 @@ import static org.mockito.Mockito.when;
  */
 class JsonUsernamePasswordAuthenticationFilterTest {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final JsonMapper objectMapper = JsonMapper.builder().build();
 
     /**
      * JSON literal null must be treated as an authentication failure instead of causing NPE.

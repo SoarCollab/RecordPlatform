@@ -11,7 +11,7 @@ import cn.flying.dao.mapper.SysPermissionMapper;
 import cn.flying.dao.mapper.SysRolePermissionMapper;
 import cn.flying.test.support.BaseControllerIntegrationTest;
 import cn.flying.test.support.JwtTestSupport;
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;

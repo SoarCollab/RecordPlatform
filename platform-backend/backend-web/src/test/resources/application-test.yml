@@ -60,11 +60,6 @@ spring:
     registration:
       tenant-id: 1
 
-knife4j:
-  basic:
-    username: test
-    password: test
-
 record-platform:
   rpc:
     blockchain-token: test-blockchain-rpc-token

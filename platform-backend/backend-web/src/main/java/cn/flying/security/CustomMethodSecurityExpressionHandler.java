@@ -36,7 +36,7 @@ public class CustomMethodSecurityExpressionHandler extends DefaultMethodSecurity
      * @return 评估上下文
      */
     @Override
-    public EvaluationContext createEvaluationContext(Supplier<Authentication> authentication,
+    public EvaluationContext createEvaluationContext(Supplier<? extends Authentication> authentication,
                                                       MethodInvocation invocation) {
         CustomMethodSecurityExpressionRoot root = buildExpressionRoot(authentication, invocation);
         MethodBasedEvaluationContext context = new MethodBasedEvaluationContext(
@@ -55,7 +55,7 @@ public class CustomMethodSecurityExpressionHandler extends DefaultMethodSecurity
      * @param invocation 方法调用
      * @return 自定义表达式根
      */
-    private CustomMethodSecurityExpressionRoot buildExpressionRoot(Supplier<Authentication> authentication,
+    private CustomMethodSecurityExpressionRoot buildExpressionRoot(Supplier<? extends Authentication> authentication,
                                                                    MethodInvocation invocation) {
         CustomMethodSecurityExpressionRoot root =
                 new CustomMethodSecurityExpressionRoot(authentication, permissionService);

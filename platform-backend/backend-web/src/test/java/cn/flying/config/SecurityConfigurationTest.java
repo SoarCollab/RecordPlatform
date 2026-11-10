@@ -166,15 +166,19 @@ class SecurityConfigurationTest {
     }
 
     /**
-     * 验证 Knife4j 默认使用生产模式，避免默认暴露接口文档。
+     * 验证接口文档端点只对管理员与监控角色开放（knife4j 已随 Boot 4 移除，改由 springdoc + 安全规则守护）。
      */
     @Test
-    void shouldDefaultKnife4jToProductionMode() throws Exception {
-        String applicationYaml = Files.readString(Path.of("src/main/resources/application.yml"));
+    void shouldRestrictApiDocumentationToPrivilegedRoles() throws Exception {
+        String securityConfiguration = Files.readString(
+                Path.of("src/main/java/cn/flying/config/SecurityConfiguration.java"));
+        int docMatcherIndex = securityConfiguration.indexOf("/swagger-ui.html");
+        assertTrue(docMatcherIndex > 0, "文档端点必须显式声明授权规则");
 
-        assertTrue(applicationYaml.contains("production: ${KNIFE4J_PRODUCTION:true}"));
-        assertTrue(applicationYaml.contains("enable: ${KNIFE4J_BASIC_ENABLE:true}"));
-        assertFalse(applicationYaml.contains("production: false"));
+        String docMatcherTail = securityConfiguration.substring(
+                docMatcherIndex, Math.min(securityConfiguration.length(), docMatcherIndex + 400));
+        assertTrue(docMatcherTail.contains("hasAnyRole("), "文档端点必须绑定角色限制");
+        assertFalse(docMatcherTail.contains("permitAll()"), "文档端点不得匿名放行");
     }
 
     /**

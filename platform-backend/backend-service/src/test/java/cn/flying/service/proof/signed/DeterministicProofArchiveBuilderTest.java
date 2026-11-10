@@ -3,8 +3,8 @@ package cn.flying.service.proof.signed;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.verifier.contract.SignedProofBundleModel;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -137,11 +137,11 @@ class DeterministicProofArchiveBuilderTest {
     @Test
     void shouldBindSeparatedHashSemanticsAndEveryEvidenceEntry() throws Exception {
         ProofArchive archive = builder.buildNew("record-proof-fileA-1.zip", seed(), payloads(CONTENT_HASH));
-        JsonNode manifest = new ObjectMapper().readTree(archive.entries().getFirst().bytes());
-        JsonNode chunkManifest = new ObjectMapper().readTree(archive.entries().get(2).bytes());
-        JsonNode policy = new ObjectMapper().readTree(archive.entries().get(6).bytes());
+        JsonNode manifest = JsonMapper.builder().build().readTree(archive.entries().getFirst().bytes());
+        JsonNode chunkManifest = JsonMapper.builder().build().readTree(archive.entries().get(2).bytes());
+        JsonNode policy = JsonMapper.builder().build().readTree(archive.entries().get(6).bytes());
         List<String> manifestFields = new ArrayList<>();
-        manifest.fieldNames().forEachRemaining(manifestFields::add);
+        manifest.propertyNames().forEach(manifestFields::add);
 
         assertThat(manifestFields).containsExactly(
                 "batchNo",
@@ -156,7 +156,7 @@ class DeterministicProofArchiveBuilderTest {
                 "signature",
                 "statusLocation");
         assertThat(manifest.path("entries")).hasSize(6);
-        assertThat(manifest.path("entries").findValuesAsText("name"))
+        assertThat(manifest.path("entries").findValuesAsString("name"))
                 .containsExactly(
                         ProofArchive.FILE_HASH_ENTRY,
                         ProofArchive.CHUNK_MANIFEST_ENTRY,

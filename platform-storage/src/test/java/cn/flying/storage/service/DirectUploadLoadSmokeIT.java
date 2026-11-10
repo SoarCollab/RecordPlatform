@@ -5,7 +5,7 @@ import cn.flying.storage.config.StorageProperties;
 import cn.flying.storage.core.S3ClientManager;
 import cn.flying.storage.core.S3ClientManager.TopologyLease;
 import cn.flying.storage.core.S3Monitor;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -41,6 +41,7 @@ import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 
 import java.lang.management.BufferPoolMXBean;
 import java.lang.management.GarbageCollectorMXBean;
@@ -208,7 +209,7 @@ class DirectUploadLoadSmokeIT {
         DirectUploadStagingTracker stagingTracker = new DirectUploadStagingTracker(
                 redisTemplate, storageProperties, lockManager, operationIntentStore);
         DirectUploadPromotionReceiptStore receiptStore = new DirectUploadPromotionReceiptStore(
-                redisTemplate, new ObjectMapper(), storageProperties);
+                redisTemplate, JsonMapper.builder().build(), storageProperties);
         promotionExecutor = Executors.newFixedThreadPool(CONCURRENCY);
         meterRegistry = new SimpleMeterRegistry();
         promotionService = new DirectUploadPromotionService(
@@ -459,7 +460,7 @@ class DirectUploadLoadSmokeIT {
     private void writeReport(LoadSmokeReport report) throws Exception {
         Path reportDirectory = Path.of("target", "direct-upload-load-smoke");
         Files.createDirectories(reportDirectory);
-        ObjectMapper objectMapper = new ObjectMapper();
+        JsonMapper objectMapper = JsonMapper.builder().build();
         objectMapper.writerWithDefaultPrettyPrinter()
                 .writeValue(reportDirectory.resolve("report.json").toFile(), report);
         String markdown = """
@@ -688,6 +689,12 @@ class DirectUploadLoadSmokeIT {
         return S3Client.builder()
                 .endpointOverride(URI.create(endpoint))
                 .region(Region.US_EAST_1)
+                // 给 S3 SDK 调用加上总时限：任何卡住的请求在 20s 内失败并留下明确异常，
+                // 而不是耗尽 JUnit 的单测时限（曾导致 shouldRejectExpiredPresignedPut 60s 超时）。
+                .overrideConfiguration(ClientOverrideConfiguration.builder()
+                        .apiCallTimeout(Duration.ofSeconds(20))
+                        .apiCallAttemptTimeout(Duration.ofSeconds(10))
+                        .build())
                 .credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)))
                 .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())

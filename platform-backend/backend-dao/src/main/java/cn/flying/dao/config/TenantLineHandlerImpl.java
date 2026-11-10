@@ -41,7 +41,34 @@ public class TenantLineHandlerImpl implements TenantLineHandler {
         if (TenantContext.isIgnoreIsolation()) {
             return true;
         }
-        // 静态忽略：某些系统表始终不做租户过滤
-        return IGNORE_TABLES.contains(tableName);
+        // 静态忽略：某些系统表始终不做租户过滤。
+        // 生成 SQL 的表名已统一加反引号（db-config.table-format），比较前需先归一化，
+        // 否则 `tenant` 与 tenant 不相等，系统表会被错误地追加 tenant_id 条件。
+        return IGNORE_TABLES.contains(normalizeTableName(tableName));
+    }
+
+    /**
+     * 去掉表名两侧的引号（反引号、双引号、方括号），便于与忽略清单比较。
+     *
+     * @param tableName jsqlparser 解析出的表名
+     * @return 归一化后的表名
+     */
+    private static String normalizeTableName(String tableName) {
+        if (tableName == null) {
+            return "";
+        }
+        String normalized = tableName.trim();
+        while (!normalized.isEmpty()) {
+            char first = normalized.charAt(0);
+            char last = normalized.charAt(normalized.length() - 1);
+            boolean quoted = (first == '`' && last == '`')
+                    || (first == '"' && last == '"')
+                    || (first == '[' && last == ']');
+            if (!quoted || normalized.length() < 2) {
+                break;
+            }
+            normalized = normalized.substring(1, normalized.length() - 1);
+        }
+        return normalized;
     }
 }

@@ -15,9 +15,14 @@
     <description>Spring-free signed proof verification core</description>
 
     <dependencies>
+        <!-- Boot 4 的 JSON 实现是 Jackson 3（tools.jackson）；注解仍在 com.fasterxml.jackson.annotation。 -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
+            <artifactId>jackson-annotations</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>

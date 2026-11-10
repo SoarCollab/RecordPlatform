@@ -329,10 +329,34 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public Result<?> handleSystemException(Exception ex) {
         String traceId = currentTraceId();
-        log.error("系统异常: traceId={}", traceId, SensitiveDataMasker.maskThrowable(ex));
+        // 同时输出根因类型与掩码消息：MyBatis/JDBC 等包装异常的 message 常为空，
+        // 只有根因能定位问题，且这两项不含业务数据。
+        Throwable root = rootCauseOf(ex);
+        log.error("系统异常: traceId={}, rootCause={}, rootMessage={}",
+                traceId, root.getClass().getName(), SensitiveDataMasker.maskSensitiveFields(root.getMessage()),
+                SensitiveDataMasker.maskThrowable(ex));
 
         ErrorPayload payload = withTrace("服务器内部错误，请联系管理员");
         return Result.error(ResultEnum.FAIL, payload);
+    }
+
+    /**
+     * 返回异常链最内层的根因。
+     *
+     * @param throwable 原始异常
+     * @return 根因异常（无 cause 时返回自身）
+     */
+    private static Throwable rootCauseOf(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null && current.getCause() != current) {
+            Throwable cause = current.getCause();
+            // 防御环状 cause 链
+            if (cause == throwable) {
+                break;
+            }
+            current = cause;
+        }
+        return current;
     }
 
     /**

@@ -3,8 +3,8 @@ package cn.flying.service.impl;
 import cn.flying.dao.vo.file.DirectUploadCompletePartRequest;
 import cn.flying.dao.vo.file.DirectUploadPartRequest;
 import cn.flying.dao.vo.file.DirectUploadSessionRequest;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import org.junit.jupiter.api.DisplayName;
@@ -21,7 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("DirectUploadCompletePartRequest JSON Contract Tests")
 class DirectUploadCompletePartRequestJsonTest {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final JsonMapper objectMapper = JsonMapper.builder().build();
     private final Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
 
     @Test

@@ -29,7 +29,7 @@ import cn.flying.service.auth.AuthorizationStateService;
 import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.test.BaseIntegrationTest;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -114,7 +114,7 @@ class PlatformControlPlaneMySqlIT extends BaseIntegrationTest {
     @Autowired private SseEmitterManager emitters;
     @Autowired private SseController sse;
     @Autowired private PlatformTransactionManager transactionManager;
-    @Autowired private ObjectMapper json;
+    @Autowired private JsonMapper json;
     @MockitoBean private TenantInvitationMailSender invitationMail;
 
     private List<Map<String, Object>> originalConfigurations;

@@ -19,7 +19,7 @@ import cn.flying.service.admin.TenantInvitationService;
 import cn.flying.service.admin.TenantMemberCommandService;
 import cn.flying.service.admin.TenantMemberQueryService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -88,7 +88,7 @@ class TenantUserAdminControllerMvcTest {
     @Autowired private PermissionService permissionService;
     @Autowired private LocalValidatorFactoryBean validator;
 
-    private final ObjectMapper json = new ObjectMapper();
+    private final JsonMapper json = JsonMapper.builder().build();
     private MockMvc mvc;
     private Object previousCodec;
 

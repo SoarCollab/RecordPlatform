@@ -7,7 +7,7 @@ import cn.flying.dao.vo.auth.ModifyEmailVO;
 import cn.flying.dao.vo.auth.UpdateUserVO;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.test.support.BaseControllerIntegrationTest;
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;

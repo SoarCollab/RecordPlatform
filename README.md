@@ -7,7 +7,7 @@
 [![Build](https://github.com/SoarCollab/RecordPlatform/actions/workflows/test.yml/badge.svg)](https://github.com/SoarCollab/RecordPlatform/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev)
 
 [中文文档](README_CN.md) · [Documentation](https://soarcollab.github.io/RecordPlatform/) · [API Reference](docs/en/api/index.md)
@@ -198,7 +198,7 @@ Verify the installation at:
 
 | Category      | Technology                                              | Version               |
 | ------------- | ------------------------------------------------------- | --------------------- |
-| Backend       | Java + Spring Boot + Virtual Threads                    | 21, 3.5.16            |
+| Backend       | Java + Spring Boot + Virtual Threads                    | 21, 4.1.2             |
 | Microservices | Apache Dubbo (Triple protocol), Nacos                   | 3.3.6                 |
 | Blockchain    | FISCO BCOS, Solidity                                    | 3.8.0, ^0.8.11        |
 | Storage       | S3-compatible (AWS SDK v2), MySQL, Redis (Redisson)     | 2.x, 8.0+, 7.0+       |

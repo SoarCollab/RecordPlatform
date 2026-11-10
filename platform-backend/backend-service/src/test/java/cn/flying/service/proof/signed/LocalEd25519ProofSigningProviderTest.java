@@ -2,8 +2,8 @@ package cn.flying.service.proof.signed;
 
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -52,7 +52,7 @@ class LocalEd25519ProofSigningProviderTest {
                 first.compactJws(), key)).isFalse();
 
         String[] parts = first.compactJws().split("\\.");
-        JsonNode header = new ObjectMapper().readTree(Base64.getUrlDecoder().decode(parts[0]));
+        JsonNode header = JsonMapper.builder().build().readTree(Base64.getUrlDecoder().decode(parts[0]));
         assertThat(header.path("alg").asText()).isEqualTo("EdDSA");
         assertThat(header.path("kid").asText()).isEqualTo("proof-key-main");
         assertThat(header.path("keyVersion").asInt()).isEqualTo(1);

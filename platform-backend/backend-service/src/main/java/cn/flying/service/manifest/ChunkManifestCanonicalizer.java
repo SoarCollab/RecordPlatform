@@ -4,10 +4,10 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.verifier.contract.SignedProofBundleContract;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.SerializationFeature;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -35,10 +35,11 @@ public class ChunkManifestCanonicalizer {
     public static final String MANIFEST_HASH_PREFIX = "sha256:";
     private static final String DEFAULT_STORAGE_BACKEND = "S3";
 
-    private static final ObjectMapper CANONICAL_OBJECT_MAPPER = new ObjectMapper()
-            .setSerializationInclusion(JsonInclude.Include.NON_NULL)
-            .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
-            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
+    private static final JsonMapper CANONICAL_OBJECT_MAPPER = JsonMapper.builder()
+            .changeDefaultPropertyInclusion(incl -> JsonInclude.Value.construct(JsonInclude.Include.NON_NULL, JsonInclude.Include.NON_NULL))
+            .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
+            .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
+            .build();
 
     /**
      * Returns a validated manifest draft with defaults applied and chunks sorted by index.
@@ -101,7 +102,7 @@ public class ChunkManifestCanonicalizer {
         ChunkManifestDraft normalized = normalize(draft);
         try {
             return CANONICAL_OBJECT_MAPPER.writeValueAsString(toCanonicalPayload(normalized));
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new GeneralException(ResultEnum.JSON_PARSE_ERROR, "chunk manifest canonical JSON serialization failed");
         }
     }
@@ -126,7 +127,7 @@ public class ChunkManifestCanonicalizer {
         }
         try {
             return CANONICAL_OBJECT_MAPPER.writeValueAsString(toCanonicalEncryptionPayload(normalized));
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new GeneralException(ResultEnum.JSON_PARSE_ERROR, "加密描述 JSON 序列化失败");
         }
     }
@@ -142,7 +143,7 @@ public class ChunkManifestCanonicalizer {
             ChunkManifestEncryption parsed = CANONICAL_OBJECT_MAPPER.readValue(
                     encryptionJson, ChunkManifestEncryption.class);
             return normalizeEncryption(parsed);
-        } catch (JsonProcessingException | IllegalArgumentException e) {
+        } catch (JacksonException | IllegalArgumentException e) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "manifest 加密描述格式无效");
         }
     }

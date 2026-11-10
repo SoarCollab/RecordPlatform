@@ -2,7 +2,7 @@ package cn.flying.fisco_bcos.deploy;
 
 import org.fisco.bcos.sdk.jni.utilities.tx.TransactionBuilderJniObj;
 import cn.flying.fisco_bcos.config.LocalFiscoSigner;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.fisco.bcos.sdk.v3.client.Client;
 import org.fisco.bcos.sdk.v3.client.protocol.response.BcosTransactionReceipt;
 import org.fisco.bcos.sdk.v3.crypto.CryptoSuite;
@@ -57,7 +57,7 @@ class VerifiedContractSubmitterTest {
             response.setResult(receipt);
             when(client.sendTransaction(anyString(), eq(false))).thenAnswer(invocation -> {
                 String signed = invocation.getArgument(0);
-                var transaction = new ObjectMapper().readTree(
+                var transaction = JsonMapper.builder().build().readTree(
                         TransactionBuilderJniObj.decodeTransactionToJsonObj(signed));
                 var data = transaction.path("data");
                 assertThat(data.path("input").asText().replaceFirst("^0x", "")).isEqualTo(expectedHex);

@@ -15,7 +15,7 @@ import cn.flying.service.FriendService;
 import cn.flying.service.key.FileKeyEnvelopeService;
 import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.service.sse.SseEvent;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.*;
@@ -52,7 +52,7 @@ class FriendFileShareServiceImplTest {
     private FileKeyEnvelopeService fileKeyEnvelopeService;
 
     @Spy
-    private ObjectMapper objectMapper = new ObjectMapper();
+    private JsonMapper objectMapper = JsonMapper.builder().build();
 
     @Spy
     @InjectMocks

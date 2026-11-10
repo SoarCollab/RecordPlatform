@@ -7,7 +7,7 @@
 [![Build](https://github.com/SoarCollab/RecordPlatform/actions/workflows/test.yml/badge.svg)](https://github.com/SoarCollab/RecordPlatform/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev)
 
 [English](README.md) · [在线文档](https://soarcollab.github.io/RecordPlatform/) · [API 参考](docs/zh/api/index.md)
@@ -198,7 +198,7 @@ cd platform-frontend && pnpm install && pnpm dev
 
 | 分类     | 技术                                                    | 版本               |
 | -------- | ------------------------------------------------------- | ------------------ |
-| 后端     | Java + Spring Boot + Virtual Threads                    | 21, 3.5.16         |
+| 后端     | Java + Spring Boot + Virtual Threads                    | 21, 4.1.2          |
 | 微服务   | Apache Dubbo (Triple 协议), Nacos                       | 3.3.6              |
 | 区块链   | FISCO BCOS, Solidity                                    | 3.8.0, ^0.8.11     |
 | 存储     | S3 兼容存储 (AWS SDK v2), MySQL, Redis (Redisson)        | 2.x, 8.0+, 7.0+    |

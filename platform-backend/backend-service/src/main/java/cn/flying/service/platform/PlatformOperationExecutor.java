@@ -10,10 +10,10 @@ import cn.flying.dao.mapper.platform.PlatformOperationMapper;
 import cn.flying.dao.vo.platform.PlatformMutationVO;
 import cn.flying.dao.vo.platform.PlatformSafeLongSerializer;
 import cn.flying.service.admin.TenantMemberAuditService;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.SerializationFeature;
 import jakarta.validation.Validator;
 import org.slf4j.MDC;
 import org.springframework.dao.DuplicateKeyException;
@@ -43,17 +43,17 @@ public class PlatformOperationExecutor {
     private static final Pattern TRACE_PATTERN = Pattern.compile("[0-9a-fA-F]{16,64}");
     private final PlatformOperationMapper mapper;
     private final TenantMemberAuditService sanitizer;
-    private final ObjectMapper objectMapper;
+    private final JsonMapper objectMapper;
     private final Validator validator;
     private final TransactionTemplate independentTransaction;
 
     /** Creates separate physical transaction boundaries for claim, business work, and failure recording. */
     public PlatformOperationExecutor(PlatformOperationMapper mapper, TenantMemberAuditService sanitizer,
-                                     ObjectMapper objectMapper, Validator validator,
+                                     JsonMapper objectMapper, Validator validator,
                                      PlatformTransactionManager transactionManager) {
         this.mapper = mapper;
         this.sanitizer = sanitizer;
-        this.objectMapper = objectMapper.copy().enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
+        this.objectMapper = objectMapper.rebuild().enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS).build();
         this.validator = validator;
         this.independentTransaction = new TransactionTemplate(transactionManager);
         this.independentTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -124,7 +124,7 @@ public class PlatformOperationExecutor {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(objectMapper.writeValueAsString(command).getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException | JsonProcessingException exception) {
+        } catch (NoSuchAlgorithmException | JacksonException exception) {
             throw new GeneralException(ResultEnum.SERVICE_UNAVAILABLE);
         }
     }
@@ -212,7 +212,7 @@ public class PlatformOperationExecutor {
                 throw new GeneralException(ResultEnum.SERVICE_UNAVAILABLE);
             }
             return result;
-        } catch (JsonProcessingException | IllegalArgumentException exception) {
+        } catch (JacksonException | IllegalArgumentException exception) {
             throw new GeneralException(ResultEnum.SERVICE_UNAVAILABLE);
         }
     }
@@ -221,7 +221,7 @@ public class PlatformOperationExecutor {
     private String writeResult(PlatformMutationVO result) {
         try {
             return objectMapper.writeValueAsString(result);
-        } catch (JsonProcessingException exception) {
+        } catch (JacksonException exception) {
             throw new GeneralException(ResultEnum.SERVICE_UNAVAILABLE);
         }
     }

@@ -17,7 +17,7 @@ import cn.flying.service.AccountService;
 import cn.flying.service.LoginSecurityService;
 import cn.flying.service.PermissionService;
 import cn.flying.service.auth.AuthorizationStateService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -77,7 +77,7 @@ public class SecurityConfiguration {
     AuthenticationConfiguration authenticationConfiguration;
 
     @Resource
-    ObjectMapper objectMapper;
+    JsonMapper objectMapper;
 
     @Resource
     PrometheusScrapeSecurity prometheusScrapeSecurity;

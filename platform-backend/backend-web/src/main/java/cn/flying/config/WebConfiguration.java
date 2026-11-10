@@ -1,7 +1,7 @@
 package cn.flying.config;
 
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.boot.restclient.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -42,8 +42,8 @@ public class WebConfiguration implements WebMvcConfigurer {
     public RestTemplate restTemplate(ObjectProvider<RestTemplateBuilder> builderProvider) {
         RestTemplateBuilder builder = builderProvider.getIfAvailable(RestTemplateBuilder::new);
         return builder
-                .setConnectTimeout(Duration.ofSeconds(3))
-                .setReadTimeout(Duration.ofSeconds(10))
+                .connectTimeout(Duration.ofSeconds(3))
+                .readTimeout(Duration.ofSeconds(10))
                 .build();
     }
 

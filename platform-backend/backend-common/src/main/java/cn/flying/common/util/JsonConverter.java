@@ -3,14 +3,14 @@ package cn.flying.common.util;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JavaType;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.exc.InvalidDefinitionException;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JavaType;
+import tools.jackson.databind.cfg.DateTimeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.exc.InvalidDefinitionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,20 +22,21 @@ import java.util.TimeZone;
 public class JsonConverter {
 
     private static final Logger logger = LoggerFactory.getLogger(JsonConverter.class);
-    private static final ObjectMapper om = new ObjectMapper();
-
-    static{
-        //忽略空值的序列化行为
-        om.setSerializationInclusion(JsonInclude.Include.NON_NULL);
-        //该属性设置主要是取消将对象的时间默认转换timestamps(时间戳)形式
-        om.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
-        //该属性设置主要是将忽略空bean转json错误
-        om.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
-        //忽略反序列化未知的值
-        om.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        om.registerModule(new JavaTimeModule());
-        om.setTimeZone(TimeZone.getTimeZone("GMT+8"));
-    }
+    /**
+     * Jackson 3 的 Mapper 不可变：所有配置都在 builder 阶段完成。
+     * java.time 支持已内置，无需再注册 JavaTimeModule。
+     */
+    private static final JsonMapper om = JsonMapper.builder()
+            // 忽略空值的序列化行为
+            .changeDefaultPropertyInclusion(incl -> JsonInclude.Value.construct(JsonInclude.Include.NON_NULL, JsonInclude.Include.NON_NULL))
+            // 取消把时间默认转成 timestamps
+            .disable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)
+            // 忽略空 bean 转 JSON 的错误
+            .disable(SerializationFeature.FAIL_ON_EMPTY_BEANS)
+            // 忽略反序列化时未知字段
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            .defaultTimeZone(TimeZone.getTimeZone("GMT+8"))
+            .build();
 
     /**
      * 反序列化
@@ -55,7 +56,7 @@ public class JsonConverter {
         } catch (InvalidDefinitionException e) {
             logger.error("无效的JSON定义", e);
             throw new GeneralException(ResultEnum.JSON_PARSE_ERROR, "无效的JSON定义");
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             logger.error("JSON 解析失败", e);
             throw new GeneralException(ResultEnum.JSON_PARSE_ERROR, "JSON 解析失败");
         } catch (Exception e) {

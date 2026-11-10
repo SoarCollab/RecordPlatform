@@ -1,16 +1,15 @@
 package cn.flying.fisco_bcos.registry;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.StreamReadFeature;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.json.JsonFactory;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -37,18 +36,20 @@ public class ContractFingerprintService {
     private static final Comparator<String> UNICODE_CODE_POINT_ORDER =
             ContractFingerprintService::compareUnicodeCodePoints;
 
-    private final ObjectMapper strictObjectMapper;
+    private final JsonMapper strictJsonMapper;
 
     /**
      * 创建启用重复 key 检测的 JSON 解析器，避免 ABI 歧义。
      */
     public ContractFingerprintService() {
+        // Jackson 3 起 mapper 不可变：特性在 builder 上一次配置完成。
         JsonFactory factory = JsonFactory.builder()
                 .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
                 .build();
-        this.strictObjectMapper = new ObjectMapper(factory)
+        this.strictJsonMapper = JsonMapper.builder(factory)
                 .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-                .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+                .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                .build();
     }
 
     /**
@@ -60,8 +61,8 @@ public class ContractFingerprintService {
     public ContractArtifactCatalog readCatalog(byte[] bytes) {
         requireBoundedBytes(bytes, "Contract artifact catalog");
         try {
-            return strictObjectMapper.readValue(bytes, ContractArtifactCatalog.class);
-        } catch (IOException e) {
+            return strictJsonMapper.readValue(bytes, ContractArtifactCatalog.class);
+        } catch (JacksonException e) {
             throw new IllegalStateException("Invalid contract artifact catalog", e);
         }
     }
@@ -85,7 +86,7 @@ public class ContractFingerprintService {
     public String canonicalizeAbi(String abiJson) {
         requireBoundedText(abiJson, "ABI");
         try {
-            JsonNode root = strictObjectMapper.readTree(abiJson);
+            JsonNode root = strictJsonMapper.readTree(abiJson);
             if (!(root instanceof ArrayNode entries)) {
                 throw new IllegalArgumentException("ABI root must be a JSON array");
             }
@@ -103,10 +104,10 @@ public class ContractFingerprintService {
                     this::writeCompactJson,
                     UNICODE_CODE_POINT_ORDER));
 
-            ArrayNode canonical = strictObjectMapper.createArrayNode();
+            ArrayNode canonical = strictJsonMapper.createArrayNode();
             normalizedEntries.forEach(canonical::add);
             return writeCompactJson(canonical);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new IllegalArgumentException("Invalid ABI JSON", e);
         }
     }
@@ -126,7 +127,7 @@ public class ContractFingerprintService {
      */
     private JsonNode normalize(JsonNode node) {
         if (node.isObject()) {
-            ObjectNode result = strictObjectMapper.createObjectNode();
+            ObjectNode result = strictJsonMapper.createObjectNode();
             Map<String, JsonNode> sorted = new TreeMap<>(UNICODE_CODE_POINT_ORDER);
             for (Map.Entry<String, JsonNode> field : node.properties()) {
                 if (!"internalType".equals(field.getKey())) {
@@ -137,7 +138,7 @@ public class ContractFingerprintService {
             return result;
         }
         if (node.isArray()) {
-            ArrayNode result = strictObjectMapper.createArrayNode();
+            ArrayNode result = strictJsonMapper.createArrayNode();
             node.forEach(item -> result.add(normalize(item)));
             return result;
         }
@@ -152,8 +153,8 @@ public class ContractFingerprintService {
      */
     private String writeCompactJson(JsonNode node) {
         try {
-            return strictObjectMapper.writeValueAsString(node);
-        } catch (JsonProcessingException e) {
+            return strictJsonMapper.writeValueAsString(node);
+        } catch (JacksonException e) {
             throw new IllegalArgumentException("Cannot serialize canonical ABI", e);
         }
     }

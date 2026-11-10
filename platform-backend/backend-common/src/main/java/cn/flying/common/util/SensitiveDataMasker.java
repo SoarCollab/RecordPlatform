@@ -1,11 +1,11 @@
 package cn.flying.common.util;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.StreamReadConstraints;
-import com.fasterxml.jackson.core.StreamWriteConstraints;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.json.JsonFactory;
+import tools.jackson.core.StreamReadConstraints;
+import tools.jackson.core.StreamWriteConstraints;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import org.springframework.http.server.PathContainer;
 
 import java.io.IOException;
@@ -30,7 +30,7 @@ public final class SensitiveDataMasker {
     private static final int MAX_LOG_VALUE_CHARS = 65536;
     private static final int MAX_LOG_DEPTH = 32;
     private static final int MAX_LOG_NODES = 4096;
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper(JsonFactory.builder()
+    private static final JsonMapper OBJECT_MAPPER = JsonMapper.builder(JsonFactory.builder()
             .streamReadConstraints(StreamReadConstraints.builder()
                     .maxDocumentLength(MAX_LOG_VALUE_CHARS)
                     .maxStringLength(MAX_LOG_VALUE_CHARS)
@@ -38,7 +38,7 @@ public final class SensitiveDataMasker {
                     .maxNumberLength(128)
                     .build())
             .streamWriteConstraints(StreamWriteConstraints.builder().maxNestingDepth(MAX_LOG_DEPTH).build())
-            .build()).enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+            .build()).enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
     private static final Set<String> CAPABILITY_FIELDS = Set.of(
             "uploadurl", "presignedurl", "downloadurl", "signature", "awsaccesskeyid");
 
@@ -225,7 +225,7 @@ public final class SensitiveDataMasker {
             try {
                 Object value = OBJECT_MAPPER.readValue(text, Object.class);
                 return OBJECT_MAPPER.writeValueAsString(maskLogValue(value, depth + 1, budget));
-            } catch (JsonProcessingException ignored) {
+            } catch (JacksonException ignored) {
                 // Inspect truncated/escaped forms below, without ever logging parser diagnostics.
             }
         }
@@ -334,7 +334,7 @@ public final class SensitiveDataMasker {
         if (value != null && !(value instanceof Number) && !(value instanceof Boolean)) {
             try {
                 return maskLogValue(OBJECT_MAPPER.readValue(serializeForLog(value), Object.class), depth + 1, budget);
-            } catch (IOException ignored) {
+            } catch (IOException | JacksonException ignored) {
                 return "[" + value.getClass().getSimpleName() + "]";
             }
         }
@@ -611,7 +611,7 @@ public final class SensitiveDataMasker {
                     ? maskLogValue(obj, 0, new int[]{MAX_LOG_NODES, MAX_LOG_VALUE_CHARS * 2}) : obj;
             String json = serializeForLog(safeInput);
             return maskSensitiveFields(json);
-        } catch (IOException e) {
+        } catch (IOException | JacksonException e) {
             // 序列化失败时返回简单的类名表示
             return "[" + obj.getClass().getSimpleName() + "]";
         }
@@ -631,7 +631,7 @@ public final class SensitiveDataMasker {
         try {
             String json = serializeForLog(maskLogValue(objects, 0, new int[]{MAX_LOG_NODES, MAX_LOG_VALUE_CHARS * 2}));
             return maskSensitiveFields(json);
-        } catch (IOException e) {
+        } catch (IOException | JacksonException e) {
             return "[...]";
         }
     }

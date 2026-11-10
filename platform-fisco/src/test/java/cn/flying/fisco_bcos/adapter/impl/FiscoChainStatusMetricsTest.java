@@ -3,7 +3,7 @@ package cn.flying.fisco_bcos.adapter.impl;
 import cn.flying.fisco_bcos.adapter.model.ChainStatus;
 import cn.flying.fisco_bcos.monitor.FiscoMetrics;
 import cn.flying.fisco_bcos.service.SharingService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.fisco.bcos.sdk.v3.client.Client;
 import org.fisco.bcos.sdk.v3.client.protocol.response.TotalTransactionCount;
@@ -42,7 +42,7 @@ class FiscoChainStatusMetricsTest {
     /** SDK 3.x decimal quantities must reach gauges unchanged, including the live 54/54/2 case. */
     @Test
     void decimalSdkResponseShouldReachGaugesWithoutHexReinterpretation() throws Exception {
-        TotalTransactionCount response = new ObjectMapper().readValue("""
+        TotalTransactionCount response = JsonMapper.builder().build().readValue("""
                 {"result":{"blockNumber":54,"transactionCount":54,"failedTransactionCount":2}}
                 """, TotalTransactionCount.class);
         assertThat(response.getTotalTransactionCount().getBlockNumber()).isEqualTo("54");

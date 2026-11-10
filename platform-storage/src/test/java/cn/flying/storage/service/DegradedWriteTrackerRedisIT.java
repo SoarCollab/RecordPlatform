@@ -2,7 +2,7 @@ package cn.flying.storage.service;
 
 import cn.flying.storage.config.StorageProperties;
 import cn.flying.storage.core.FaultDomainManager;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,7 +66,7 @@ class DegradedWriteTrackerRedisIT {
     private static StringRedisTemplate firstTemplate;
     private static StringRedisTemplate secondTemplate;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final JsonMapper objectMapper = JsonMapper.builder().build();
 
     /**
      * 建立两个连接工厂，确保测试覆盖跨客户端而非单连接串行行为。

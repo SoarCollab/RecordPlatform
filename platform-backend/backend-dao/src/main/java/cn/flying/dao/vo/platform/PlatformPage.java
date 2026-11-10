@@ -4,7 +4,7 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import tools.jackson.databind.annotation.JsonSerialize;
 
 /** Retains the existing page contract while making only platform pagination counters safe JSON numbers. */
 public final class PlatformPage<T> extends Page<T> {

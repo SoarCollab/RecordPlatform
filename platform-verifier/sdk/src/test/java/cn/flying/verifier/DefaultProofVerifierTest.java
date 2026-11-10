@@ -11,9 +11,9 @@ import cn.flying.verifier.model.VerificationCode;
 import cn.flying.verifier.model.VerificationOutcome;
 import cn.flying.verifier.model.VerificationReport;
 import cn.flying.verifier.resolver.Resolution;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.NullNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.NullNode;
+import tools.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -696,11 +696,11 @@ class DefaultProofVerifierTest {
     @Test
     void shouldRejectUnknownSchemaAndProofPathOverflow() throws Exception {
         var mapper = json.mapperCopy();
-        var chunk = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(
+        var chunk = (tools.jackson.databind.node.ObjectNode) mapper.readTree(
                 fixture.entries().get(SignedProofBundleContract.CHUNK_MANIFEST_ENTRY));
         chunk.put("schemaVersion", "record-platform-proof-chunk-manifest.v999");
         chunk.put("sourceSchema", "cn.flying.chunk-manifest.v999");
-        var merkle = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(
+        var merkle = (tools.jackson.databind.node.ObjectNode) mapper.readTree(
                 fixture.entries().get(SignedProofBundleContract.MERKLE_PROOF_ENTRY));
         var path = merkle.putArray("proofPath");
         for (int index = 0; index <= SignedProofBundleContract.MAX_PROOF_NODES; index++) {

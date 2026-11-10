@@ -15,7 +15,7 @@ import cn.flying.service.LoginSecurityService;
 import cn.flying.service.PermissionService;
 import cn.flying.service.auth.AuthorizationStateService;
 import com.auth0.jwt.interfaces.DecodedJWT;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import org.junit.jupiter.api.AfterEach;
@@ -161,7 +161,12 @@ class PrometheusScrapeSecurityTest {
         MockHttpServletResponse response = perform(request(method, "/actuator/prometheus", basic(USER, PASSWORD)), (req, res) -> {
             var authentication = SecurityContextHolder.getContext().getAuthentication();
             assertEquals(USER, authentication.getName());
-            assertEquals(List.of(PrometheusScrapeSecurity.AUTHORITY), authentication.getAuthorities().stream().map(Object::toString).toList());
+            // Spring Security 7 additionally records the proven authentication factor
+            // (FactorGrantedAuthority); only application authorities are compared here.
+            assertEquals(List.of(PrometheusScrapeSecurity.AUTHORITY), authentication.getAuthorities().stream()
+                    .map(Object::toString)
+                    .filter(authority -> !authority.startsWith("FactorGrantedAuthority"))
+                    .toList());
             assertNull(authentication.getCredentials());
             assertNull(((org.springframework.security.core.userdetails.UserDetails) authentication.getPrincipal()).getPassword());
             assertNull(TenantContext.getTenantId());
@@ -516,6 +521,6 @@ class PrometheusScrapeSecurityTest {
         /** Use the application's existing password encoder type for global logins. */
         @Bean PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(4); }
         /** Support the real JSON login filter without changing its implementation. */
-        @Bean ObjectMapper objectMapper() { return new ObjectMapper(); }
+        @Bean JsonMapper objectMapper() { return JsonMapper.builder().build(); }
     }
 }

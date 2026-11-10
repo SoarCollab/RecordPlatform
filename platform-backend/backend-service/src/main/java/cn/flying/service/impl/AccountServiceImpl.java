@@ -12,7 +12,7 @@ import cn.flying.dao.vo.auth.*;
 import cn.flying.service.AccountService;
 import cn.flying.service.auth.AccountSessionRevocationService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import lombok.RequiredArgsConstructor;
 import org.springframework.amqp.core.AmqpTemplate;
 import org.springframework.beans.factory.annotation.Value;

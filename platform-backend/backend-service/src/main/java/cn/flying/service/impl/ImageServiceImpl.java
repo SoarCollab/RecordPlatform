@@ -8,7 +8,7 @@ import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.mapper.ImageStoreMapper;
 import cn.flying.service.ImageService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;

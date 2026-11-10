@@ -129,11 +129,14 @@ public class ImageController {
             return;
         }
 
+        // 长度校验必须在打开输出流之前完成：先 getOutputStream() 再 getWriter() 会抛
+        // IllegalStateException，Spring 7 会把该异常重新解析成 200，导致短路径返回 200 而非 404。
+        if (imagePath.length() <= 13) {
+            writeJsonError(request, response, 404, ResultEnum.FILE_NOT_EXIST, "图片不存在");
+            return;
+        }
+
         try (ServletOutputStream outputStream = response.getOutputStream()) {
-            if (imagePath.length() <= 13) {
-                writeJsonError(request, response, 404, ResultEnum.FILE_NOT_EXIST, "图片不存在");
-                return;
-            }
             imageService.fetchImage(outputStream, imagePath);
             response.setHeader("Cache-Control", "max-age=2592000");
         } catch (NoSuchKeyException e) {

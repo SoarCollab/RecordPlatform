@@ -15,8 +15,8 @@ import cn.flying.service.ShareAuditService;
 import cn.flying.service.proof.ProofBundleService;
 import cn.flying.service.proof.signed.ProofArchive;
 import cn.flying.service.proof.signed.SignedProofArchiveService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,7 +25,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
@@ -258,8 +257,7 @@ class SignedProofControllerTest {
     @Test
     void shouldSerializeProofStatusVersionAsString() throws Exception {
         long unsafeJavaScriptInteger = 9_007_199_254_740_993L;
-        ObjectMapper objectMapper = new IdSecurityConfiguration()
-                .objectMapper(new Jackson2ObjectMapperBuilder());
+        JsonMapper objectMapper = IdSecurityConfiguration.productionJsonMapper();
 
         JsonNode json = objectMapper.readTree(
                 objectMapper.writeValueAsBytes(Result.success(status("ACTIVE", unsafeJavaScriptInteger))));

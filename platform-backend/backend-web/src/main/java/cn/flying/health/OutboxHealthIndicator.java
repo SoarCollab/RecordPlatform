@@ -6,8 +6,8 @@ import cn.flying.dao.mapper.OutboxEventMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.actuate.health.Health;
-import org.springframework.boot.actuate.health.HealthIndicator;
+import org.springframework.boot.health.contributor.Health;
+import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.stereotype.Component;
 
 /**
@@ -36,8 +36,8 @@ public class OutboxHealthIndicator implements HealthIndicator {
      * self-invocation bypasses method advice, while preserving detail policy and caller context.
      */
     @Override
-    public Health getHealth(boolean includeDetails) {
-        return TenantContext.runWithoutIsolation(() -> HealthIndicator.super.getHealth(includeDetails));
+    public Health health(boolean includeDetails) {
+        return TenantContext.runWithoutIsolation(() -> HealthIndicator.super.health(includeDetails));
     }
 
     @Override

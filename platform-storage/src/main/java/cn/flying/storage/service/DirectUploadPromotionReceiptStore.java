@@ -1,9 +1,11 @@
 package cn.flying.storage.service;
 
 import cn.flying.storage.config.StorageProperties;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.core.json.JsonFactory;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -61,7 +63,12 @@ public class DirectUploadPromotionReceiptStore {
             """, Long.class);
 
     private final StringRedisTemplate stringRedisTemplate;
-    private final ObjectMapper objectMapper;
+    private final JsonMapper objectMapper;
+
+    /** Parser factory that rejects duplicate JSON keys (receipt integrity requirement). */
+    private static final JsonFactory STRICT_FACTORY = JsonFactory.builder()
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .build();
     private final StorageProperties storageProperties;
 
     /**
@@ -308,8 +315,8 @@ public class DirectUploadPromotionReceiptStore {
                 || receiptJson.length() > MAX_RECEIPT_JSON_LENGTH) {
             throw new IllegalStateException("direct-upload promotion receipt is corrupt");
         }
-        try (JsonParser parser = objectMapper.createParser(receiptJson)) {
-            parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+        // Jackson 3 移除了可变的 parser.enable()：严格重复键检测改在解析前用带该特性的工厂创建 parser。
+        try (JsonParser parser = STRICT_FACTORY.createParser(receiptJson)) {
             PromotionReceipt receipt = objectMapper.readerFor(PromotionReceipt.class)
                     .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                     .with(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)

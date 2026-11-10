@@ -6,7 +6,7 @@ import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.entity.ProcessedMessage;
 import cn.flying.dao.mapper.ProcessedMessageMapper;
 import cn.flying.service.outbox.OutboxPublisher;
-import com.fasterxml.jackson.core.type.TypeReference;
+import tools.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;

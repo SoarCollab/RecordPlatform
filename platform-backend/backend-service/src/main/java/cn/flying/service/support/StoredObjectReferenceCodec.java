@@ -4,7 +4,7 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.platformapi.response.DirectMultipartCompletedPartVO;
-import com.fasterxml.jackson.core.type.TypeReference;
+import tools.jackson.core.type.TypeReference;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;

@@ -85,7 +85,12 @@ public class SwaggerConfiguration {
         };
     }
 
-    /** Preserves a nullable object reference without modifying its shared OpenAPI 3.0 component schema. */
+    /**
+     * Preserves a nullable object reference without modifying its shared component schema.
+     * <p>
+     * springdoc 3 输出 OpenAPI 3.1，`nullable` 标记不再生效：可空的 {@code $ref} 属性必须写成
+     * {@code anyOf: [$ref, {type: "null"}]}，否则生成的客户端类型会错误地声明为非空。
+     */
     private void preserveNullablePlatformAuditResult(io.swagger.v3.oas.models.OpenAPI api) {
         if (api.getComponents() == null || api.getComponents().getSchemas() == null) {
             return;
@@ -96,8 +101,12 @@ public class SwaggerConfiguration {
         }
         Schema<Object> nullableResult = new Schema<>();
         nullableResult.setDescription("Recorded successful response; null before success or after failure");
-        nullableResult.setNullable(true);
-        nullableResult.setAllOf(List.of(new Schema<>().$ref("#/components/schemas/PlatformMutationVO")));
+        Schema<Object> nullBranch = new Schema<>();
+        // OpenAPI 3.1 用 types 集合表达 null 分支，setType("null") 会被 swagger-core 丢弃
+        nullBranch.addType("null");
+        nullableResult.setAnyOf(List.of(
+                new Schema<>().$ref("#/components/schemas/PlatformMutationVO"),
+                nullBranch));
         audit.addProperty("result", nullableResult);
     }
 
@@ -121,6 +130,21 @@ public class SwaggerConfiguration {
      * 登录接口和退出登录接口手动添加一下
      * @return PathItems
      */
+    /**
+     * OpenAPI 3.1 的 schema 类型必须写入 types 集合，{@code type("string")} 在序列化时会被丢弃。
+     *
+     * @param format 可选的格式（如 password）
+     * @return 声明为 string 的 schema
+     */
+    private static Schema<String> stringSchema(String format) {
+        Schema<String> schema = new Schema<>();
+        schema.addType("string");
+        if (format != null) {
+            schema.setFormat(format);
+        }
+        return schema;
+    }
+
     private Map<String, PathItem> authorizePathItems(){
         Map<String, PathItem> map = new HashMap<>();
         // 登录接口
@@ -134,14 +158,14 @@ public class SwaggerConfiguration {
                                 .name("username")
                                 .description("用户名")
                                 .required(true)
-                                .schema(new Schema<String>().type("string"))
+                                .schema(stringSchema(null))
                         )
                         .addParametersItem(new Parameter()
                                 .in("query")
                                 .name("password")
                                 .description("密码")
                                 .required(true)
-                                .schema(new Schema<String>().type("string").format("password"))
+                                .schema(stringSchema("password"))
                         )
                         .responses(new ApiResponses()
                                 .addApiResponse("200", new ApiResponse()

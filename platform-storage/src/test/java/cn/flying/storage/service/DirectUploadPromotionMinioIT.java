@@ -6,7 +6,7 @@ import cn.flying.storage.core.FaultDomainManager;
 import cn.flying.storage.core.S3ClientManager;
 import cn.flying.storage.core.S3ClientManager.TopologyLease;
 import cn.flying.storage.core.S3Monitor;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterAll;
@@ -42,6 +42,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -233,12 +234,12 @@ class DirectUploadPromotionMinioIT {
         );
         realFirstReceiptStore = new DirectUploadPromotionReceiptStore(
                 firstRedisTemplate,
-                new ObjectMapper(),
+                JsonMapper.builder().build(),
                 storageProperties
         );
         realSecondReceiptStore = new DirectUploadPromotionReceiptStore(
                 secondRedisTemplate,
-                new ObjectMapper(),
+                JsonMapper.builder().build(),
                 storageProperties
         );
     }
@@ -769,7 +770,7 @@ class DirectUploadPromotionMinioIT {
             FaultDomainManager faultDomainManager
     ) {
         DegradedWriteTracker tracker = new DegradedWriteTracker();
-        ReflectionTestUtils.setField(tracker, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(tracker, "objectMapper", JsonMapper.builder().build());
         ReflectionTestUtils.setField(tracker, "stringRedisTemplate", firstRedisTemplate);
         ReflectionTestUtils.setField(tracker, "redissonClient", firstRedisson);
         ReflectionTestUtils.setField(tracker, "faultDomainManager", faultDomainManager);
@@ -1149,6 +1150,12 @@ class DirectUploadPromotionMinioIT {
         return S3Client.builder()
                 .endpointOverride(URI.create(endpoint))
                 .region(Region.US_EAST_1)
+                // 给 S3 SDK 调用加上总时限：任何卡住的请求在 20s 内失败并留下明确异常，
+                // 而不是耗尽 JUnit 的单测时限（曾导致 shouldRejectExpiredPresignedPut 60s 超时）。
+                .overrideConfiguration(ClientOverrideConfiguration.builder()
+                        .apiCallTimeout(Duration.ofSeconds(20))
+                        .apiCallAttemptTimeout(Duration.ofSeconds(10))
+                        .build())
                 .credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)))
                 .serviceConfiguration(S3Configuration.builder()
@@ -1164,6 +1171,7 @@ class DirectUploadPromotionMinioIT {
         return S3Presigner.builder()
                 .endpointOverride(URI.create(endpoint))
                 .region(Region.US_EAST_1)
+
                 .credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)))
                 .serviceConfiguration(S3Configuration.builder()

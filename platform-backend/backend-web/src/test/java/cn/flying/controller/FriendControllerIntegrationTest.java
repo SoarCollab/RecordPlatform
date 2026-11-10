@@ -11,7 +11,7 @@ import cn.flying.dao.vo.friend.UpdateRemarkVO;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.IdUtils;
 import cn.flying.test.support.BaseControllerIntegrationTest;
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;

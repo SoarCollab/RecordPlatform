@@ -1,7 +1,7 @@
 package cn.flying.service;
 
 import cn.flying.dao.dto.SysOperationLog;
-import com.baomidou.mybatisplus.extension.service.IService;
+import com.baomidou.mybatisplus.spring.service.IService;
 
 /**
  * 系统操作日志服务接口

@@ -12,8 +12,8 @@ import cn.flying.service.saga.FileUploadCommand;
 import cn.flying.service.saga.FileSagaOrchestrator;
 import cn.flying.service.saga.SagaCompensationHelper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,7 +44,7 @@ class SagaCompensationIT extends FaultInjectionBaseIT {
     private PlatformTransactionManager transactionManager;
 
     @Autowired
-    private ObjectMapper objectMapper;
+    private JsonMapper objectMapper;
 
     // ──────────────────────────── Test 1 ────────────────────────────
 

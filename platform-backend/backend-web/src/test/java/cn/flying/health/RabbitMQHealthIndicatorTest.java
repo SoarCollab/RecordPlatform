@@ -10,8 +10,8 @@ import org.mockito.Mockito;
 import org.springframework.amqp.rabbit.connection.Connection;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.boot.actuate.health.Health;
-import org.springframework.boot.actuate.health.Status;
+import org.springframework.boot.health.contributor.Health;
+import org.springframework.boot.health.contributor.Status;
 import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.mock.env.MockEnvironment;
@@ -38,7 +38,12 @@ class RabbitMQHealthIndicatorTest {
         RabbitTemplate template = mock(RabbitTemplate.class);
         RabbitMQHealthIndicator custom = new RabbitMQHealthIndicator(template, new SynchronousExecutorService());
         ReflectionTestUtils.setField(custom, "healthQueue", "file.stored.queue");
-        assertThatThrownBy(() -> custom.getHealth(false)).isInstanceOf(NullPointerException.class);
+        // Boot 4 起 health(boolean) 是接口默认方法：继承来的 mock 故障不再抛 NullPointerException，
+        // 而是以 null 或非 UP 的健康值返回；关键是绝不能报告为健康。
+        Health inheritedFailure = custom.health(false);
+        assertThat(inheritedFailure == null || inheritedFailure.getStatus() != Status.UP)
+                .as("inherited mock failure must not report UP")
+                .isTrue();
 
         ConnectionFactory factory = mock(ConnectionFactory.class);
         Connection connection = mock(Connection.class);
@@ -54,8 +59,8 @@ class RabbitMQHealthIndicatorTest {
                         .queue("file.stored.queue").messageCount(0).consumerCount(2).build());
         RabbitHealthProbeFixture.enableHealthCallbacks(template, factory);
 
-        assertThat(custom.getHealth(false).getStatus()).isEqualTo(Status.UP);
-        Health builtIn = new org.springframework.boot.actuate.amqp.RabbitHealthIndicator(template).getHealth(true);
+        assertThat(custom.health(false).getStatus()).isEqualTo(Status.UP);
+        Health builtIn = new org.springframework.boot.amqp.health.RabbitHealthIndicator(template).health(true);
         assertThat(builtIn.getStatus()).isEqualTo(Status.UP);
         assertThat(builtIn.getDetails()).containsEntry("version", "fixture-broker");
         org.mockito.Mockito.clearInvocations(factory);

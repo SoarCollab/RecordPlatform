@@ -5,6 +5,20 @@ server:
 spring:
   application:
     name: backend-web
+  # Nacos 配置中心（SCA 2025.1 起不再支持 bootstrap.yml，统一走 spring.config.import）
+  cloud:
+    nacos:
+      server-addr: ${NACOS_HOST:localhost}:${NACOS_PORT:8848}
+      username: ${NACOS_USERNAME}
+      password: ${NACOS_PASSWORD}
+      config:
+        group: DEFAULT_GROUP
+        file-extension: yaml
+        refresh-enabled: true
+  config:
+    import:
+      # optional: 前缀表示配置不存在时应用仍可启动
+      - optional:nacos:backend-web.yaml?group=DEFAULT_GROUP
   # Java 21 Virtual Threads - Tomcat 请求处理使用虚拟线程 (Spring Boot 3.5+)
   threads:
     virtual:
@@ -115,18 +129,6 @@ springdoc:
     - group: "系统管理服务"
       paths-to-match: "/api/v1/system/**,/api/v1/admin/**,/api/v1/public/invitations/**,/api/v1/announcements/**,/api/v1/tickets/**"
       packages-to-scan: cn.flying.controller
-
-# knife4j配置
-knife4j:
-  enable: ${KNIFE4J_ENABLE:true}
-  production: ${KNIFE4J_PRODUCTION:true}
-  basic:
-    enable: ${KNIFE4J_BASIC_ENABLE:true}
-    username: ${KNIFE4J_USERNAME}
-    password: ${KNIFE4J_PASSWORD}
-  setting:
-    language: zh_cn
-    enable-group: true
 
 mybatis-plus:
   configuration:

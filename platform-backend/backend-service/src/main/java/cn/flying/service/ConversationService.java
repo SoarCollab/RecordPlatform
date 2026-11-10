@@ -5,7 +5,7 @@ import cn.flying.dao.vo.message.ConversationDetailVO;
 import cn.flying.dao.vo.message.ConversationVO;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.baomidou.mybatisplus.extension.service.IService;
+import com.baomidou.mybatisplus.spring.service.IService;
 
 /**
  * 会话服务接口

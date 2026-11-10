@@ -10,10 +10,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.actuate.health.Health;
-import org.springframework.boot.actuate.health.HealthIndicator;
-import org.springframework.boot.actuate.health.Status;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.health.contributor.Health;
+import org.springframework.boot.health.contributor.HealthIndicator;
+import org.springframework.boot.health.contributor.Status;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -107,10 +107,10 @@ class CrossTenantHealthIndicatorIT extends BaseIntegrationTest {
 
     /** Exercises the production Actuator entry point and its per-call detail policy. */
     private void assertGlobalHealth(HealthIndicator indicator, long expectedFailed) {
-        Health detailed = indicator.getHealth(true);
+        Health detailed = indicator.health(true);
         assertThat(detailed.getStatus()).isEqualTo(Status.DOWN);
         assertThat(detailed.getDetails()).containsEntry("failed", expectedFailed);
-        Health anonymous = indicator.getHealth(false);
+        Health anonymous = indicator.health(false);
         assertThat(anonymous.getStatus()).isEqualTo(Status.DOWN);
         assertThat(anonymous.getDetails()).isEmpty();
     }
