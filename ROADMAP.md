@@ -37,9 +37,9 @@
 | Java | 21 LTS | 新 LTS 先验证构建、容器和依赖兼容性 |
 | Spring Boot | 4.1.2 | 已完成 Boot 4 迁移（Jackson 3 / 模块化包名 / Dubbo 3.3.7） |
 | Dubbo | 3.3.6 Triple | 保持 consumer/provider 契约兼容 |
-| Svelte | 5.55+ | 使用稳定 Runes API |
-| SvelteKit | 2.59+ | 与前端 lockfile 同步验证 |
-| Vite | 7.3+ | 应用与文档站分别以各自 `package.json`/lockfile 为准 |
+| Svelte | 5.57+ | 使用稳定 Runes API |
+| SvelteKit | 3.1+ | 与前端 lockfile 同步验证 |
+| Vite | 8.3+ | 应用与文档站分别以各自 `package.json`/lockfile 为准 |
 | Tailwind CSS | 4.3+ | 通过 `@tailwindcss/vite` 集成 |
 | MySQL | 8.0 | schema 只通过顺序 Flyway migration 演进 |
 | Redis | 7 | 锁、lease、receipt、tombstone 必须有过期与 fencing 语义 |

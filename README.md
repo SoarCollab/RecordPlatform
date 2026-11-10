@@ -202,7 +202,7 @@ Verify the installation at:
 | Microservices | Apache Dubbo (Triple protocol), Nacos                   | 3.3.6                 |
 | Blockchain    | FISCO BCOS, Solidity                                    | 3.8.0, ^0.8.11        |
 | Storage       | S3-compatible (AWS SDK v2), MySQL, Redis (Redisson)     | 2.x, 8.0+, 7.0+       |
-| Frontend      | Svelte 5 (Runes), SvelteKit, Vite, Tailwind CSS 4, bits-ui | 5.55+, 2.59+, 7.3+, 4.3+ |
+| Frontend      | Svelte 5 (Runes), SvelteKit, Vite, Tailwind CSS 4, bits-ui | 5.57+, 3.1+, 8.3+, 4.3+ |
 | Resilience    | Resilience4j (circuit breaker, retry)                   | 2.4.0                 |
 | Monitoring    | Micrometer, Prometheus, OpenTelemetry, Jaeger           | —                     |
 | Testing       | JUnit 5, Mockito, Testcontainers, Vitest                | —                     |
