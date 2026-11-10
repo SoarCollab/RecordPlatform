@@ -4,7 +4,6 @@
  * Supports concurrent downloads, progress tracking, resumable downloads, and streaming for large files
  */
 import { browser } from "$app/env";
-
 import { PUBLIC_TENANT_ID } from "$app/env/public";
 import { ApiError, getToken } from "$api/client";
 import * as fileApi from "$api/endpoints/files";
@@ -36,12 +35,10 @@ import type {
   FileDownloadMetadataVO,
   ManifestErrorDetail,
 } from "$api/types";
-
 import {
   buildBatchMetricsPayload,
   calculateRetryCount,
 } from "$utils/downloadBatchMetrics";
-
 import {
   performPreDownloadCheck,
   type DownloadStrategy,

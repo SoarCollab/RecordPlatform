@@ -18,7 +18,6 @@
     getBadgeCount: (key: BadgeKey) => number;
   } = $props();
 
-
   function isActive(href: string) {
     return pathname === href || pathname.startsWith(href + "/");
   }

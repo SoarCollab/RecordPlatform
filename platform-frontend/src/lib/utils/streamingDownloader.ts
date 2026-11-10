@@ -11,7 +11,6 @@
  * - Safari: Not supported (falls back to in-memory download)
  * - Firefox: Not supported (falls back to in-memory download)
  */
-
 import { downloadChunkWithRetry } from "./chunkDownloader";
 import { executeStreamingDecrypt } from "./crypto";
 import { isStreamingSupported } from "./fileSize";
