@@ -92,7 +92,8 @@ class DirectUploadLoadSmokeIT {
     private static final int PART_BYTES = 256 * 1024;
     private static final String ACCESS_KEY = "directupload";
     private static final String SECRET_KEY = "directupload-secret-2026";
-    private static final String MINIO_IMAGE = "minio/minio:RELEASE.2024-11-07T00-52-20Z";
+    // MinIO 官方镜像已无法匿名拉取，改用 Bitnami 归档镜像（入口点自带 setup+run.sh）。
+    private static final String MINIO_IMAGE = "bitnamilegacy/minio:2024.11.7-debian-12-r2";
     private static final String REDIS_IMAGE = "redis:7.4.9-alpine";
     private static final String SOURCE_BUCKET = "direct-load-source";
     private static final String TARGET_BUCKET = "direct-load-target";
@@ -105,7 +106,6 @@ class DirectUploadLoadSmokeIT {
             .withExposedPorts(MINIO_PORT)
             .withEnv("MINIO_ROOT_USER", ACCESS_KEY)
             .withEnv("MINIO_ROOT_PASSWORD", SECRET_KEY)
-            .withCommand("server", "/data")
             .waitingFor(Wait.forHttp("/minio/health/ready")
                     .forPort(MINIO_PORT)
                     .forStatusCode(200)

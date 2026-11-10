@@ -103,12 +103,13 @@ public abstract class BaseIntegrationTest {
     static RabbitMQContainer rabbitmq = new RabbitMQContainer(DockerImageName.parse("rabbitmq:3.12-management-alpine"))
             .withReuse(true);
 
+    // MinIO 官方镜像已从 Docker Hub 移除匿名拉取（仓库需登录），改用 Bitnami 归档镜像；
+    // 该镜像入口点自带 setup+run.sh，不能再传 `server /data` 参数。
     @Container
-    static GenericContainer<?> minio = new GenericContainer<>(DockerImageName.parse("minio/minio:latest"))
+    static GenericContainer<?> minio = new GenericContainer<>(DockerImageName.parse("bitnamilegacy/minio:2024.11.7-debian-12-r2"))
             .withExposedPorts(MINIO_PORT)
             .withEnv("MINIO_ROOT_USER", MINIO_ACCESS_KEY)
             .withEnv("MINIO_ROOT_PASSWORD", MINIO_SECRET_KEY)
-            .withCommand("server /data")
             .waitingFor(Wait.forHttp("/minio/health/ready")
                     .forPort(MINIO_PORT)
                     .withStartupTimeout(Duration.ofSeconds(60)))
