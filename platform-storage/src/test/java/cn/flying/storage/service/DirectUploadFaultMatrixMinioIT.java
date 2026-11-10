@@ -98,7 +98,8 @@ class DirectUploadFaultMatrixMinioIT {
     private static final int MINIO_PORT = 9000;
     private static final String ACCESS_KEY = "directupload";
     private static final String SECRET_KEY = "directupload-secret-2026";
-    private static final String MINIO_IMAGE = "minio/minio:RELEASE.2024-11-07T00-52-20Z";
+    // MinIO 官方镜像已无法匿名拉取，改用 Bitnami 归档镜像（入口点自带 setup+run.sh）。
+    private static final String MINIO_IMAGE = "bitnamilegacy/minio:2024.11.7-debian-12-r2";
     private static final String TOXIPROXY_IMAGE = "ghcr.io/shopify/toxiproxy:2.5.0";
     private static final Network NETWORK = Network.newNetwork();
 

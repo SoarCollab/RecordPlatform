@@ -84,7 +84,8 @@ class DirectUploadPromotionMinioIT {
     private static final int REDIS_PORT = 6379;
     private static final String ACCESS_KEY = "directupload";
     private static final String SECRET_KEY = "directupload-secret-2026";
-    private static final String MINIO_IMAGE = "minio/minio:RELEASE.2024-11-07T00-52-20Z";
+    // MinIO 官方镜像已无法匿名拉取，改用 Bitnami 归档镜像（入口点自带 setup+run.sh）。
+    private static final String MINIO_IMAGE = "bitnamilegacy/minio:2024.11.7-debian-12-r2";
     private static final String REDIS_IMAGE = "redis:7.4.9-alpine";
     private static final String ALLOWED_BROWSER_ORIGIN = "http://localhost:5173";
     private static final String DISALLOWED_BROWSER_ORIGIN = "https://evil.example";
@@ -1081,7 +1082,6 @@ class DirectUploadPromotionMinioIT {
                 .withEnv("MINIO_ROOT_USER", ACCESS_KEY)
                 .withEnv("MINIO_ROOT_PASSWORD", SECRET_KEY)
                 .withEnv("MINIO_API_CORS_ALLOW_ORIGIN", ALLOWED_BROWSER_ORIGIN)
-                .withCommand("server", "/data")
                 .waitingFor(Wait.forHttp("/minio/health/ready")
                         .forPort(MINIO_PORT)
                         .forStatusCode(200)
