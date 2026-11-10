@@ -5,13 +5,18 @@ import tools.jackson.core.json.JsonFactory;
 import tools.jackson.core.StreamReadConstraints;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.cfg.DateTimeFeature;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.Arrays;
+import java.util.Map;
 
 /**
  * Strict bounded JSON parser and deterministic serializer for signed proof evidence.
@@ -57,10 +62,38 @@ public final class CanonicalJson {
      */
     public byte[] canonicalBytes(Object value) {
         try {
-            return mapper.writeValueAsBytes(value);
+            // Jackson 3 不再按 MapperFeature.SORT_PROPERTIES_ALPHABETICALLY 排序对象属性
+            //（该特性对 record/POJO 已不生效），因此先转成树、按 key 递归排序后再序列化，
+            // 保证 canonical 字节与历史签发结果一致。
+            return mapper.writeValueAsBytes(sortByPropertyName(mapper.valueToTree(value)));
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("Unable to serialize canonical proof JSON", e);
         }
+    }
+
+    /**
+     * Recursively rebuilds a JSON tree so every object lists its properties in code-point order.
+     *
+     * @param node source node
+     * @return node whose object properties are sorted by name
+     */
+    private static JsonNode sortByPropertyName(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return node;
+        }
+        if (node.isArray()) {
+            ArrayNode sorted = JsonNodeFactory.instance.arrayNode();
+            node.forEach(child -> sorted.add(sortByPropertyName(child)));
+            return sorted;
+        }
+        if (node.isObject()) {
+            ObjectNode sorted = JsonNodeFactory.instance.objectNode();
+            node.properties().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(entry -> sorted.set(entry.getKey(), sortByPropertyName(entry.getValue())));
+            return sorted;
+        }
+        return node;
     }
 
     /**
