@@ -89,6 +89,8 @@ logging:
     org.springframework.test: WARN
     org.testcontainers: WARN
     com.github.dockerjava: WARN
+    # 打印 mapper 实际执行的 SQL：分页 count 与租户过滤相关的回归只能靠 SQL 判断。
+    cn.flying.dao.mapper: DEBUG
 
 # Disable scheduled tasks in tests
 spring.task.scheduling.pool.size: 0
