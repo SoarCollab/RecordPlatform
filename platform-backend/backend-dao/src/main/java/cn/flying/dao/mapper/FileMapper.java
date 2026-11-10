@@ -58,7 +58,7 @@ public interface FileMapper extends BaseMapper<File> {
      * @return number of updated rows
      */
     @InterceptorIgnore(tenantLine = "true")
-    @Update("UPDATE file SET status = #{targetStatus} " +
+    @Update("UPDATE `file` SET status = #{targetStatus} " +
             "WHERE id = #{id} AND tenant_id = #{tenantId} " +
             "AND status = #{expectedStatus} AND deleted = 0")
     int updateStatusByAdminWithCas(
@@ -319,7 +319,8 @@ public interface FileMapper extends BaseMapper<File> {
      * @param tenantId 租户ID
      * @return 受影响行数
      */
-    @Update("UPDATE file SET is_latest = 0 WHERE version_group_id = #{versionGroupId} AND tenant_id = #{tenantId} AND deleted = 0")
+    // jsqlparser 5.4 把 FILE 视为保留字，裸表名的 UPDATE 会让多租户插件解析失败。
+    @Update("UPDATE `file` SET is_latest = 0 WHERE version_group_id = #{versionGroupId} AND tenant_id = #{tenantId} AND deleted = 0")
     int clearLatestInChain(@Param("versionGroupId") Long versionGroupId, @Param("tenantId") Long tenantId);
 
     /**
