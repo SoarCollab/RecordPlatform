@@ -15,11 +15,10 @@ coverage:
         if_ci_failed: error
 
 # 覆盖率仅采集可插桩的 TS 模块（vitest coverage.include = src/lib/**/*.ts）；
-# .svelte 组件没有插桩数据，若计入 patch 统计会把纯模板改动误判为未覆盖。
-# 这里必须使用上报里的相对路径（如 src/lib/utils.ts），不能用 platform-frontend/src/**。
+# .svelte 组件目前没有插桩数据，若计入 patch 统计会把纯模板改动误判为未覆盖。
 ignore:
-  - "src/**/*.svelte"
-  - "src/app.html"
+  - "platform-frontend/src/**/*.svelte"
+  - "platform-frontend/src/app.html"
 
 comment:
   layout: "condensed_header, diff, flags, components"
