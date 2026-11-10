@@ -20,6 +20,8 @@ import {
 
 // ===== Configuration =====
 
+// 生产分支只在真实构建里求值（DEV 下走上面的常量），单测永远无法覆盖。
+/* v8 ignore next 2 */
 const DEFAULT_API_BASE = import.meta.env.DEV
   ? "/record-platform/api/v1"
   : `${PUBLIC_API_BASE_URL || "/record-platform"}/api/v1`;
