@@ -5,12 +5,12 @@ import tools.jackson.core.json.JsonFactory;
 import tools.jackson.core.StreamReadConstraints;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.cfg.DateTimeFeature;
 import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
-import java.io.IOException;
 import java.util.Arrays;
 
 /**
@@ -39,14 +39,13 @@ public final class CanonicalJson {
                 .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
                 .build();
         this.mapper = JsonMapper.builder(factory)
-                .defaultPropertyInclusion(JsonInclude.Value.construct(
-                        JsonInclude.Include.NON_NULL,
-                        JsonInclude.Include.NON_NULL))
+                .changeDefaultPropertyInclusion(inclusion ->
+                        inclusion.withValueInclusion(JsonInclude.Include.NON_NULL))
                 .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
                 .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
                 .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
-                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                .disable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)
                 .build();
     }
 
@@ -59,7 +58,7 @@ public final class CanonicalJson {
     public byte[] canonicalBytes(Object value) {
         try {
             return mapper.writeValueAsBytes(value);
-        } catch (IOException | RuntimeException e) {
+        } catch (RuntimeException e) {
             throw new IllegalArgumentException("Unable to serialize canonical proof JSON", e);
         }
     }
@@ -78,7 +77,7 @@ public final class CanonicalJson {
         }
         try {
             return mapper.readValue(bytes, type);
-        } catch (IOException | RuntimeException e) {
+        } catch (RuntimeException e) {
             throw new IllegalArgumentException("Unable to parse strict proof JSON", e);
         }
     }
@@ -100,6 +99,6 @@ public final class CanonicalJson {
      * @return independent mapper copy
      */
     public JsonMapper mapperCopy() {
-        return mapper.copy();
+        return mapper.rebuild().build();
     }
 }

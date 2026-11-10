@@ -431,7 +431,7 @@ public final class HttpProofResolvers implements SigningKeyResolver, ProofStatus
 
     /** Converts an arbitrary scalar JSON node to a bounded string representation. */
     private String nodeScalarText(JsonNode node) {
-        if (node == null || node.isNull() || node.isContainerNode()) {
+        if (node == null || node.isNull() || node.isContainer()) {
             return null;
         }
         String value = node.asText();
@@ -440,7 +440,7 @@ public final class HttpProofResolvers implements SigningKeyResolver, ProofStatus
 
     /** Converts the backend's Date epoch-millis or an RFC 3339 string into one timestamp string. */
     private String nodeTimestampText(JsonNode node) {
-        if (node == null || node.isNull() || node.isContainerNode()) {
+        if (node == null || node.isNull() || node.isContainer()) {
             return null;
         }
         if (node.isIntegralNumber()) {
