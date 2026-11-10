@@ -134,7 +134,7 @@ vi.stubGlobal(
     dispatchEvent: vi.fn(),
   })),
 );
-server.listen({ onUnhandledRequest: "error" });
+server.listen({ onUnhandledFrame: "error" });
 const [
   client,
   { useAuth },

@@ -9,12 +9,7 @@ export const TEXT_PREVIEW_TRUNCATION_NOTICE =
   "\n\n... (内容过长，仅显示前 100000 字节)";
 
 export type FilePreviewType =
-  | "image"
-  | "video"
-  | "audio"
-  | "pdf"
-  | "text"
-  | "unsupported";
+  "image" | "video" | "audio" | "pdf" | "text" | "unsupported";
 
 const NATIVE_IMAGE_EXTENSIONS = new Set([
   "jpg",

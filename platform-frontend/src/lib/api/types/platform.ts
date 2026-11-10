@@ -55,10 +55,7 @@ export type PlatformUsage = Schema<"PlatformUsageVO"> & {
 };
 export type PlatformHealthStatus = Schema<"PlatformHealthVO">["status"];
 export type PlatformHealthComponent =
-  | "database"
-  | "redis"
-  | "storage"
-  | "blockchain";
+  "database" | "redis" | "storage" | "blockchain";
 export type PlatformHealth = Omit<Schema<"PlatformHealthVO">, "components"> & {
   components: Record<PlatformHealthComponent, PlatformHealthStatus>;
 };

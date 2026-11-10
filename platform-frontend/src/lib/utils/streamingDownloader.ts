@@ -69,11 +69,7 @@ export interface StreamingDownloadOptions {
 }
 
 export type StreamingPhase =
-  | "preparing"
-  | "downloading"
-  | "decrypting"
-  | "writing"
-  | "completed";
+  "preparing" | "downloading" | "decrypting" | "writing" | "completed";
 
 export interface StreamingDownloadResult {
   success: boolean;

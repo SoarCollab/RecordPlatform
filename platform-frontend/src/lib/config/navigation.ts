@@ -1,11 +1,7 @@
 import type { AppIconName } from "$components/ui/app-icon";
 
 export type BadgeKey =
-  | "messages"
-  | "announcements"
-  | "tickets"
-  | "friends"
-  | null;
+  "messages" | "announcements" | "tickets" | "friends" | null;
 
 export type MenuItem = {
   href: string;

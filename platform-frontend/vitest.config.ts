@@ -80,6 +80,9 @@ export default defineConfig({
     },
   },
   resolve: {
+    // JSdom tests run in Node; without pinning the condition order, packages whose
+    // exports map marks Node-only entrypoints as `browser: null` fail to resolve.
+    conditions: ["node", "import", "module", "default"],
     alias: [
       // `$app/env*` resolve to Vitest stubs: the real modules require the SvelteKit
       // client payload (`__SVELTEKIT_PAYLOAD__`) which Vitest never bootstraps.

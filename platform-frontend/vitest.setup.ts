@@ -4,8 +4,7 @@ import { vi } from "vitest";
 
 declare global {
   var __setDocumentVisibility:
-    | ((state: DocumentVisibilityState) => void)
-    | undefined;
+    ((state: DocumentVisibilityState) => void) | undefined;
   var $state: <T>(initial: T) => T;
   var $derived: <T>(value: T) => T;
 }

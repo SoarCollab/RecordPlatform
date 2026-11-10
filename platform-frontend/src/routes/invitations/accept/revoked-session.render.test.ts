@@ -58,7 +58,7 @@ server.use(
     },
   ),
 );
-server.listen({ onUnhandledRequest: "error" });
+server.listen({ onUnhandledFrame: "error" });
 const client = await import("$api/client");
 // Keep a real old session in place before loading the route so eager auth imports remain observable.
 client.setToken(oldToken, "2099-01-01", true);

@@ -49,7 +49,7 @@ const server = setupServer(
   }),
 );
 vi.stubGlobal("AbortController", transferableAbortController().constructor);
-server.listen({ onUnhandledRequest: "error" });
+server.listen({ onUnhandledFrame: "error" });
 const [api, client] = await Promise.all([
   import("./platform"),
   import("$api/client"),

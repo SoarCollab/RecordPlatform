@@ -519,7 +519,7 @@ describe("API Client", () => {
           "AbortController",
           transferableAbortController().constructor,
         );
-        server.listen({ onUnhandledRequest: "error" });
+        server.listen({ onUnhandledFrame: "error" });
       });
       afterEach(() => server.resetHandlers());
       afterAll(() => {
