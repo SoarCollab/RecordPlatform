@@ -27,7 +27,7 @@ describe("store guards outside the browser", () => {
     const { useSSE } = await import("./sse.svelte");
     const sse = useSSE();
 
-    expect(() => sse.init(vi.fn(), vi.fn(), vi.fn(), vi.fn())).not.toThrow();
+    expect(() => sse.init("user-1")).not.toThrow();
     expect(() => sse.cleanup()).not.toThrow();
     expect(sse.isConnected).toBe(false);
   });
