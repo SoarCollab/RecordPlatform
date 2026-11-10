@@ -87,6 +87,11 @@ export default defineConfig({
       // `$app/env*` resolve to Vitest stubs: the real modules require the SvelteKit
       // client payload (`__SVELTEKIT_PAYLOAD__`) which Vitest never bootstraps.
       { find: /^\$app\/env$/, replacement: resolve("./vitest.app-env.ts") },
+      // 源码里仍是 kit 2 的 `$app/environment`（vite alias 在构建期改名），测试同样走 stub。
+      {
+        find: /^\$app\/environment$/,
+        replacement: resolve("./vitest.app-env.ts"),
+      },
       { find: /^\$app\/env\/public$/, replacement: resolve("./vitest.env.ts") },
       {
         find: /^\$env\/static\/public$/,

@@ -34,6 +34,9 @@ export default defineConfig(({ mode }) => {
         }),
 
         alias: {
+          // kit 3 把 $app/environment 改名为 $app/env（browser/dev/building/version 语义不变），
+          // 用别名保持既有源码不变，避免迁移 diff 变成全量改 import。
+          "$app/environment": "$app/env",
           // kit 3 已移除内置 `$lib` 别名，这里按原语义补回，
           // 使既有 $lib/... 引用无需全量改写。
           $lib: "src/lib",

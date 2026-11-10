@@ -1,4 +1,4 @@
-import { browser } from "$app/env";
+import { browser } from "$app/environment";
 import { useSSE } from "$stores/sse.svelte";
 import * as uploadApi from "$api/endpoints/upload";
 import { ApiError } from "$api/client";

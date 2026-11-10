@@ -1,4 +1,4 @@
-import { browser } from "$app/env";
+import { browser } from "$app/environment";
 
 // ===== Types =====
 export type LeaderRole = "init" | "electing" | "leader" | "follower";

@@ -1,4 +1,4 @@
-import { browser } from "$app/env";
+import { browser } from "$app/environment";
 import type { AuthScope } from "$api/types/auth";
 
 export const TOKEN_KEY = "auth_token";

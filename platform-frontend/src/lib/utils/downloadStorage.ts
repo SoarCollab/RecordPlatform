@@ -2,7 +2,7 @@
  * IndexedDB persistence layer for download tasks
  * Enables resumable downloads by persisting task metadata and chunk data
  */
-import { browser } from "$app/env";
+import { browser } from "$app/environment";
 
 // ===== Types =====
 
