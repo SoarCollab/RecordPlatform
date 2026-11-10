@@ -10,7 +10,7 @@
     type DateValue,
     today,
   } from "@internationalized/date";
-  import { cn } from "#lib/utils.ts";
+  import { cn } from "#lib/utils.js";
   import { Button } from "$components/ui/button";
   import { Calendar } from "$components/ui/calendar";
   import * as Popover from "$components/ui/popover";
@@ -86,7 +86,7 @@
       v.day,
       hour,
       minute,
-      second,
+      second
     );
     date = newDate;
     updateValue();
@@ -101,7 +101,7 @@
         now.day,
         hour,
         minute,
-        second,
+        second
       );
     } else {
       date = new CalendarDateTime(
@@ -110,7 +110,7 @@
         date.day,
         hour,
         minute,
-        second,
+        second
       );
     }
     updateValue();
@@ -128,9 +128,9 @@
       <Button
         variant="outline"
         class={cn(
-          "w-full justify-start pl-3 text-left font-normal",
+          "w-full justify-start text-left font-normal pl-3",
           !value && "text-muted-foreground",
-          className,
+          className
         )}
         {...props}
       >
@@ -151,17 +151,17 @@
         onValueChange={handleDateChange}
         initialFocus
       />
-      <div class="bg-muted/20 border-t p-3">
+      <div class="border-t p-3 bg-muted/20">
         <div class="flex flex-col gap-2">
-          <div class="mb-1 flex items-center gap-2">
-            <Clock class="text-muted-foreground h-3.5 w-3.5" />
-            <span class="text-muted-foreground text-xs font-medium">时间</span>
+          <div class="flex items-center gap-2 mb-1">
+            <Clock class="h-3.5 w-3.5 text-muted-foreground" />
+            <span class="text-xs font-medium text-muted-foreground">时间</span>
           </div>
-          <div class="flex items-center justify-center gap-1">
+          <div class="flex items-center gap-1 justify-center">
             <div class="flex flex-col items-center gap-1">
               <Input
                 type="number"
-                class="h-8 w-14 p-0 text-center text-sm"
+                class="h-8 w-14 text-center p-0 text-sm"
                 min="0"
                 max="23"
                 bind:value={hour}
@@ -170,13 +170,13 @@
                   handleTimeChange();
                 }}
               />
-              <span class="text-muted-foreground text-[10px]">时</span>
+              <span class="text-[10px] text-muted-foreground">时</span>
             </div>
-            <span class="text-muted-foreground pb-4 text-lg">:</span>
+            <span class="text-lg pb-4 text-muted-foreground">:</span>
             <div class="flex flex-col items-center gap-1">
               <Input
                 type="number"
-                class="h-8 w-14 p-0 text-center text-sm"
+                class="h-8 w-14 text-center p-0 text-sm"
                 min="0"
                 max="59"
                 bind:value={minute}
@@ -185,13 +185,13 @@
                   handleTimeChange();
                 }}
               />
-              <span class="text-muted-foreground text-[10px]">分</span>
+              <span class="text-[10px] text-muted-foreground">分</span>
             </div>
-            <span class="text-muted-foreground pb-4 text-lg">:</span>
+            <span class="text-lg pb-4 text-muted-foreground">:</span>
             <div class="flex flex-col items-center gap-1">
               <Input
                 type="number"
-                class="h-8 w-14 p-0 text-center text-sm"
+                class="h-8 w-14 text-center p-0 text-sm"
                 min="0"
                 max="59"
                 bind:value={second}
@@ -200,7 +200,7 @@
                   handleTimeChange();
                 }}
               />
-              <span class="text-muted-foreground text-[10px]">秒</span>
+              <span class="text-[10px] text-muted-foreground">秒</span>
             </div>
           </div>
         </div>

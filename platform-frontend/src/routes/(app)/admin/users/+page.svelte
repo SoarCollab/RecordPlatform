@@ -243,13 +243,12 @@
           <tbody>
             {#each members as member (member.id)}
               <tr class="border-b last:border-0">
-                <td class="p-4">
-                  <div class="font-medium">
+                <td class="p-4"
+                  ><div class="font-medium">
                     {member.nickname || member.username}
                   </div>
-                  <div class="text-muted-foreground">{member.email}</div>
-                </td>
-
+                  <div class="text-muted-foreground">{member.email}</div></td
+                >
                 <td class="p-4">
                   <select
                     aria-label={`修改 ${member.username} 的角色`}
@@ -416,24 +415,20 @@
   </div>
 
   <Dialog.Root bind:open={inviteOpen}>
-    <Dialog.Content class="sm:max-w-md">
-      <form onsubmit={submitInvitation} class="space-y-4">
-        <Dialog.Header>
-          <Dialog.Title>邀请成员</Dialog.Title>
-          <Dialog.Description
+    <Dialog.Content class="sm:max-w-md"
+      ><form onsubmit={submitInvitation} class="space-y-4">
+        <Dialog.Header
+          ><Dialog.Title>邀请成员</Dialog.Title><Dialog.Description
             >邀请链接只通过邮件投递，页面不会显示令牌。</Dialog.Description
-          >
-        </Dialog.Header>
-
-        <label class="block space-y-2 text-sm">
-          <span>邮箱</span>
-          <Input type="email" required bind:value={inviteEmail} />
-        </label>
-
-        <label class="block space-y-2 text-sm">
-          <span>角色</span>
-
-          <select
+          ></Dialog.Header
+        ><label class="block space-y-2 text-sm"
+          ><span>邮箱</span><Input
+            type="email"
+            required
+            bind:value={inviteEmail}
+          /></label
+        ><label class="block space-y-2 text-sm"
+          ><span>角色</span><select
             required
             bind:value={inviteRole}
             class="bg-background h-10 w-full rounded-md border px-3"
@@ -460,14 +455,12 @@
             type="button"
             variant="outline"
             onclick={() => (inviteOpen = false)}>取消</Button
-          >
-
-          <Button type="submit" disabled={saving || !inviteReason.trim()}
+          ><Button type="submit" disabled={saving || !inviteReason.trim()}
             >{saving ? "发送中…" : "发送邀请"}</Button
-          >
-        </Dialog.Footer>
-      </form>
-    </Dialog.Content>
+          ></Dialog.Footer
+        >
+      </form></Dialog.Content
+    >
   </Dialog.Root>
 
   <Dialog.Root
@@ -487,13 +480,10 @@
           maxlength={255}
           bind:value={actionReason}
           placeholder="请输入操作原因"
-        />
-      </label>
-
-      <Dialog.Footer>
-        <Button variant="outline" onclick={() => (action = null)}>取消</Button>
-
-        <Button
+        /></label
+      ><Dialog.Footer
+        ><Button variant="outline" onclick={() => (action = null)}>取消</Button
+        ><Button
           variant="destructive"
           disabled={saving || !actionReason.trim()}
           onclick={confirmAction}>{saving ? "处理中…" : "确认"}</Button

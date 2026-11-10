@@ -53,7 +53,6 @@
     | "rejected"
     | "success"
   >("edit");
-
   let reason = $state("");
   let attempt = $state<PlatformMutationAttempt | null>(null);
   let reviewedTarget = $state("");
@@ -205,7 +204,6 @@
   }
 
   beforeNavigate((navigation) => {
-    if (navigation.shallow && navigation.type === "goto") return;
     if (locked && reviewedCredential && isCurrentCredential(reviewedCredential))
       navigation.cancel();
     else if (open) setOpen(false);
@@ -296,14 +294,13 @@
         {#if result.version !== null}<p>资源版本：{result.version}</p>{/if}
       </div>{/if}
     <Dialog.Footer>
-      {#if phase === "edit"}
-        <Button variant="outline" onclick={() => setOpen(false)}>取消</Button>
-
-        <Button onclick={review} disabled={!command || !reason.trim()}
+      {#if phase === "edit"}<Button
+          variant="outline"
+          onclick={() => setOpen(false)}>取消</Button
+        ><Button onclick={review} disabled={!command || !reason.trim()}
           >核对变更</Button
         >
-      {:else if phase === "review"}
-        <Button
+      {:else if phase === "review"}<Button
           variant="outline"
           onclick={() => {
             phase = "edit";

@@ -55,22 +55,18 @@
       >刷新服务状态</Button
     >
   </div>
-
-  {#if loading}
-    <p role="status">正在检查共享服务…</p>
-  {:else if error}
-    <p role="alert" class="text-destructive">{error}</p>
-  {:else if health}
-    <PlatformHealthPanel {health} />
-  {/if}
-
-  {#if auth.hasPlatformCapability("platform:tenant:read")}
-    <PlatformTenantPicker bind:value={selectedTenant} />
-  {/if}
-
-  {#if selectedTenant && auth.hasPlatformCapability("platform:quota:read")}
-    <PlatformQuotaPanel tenantId={selectedTenant} />
-  {:else}
-    <p class="text-muted-foreground text-sm">选择租户后查看其用量和配额。</p>
-  {/if}
+  {#if loading}<p role="status">正在检查共享服务…</p>{:else if error}<p
+      role="alert"
+      class="text-destructive"
+    >
+      {error}
+    </p>{:else if health}<PlatformHealthPanel {health} />{/if}
+  {#if auth.hasPlatformCapability("platform:tenant:read")}<PlatformTenantPicker
+      bind:value={selectedTenant}
+    />{/if}
+  {#if selectedTenant && auth.hasPlatformCapability("platform:quota:read")}<PlatformQuotaPanel
+      tenantId={selectedTenant}
+    />{:else}<p class="text-muted-foreground text-sm">
+      选择租户后查看其用量和配额。
+    </p>{/if}
 </div>

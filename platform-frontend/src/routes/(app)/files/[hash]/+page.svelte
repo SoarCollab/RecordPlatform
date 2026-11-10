@@ -220,7 +220,6 @@
           message: friendShareMessage || undefined,
         }),
       );
-
       await Promise.all(sharePromises);
       notifications.success(`已分享给 ${selectedFriends.size} 位好友`);
       friendShareDialogOpen = false;
@@ -312,7 +311,7 @@
         stroke-linejoin="round"
         stroke-width="2"
         d="M10 19l-7-7m0 0l7-7m-7 7h18"
-      ></path>
+      />
     </svg>
     返回文件列表
   </a>
@@ -342,7 +341,7 @@
               stroke-linejoin="round"
               stroke-width="2"
               d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-            ></path>
+            />
           </svg>
         </div>
         <p class="text-muted-foreground">{error}</p>
@@ -371,7 +370,7 @@
                   stroke-linejoin="round"
                   stroke-width="2"
                   d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                ></path>
+                />
               </svg>
             </div>
             <div>
@@ -413,7 +412,7 @@
                 stroke-linejoin="round"
                 stroke-width="2"
                 d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-              ></path>
+              />
             </svg>
             <span class="text-sm">
               分享自 <span class="font-medium text-blue-600"
@@ -448,13 +447,13 @@
                       stroke-linejoin="round"
                       stroke-width="2"
                       d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                    ></path>
+                    />
                     <path
                       stroke-linecap="round"
                       stroke-linejoin="round"
                       stroke-width="2"
                       d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                    ></path>
+                    />
                   </svg>
                 {/if}
                 预览文件
@@ -472,7 +471,7 @@
                   stroke-linejoin="round"
                   stroke-width="2"
                   d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                ></path>
+                />
               </svg>
               下载文件
             </Button>
@@ -494,7 +493,7 @@
                   stroke-linejoin="round"
                   stroke-width="2"
                   d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"
-                ></path>
+                />
               </svg>
               分享链接
             </Button>
@@ -510,7 +509,7 @@
                   stroke-linejoin="round"
                   stroke-width="2"
                   d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-                ></path>
+                />
               </svg>
               分享给好友
             </Button>
@@ -535,7 +534,7 @@
                 stroke-linejoin="round"
                 stroke-width="2"
                 d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
-              ></path>
+              />
             </svg>
             区块链存证信息
           </Card.Title>
@@ -594,7 +593,7 @@
                 stroke-linejoin="round"
                 stroke-width="2"
                 d="M5 13l4 4L19 7"
-              ></path>
+              />
             </svg>
             <span>此文件已通过 FISCO BCOS 区块链存证</span>
           </div>
@@ -633,13 +632,13 @@
                   stroke-linejoin="round"
                   stroke-width="2"
                   d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                ></path>
+                />
                 <path
                   stroke-linecap="round"
                   stroke-linejoin="round"
                   stroke-width="2"
                   d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                ></path>
+                />
               </svg>
               文件预览
             </Card.Title>
@@ -655,7 +654,7 @@
                   stroke-linejoin="round"
                   stroke-width="2"
                   d="M6 18L18 6M6 6l12 12"
-                ></path>
+                />
               </svg>
             </Button>
           </div>
@@ -743,10 +742,9 @@
     {/if}
 
     <Dialog.Footer>
-      <Button variant="outline" onclick={() => (shareDialogOpen = false)}
-        >{shareCode ? "关闭" : "取消"}</Button
-      >
-
+      <Button variant="outline" onclick={() => (shareDialogOpen = false)}>
+        {shareCode ? "关闭" : "取消"}
+      </Button>
       {#if !shareCode}
         <Button onclick={handleShare} disabled={isSharing}>
           {isSharing ? "创建中..." : "创建分享"}
@@ -835,7 +833,7 @@
                     stroke-linejoin="round"
                     stroke-width="2"
                     d="M5 13l4 4L19 7"
-                  ></path>
+                  />
                 </svg>
               {/if}
             </button>
@@ -859,10 +857,9 @@
     </div>
 
     <Dialog.Footer>
-      <Button variant="outline" onclick={() => (friendShareDialogOpen = false)}
-        >取消</Button
-      >
-
+      <Button variant="outline" onclick={() => (friendShareDialogOpen = false)}>
+        取消
+      </Button>
       <Button
         onclick={handleShareToFriend}
         disabled={selectedFriends.size === 0 || isSharingToFriend}

@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { cn } from "#lib/utils.ts";
+  import { cn } from "#lib/utils.js";
 
   let { class: className, ...props } = $props();
 </script>
 
 <div
-  class={cn("bg-muted animate-pulse rounded-md", className)}
+  class={cn("animate-pulse rounded-md bg-muted", className)}
   {...props}
 ></div>

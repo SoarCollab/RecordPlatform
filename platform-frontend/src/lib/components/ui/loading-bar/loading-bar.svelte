@@ -9,7 +9,7 @@
   let resetTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
   $effect(() => {
-    if (navigating.to) {
+    if (navigating) {
       start();
     } else {
       complete();
@@ -68,11 +68,11 @@
 
 {#if visible}
   <div
-    class="bg-primary fixed top-0 right-0 left-0 z-[100] h-0.5 transition-all duration-300 ease-out"
+    class="fixed top-0 left-0 right-0 z-[100] h-0.5 bg-primary transition-all duration-300 ease-out"
     style="width: {progress * 100}%"
   >
     <div
-      class="absolute right-0 h-full w-[100px] translate-y-[-4px] rotate-3 opacity-100 shadow-[0_0_10px_#3b82f6]"
+      class="absolute right-0 h-full w-[100px] shadow-[0_0_10px_#3b82f6] rotate-3 translate-y-[-4px] opacity-100"
     ></div>
   </div>
 {/if}

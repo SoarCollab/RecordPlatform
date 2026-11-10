@@ -18,8 +18,8 @@
   interface Props {
     children: Snippet;
   }
-
   let { children }: Props = $props();
+
   const notifications = useNotifications();
   const sse = useSSE();
   const download = useDownload();
@@ -53,7 +53,6 @@
 
   // 页面切换动画 — 使用浏览器原生 View Transitions API
   onNavigate((navigation) => {
-    if (navigation.shallow && navigation.type === "goto") return;
     if (!document.startViewTransition) return;
 
     return new Promise((resolve) => {
@@ -111,7 +110,7 @@
               stroke-linejoin="round"
               stroke-width="2"
               d="M6 18L18 6M6 6l12 12"
-            ></path>
+            />
           </svg>
         </button>
       </div>

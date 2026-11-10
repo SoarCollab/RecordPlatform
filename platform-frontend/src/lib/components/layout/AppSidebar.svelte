@@ -1,12 +1,9 @@
 <script lang="ts">
   import { AppIcon } from "$components/ui/app-icon";
-  import {
-    adminItems,
-    menuItems,
-    type BadgeKey,
-  } from "#lib/config/navigation.ts";
+  import { adminItems, menuItems, type BadgeKey } from "#lib/config/navigation.js";
   import logo from "#lib/assets/logo.png";
 
+  // Svelte 5.57 起 $props 不再接受类型参数，改为对解构结果做类型标注。
   let {
     collapsed,
     onToggle,
@@ -21,13 +18,14 @@
     getBadgeCount: (key: BadgeKey) => number;
   } = $props();
 
+
   function isActive(href: string) {
     return pathname === href || pathname.startsWith(href + "/");
   }
 </script>
 
 <aside
-  class="bg-card flex flex-col border-r transition-all duration-300"
+  class="flex flex-col border-r bg-card transition-all duration-300"
   class:w-64={!collapsed}
   class:w-16={collapsed}
 >
@@ -49,7 +47,7 @@
         <li>
           <a
             href={item.href}
-            class="hover:bg-accent relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+            class="relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-accent"
             class:bg-accent={isActive(item.href)}
             class:text-primary={isActive(item.href)}
             class:justify-center={collapsed}
@@ -60,12 +58,12 @@
             <div class="relative">
               <AppIcon name={item.icon} class="h-5 w-5 shrink-0" />
               {#if collapsed && badgeCount > 0}
-                <span class="absolute -top-1 -right-1 flex h-2 w-2">
+                <span class="absolute -right-1 -top-1 flex h-2 w-2">
                   <span
-                    class="bg-destructive absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
+                    class="absolute inline-flex h-full w-full animate-ping rounded-full bg-destructive opacity-75"
                   ></span>
                   <span
-                    class="bg-destructive relative inline-flex h-2 w-2 rounded-full"
+                    class="relative inline-flex h-2 w-2 rounded-full bg-destructive"
                   ></span>
                 </span>
               {/if}
@@ -74,7 +72,7 @@
               <span class="flex-1">{item.label}</span>
               {#if badgeCount > 0}
                 <span
-                  class="bg-destructive flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-medium text-white"
+                  class="flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-xs font-medium text-white"
                 >
                   {badgeCount > 99 ? "99+" : badgeCount}
                 </span>
@@ -88,7 +86,7 @@
     {#if isAdmin}
       <div class="my-4 border-t"></div>
       <p
-        class="text-muted-foreground mb-2 px-3 text-xs font-medium uppercase"
+        class="mb-2 px-3 text-xs font-medium uppercase text-muted-foreground"
         class:hidden={collapsed}
       >
         管理功能
@@ -98,7 +96,7 @@
           <li>
             <a
               href={item.href}
-              class="hover:bg-accent flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+              class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-accent"
               class:bg-accent={isActive(item.href)}
               class:text-primary={isActive(item.href)}
               class:justify-center={collapsed}
@@ -117,7 +115,7 @@
 
   <div class="border-t p-2">
     <button
-      class="text-muted-foreground hover:bg-accent flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm"
+      class="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent"
       onclick={onToggle}
       aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
     >

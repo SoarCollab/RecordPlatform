@@ -7,7 +7,7 @@
   import {
     platformNavigation,
     platformCapabilityForPath,
-  } from "#lib/config/platformNavigation.ts";
+  } from "#lib/config/platformNavigation.js";
   import { requirePlatformSession } from "$utils/platformAccess";
   import { Button } from "$components/ui/button";
   import { toggleMode } from "mode-watcher";
@@ -66,11 +66,13 @@
       <div
         class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4"
       >
-        <a href="/platform" class="flex items-center gap-3 font-semibold">
-          <img src={logo} alt="存证平台" class="h-8 w-8 rounded-lg" />
-          平台管理
-        </a>
-
+        <a href="/platform" class="flex items-center gap-3 font-semibold"
+          ><img
+            src={logo}
+            alt="存证平台"
+            class="h-8 w-8 rounded-lg"
+          />平台管理</a
+        >
         <div class="flex items-center gap-3 text-sm">
           <span class="text-muted-foreground">{auth.displayName}</span><Button
             variant="ghost"
