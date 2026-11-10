@@ -28,7 +28,7 @@ class VerifierExceptionHandlerTest {
                 .extracting(VerifierErrorResponse::code, VerifierErrorResponse::message)
                 .containsExactly("VERIFIER_BUSY", "Please retry");
         assertThat(badRequest.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-        assertThat(badRequest.getHeaders().containsKey(HttpHeaders.RETRY_AFTER)).isFalse();
+        assertThat(badRequest.getHeaders().containsHeader(HttpHeaders.RETRY_AFTER)).isFalse();
         assertThat(badRequest.getHeaders().getCacheControl()).isEqualTo("no-store");
     }
 
