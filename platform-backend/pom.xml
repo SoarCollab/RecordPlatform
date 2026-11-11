@@ -73,7 +73,7 @@
             <dependency>
                 <groupId>com.github.jsqlparser</groupId>
                 <artifactId>jsqlparser</artifactId>
-                <version>5.3</version>
+                <version>5.4</version>
             </dependency>
             <!--    项目子模块    -->
             <dependency>
