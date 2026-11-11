@@ -103,8 +103,14 @@ class DirectUploadFaultMatrixMinioIT {
     private static final String TOXIPROXY_IMAGE = "ghcr.io/shopify/toxiproxy:2.5.0";
     private static final Network NETWORK = Network.newNetwork();
 
-    /** 故障矩阵各用例共享的默认传输预算（秒）。 */
-    private static final int DEFAULT_TRANSFER_TIMEOUT_SECONDS = 3;
+    /**
+     * 故障矩阵各用例共享的默认传输预算（秒）。
+     * <p>
+     * 不能取太小：SDK 的尝试超时是「预算/2」，CI 上首次请求（建连 + 容器冷启动）可能超过 1.5 秒，
+     * 客户端会主动断连并让 MinIO 返回 499「Client disconnected before response was ready」。
+     * 需要严格计时的用例（F14）会自行把预算改成 1 秒。
+     */
+    private static final int DEFAULT_TRANSFER_TIMEOUT_SECONDS = 15;
 
     @Container
     private static final GenericContainer<?> MINIO_A = minioContainer("fault-minio-a");
