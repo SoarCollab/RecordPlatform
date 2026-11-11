@@ -329,6 +329,11 @@
                                 <exclude>**/DirectUploadConstrainedHeapIT.java</exclude>
                             </excludes>
                             <failIfNoTests>true</failIfNoTests>
+                            <!-- 每个 IT 类独立 fork：容器由 Ryuk 在 JVM 退出时回收，
+                                 避免多个 provider/Toxiproxy/MinIO 容器同时存活把 CI runner 压到 OOM
+                                 （表现为随机位置的 Connection reset / 499）。 -->
+                            <forkCount>1</forkCount>
+                            <reuseForks>false</reuseForks>
                             <systemPropertyVariables>
                                 <user.home>${project.build.directory}</user.home>
                             </systemPropertyVariables>
