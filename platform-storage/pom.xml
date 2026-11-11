@@ -20,22 +20,22 @@
         <!-- 保持在 2.44.x：2.57 起 storage 的 MinIO/Toxiproxy 故障矩阵出现
              「Client disconnected before response was ready」(499) 回归，
              需要独立环境定位后再升。该版本不涉及任何 CVE。 -->
-        <aws.sdk.version>2.44.4</aws.sdk.version>
+        <aws.sdk.version>2.57.11</aws.sdk.version>
         <hutool.version>5.8.48</hutool.version>
         <redisson.version>4.8.0</redisson.version>
         <spring-cloud-alibaba-dependencies.version>2025.1.0.0</spring-cloud-alibaba-dependencies.version>
         <!-- Spring Cloud 官方 BOM 必须先于 SCA 导入：SCA 2025.1.0.0 携带的 Cloud 5.0.0 只兼容 Boot 4.0.x -->
         <spring-cloud.version>2025.1.4</spring-cloud.version>
         <logstash.logback.version>9.0</logstash.logback.version>
-        <skywalking.toolkit.version>9.6.0</skywalking.toolkit.version>
-        <netty.version>4.2.17.Final</netty.version>
+        <skywalking.toolkit.version>9.8.0</skywalking.toolkit.version>
+        <netty.version>4.2.20.Final</netty.version>
         <log4j2.version>2.25.5</log4j2.version>
         <httpclient5.version>5.6.3</httpclient5.version>
         <httpcore5.version>5.4.3</httpcore5.version>
         <testcontainers.version>2.0.5</testcontainers.version>
         <commons-compress.version>1.28.0</commons-compress.version>
-        <commons-lang3.version>3.20.0</commons-lang3.version>
-        <maven-failsafe-plugin.version>3.5.5</maven-failsafe-plugin.version>
+        <commons-lang3.version>3.21.0</commons-lang3.version>
+        <maven-failsafe-plugin.version>3.6.1</maven-failsafe-plugin.version>
     </properties>
     <dependencies>
         <dependency>
@@ -215,12 +215,12 @@
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
-                <version>3.1.5</version>
+                <version>3.3.0</version>
             </dependency>
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
-                <version>3.1.5</version>
+                <version>3.3.0</version>
             </dependency>
             <dependency>
                 <groupId>io.netty</groupId>
@@ -280,7 +280,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.6.2</version>
+                <version>3.7.0</version>
                 <executions>
                     <execution>
                         <id>enforce-java-21</id>
