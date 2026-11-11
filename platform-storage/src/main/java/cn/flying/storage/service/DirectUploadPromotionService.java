@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import software.amazon.awssdk.awscore.AwsRequestOverrideConfiguration;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.exception.SdkException;
+import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.http.ContentStreamProvider;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -566,7 +567,20 @@ public class DirectUploadPromotionService {
                         part.partIndex()))
                 .build();
         int bufferSize = storageProperties.getDirectUpload().getEffectiveStreamBufferBytes();
-        try (ResponseInputStream<GetObjectResponse> response = client.getObject(request);
+        ResponseInputStream<GetObjectResponse> responseStream;
+        try {
+            responseStream = client.getObject(request);
+        } catch (SdkClientException e) {
+            // SDK 在截止点之后可能先以重试耗尽的形式失败（如连接被重置），
+            // 对外仍应保持「有界超时」语义，而不是暴露底层传输异常。
+            if (remainingNanos(verificationDeadline) <= 0) {
+                incrementOperationMetric("verification", "timeout");
+                throw new IllegalStateException(
+                        "direct-upload verification timed out for part " + part.partIndex(), e);
+            }
+            throw new IllegalStateException("failed to stream direct-upload object", e);
+        }
+        try (ResponseInputStream<GetObjectResponse> response = responseStream;
              DeadlineBoundInputStream input = new DeadlineBoundInputStream(
                      response,
                      bufferSize,

@@ -41,7 +41,6 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
-import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 
 import java.io.IOException;
 import java.net.URI;
@@ -103,6 +102,15 @@ class DirectUploadFaultMatrixMinioIT {
     private static final String MINIO_IMAGE = "bitnamilegacy/minio:2024.11.7-debian-12-r2";
     private static final String TOXIPROXY_IMAGE = "ghcr.io/shopify/toxiproxy:2.5.0";
     private static final Network NETWORK = Network.newNetwork();
+
+    /**
+     * 故障矩阵各用例共享的默认传输预算（秒）。
+     * <p>
+     * 不能取太小：SDK 的尝试超时是「预算/2」，CI 上首次请求（建连 + 容器冷启动）可能超过 1.5 秒，
+     * 客户端会主动断连并让 MinIO 返回 499「Client disconnected before response was ready」。
+     * 需要严格计时的用例（F14）会自行把预算改成 1 秒。
+     */
+    private static final int DEFAULT_TRANSFER_TIMEOUT_SECONDS = 15;
 
     @Container
     private static final GenericContainer<?> MINIO_A = minioContainer("fault-minio-a");
@@ -221,7 +229,9 @@ class DirectUploadFaultMatrixMinioIT {
         storageProperties.getReplication().setFactor(3);
         storageProperties.getReplication().setQuorum("2");
         storageProperties.getDirectUpload().setStreamBufferBytes(8 * 1024);
-        storageProperties.getDirectUpload().setTransferTimeoutSeconds(3);
+        // 每个故障场景都用固定的默认预算：F14 之类的用例会临时改写它，
+        // 若不复位，后续用例（如 F03）会带着 1 秒预算运行，SDK 主动断连后 MinIO 返回 499。
+        storageProperties.getDirectUpload().setTransferTimeoutSeconds(DEFAULT_TRANSFER_TIMEOUT_SECONDS);
         storageProperties.getDegradedWrite().setEnabled(true);
         storageProperties.getDegradedWrite().setTrackForSync(true);
         executor = Executors.newFixedThreadPool(4);
@@ -792,12 +802,6 @@ class DirectUploadFaultMatrixMinioIT {
         return S3Client.builder()
                 .endpointOverride(URI.create(endpoint))
                 .region(Region.US_EAST_1)
-                // 给 S3 SDK 调用加上总时限：任何卡住的请求在 20s 内失败并留下明确异常，
-                // 而不是耗尽 JUnit 的单测时限（曾导致 shouldRejectExpiredPresignedPut 60s 超时）。
-                .overrideConfiguration(ClientOverrideConfiguration.builder()
-                        .apiCallTimeout(Duration.ofSeconds(20))
-                        .apiCallAttemptTimeout(Duration.ofSeconds(10))
-                        .build())
                 .credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)))
                 .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())
