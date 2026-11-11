@@ -19,6 +19,9 @@
         <dubbo.version>3.3.7</dubbo.version>
         <protobuf.version>4.36.2</protobuf.version>
         <dubbo-api-docs.version>2.7.8.1</dubbo-api-docs.version>
+        <!-- 与 Boot 4.1.2 BOM 对齐：Dubbo starter 声明的旧版本由此覆盖 -->
+        <jackson2.version>2.21.7</jackson2.version>
+        <micrometer.version>1.17.2</micrometer.version>
         <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
         <netty.version>4.2.17.Final</netty.version>
         <log4j2.version>2.26.1</log4j2.version>
@@ -74,6 +77,23 @@
                 <groupId>io.netty</groupId>
                 <artifactId>netty-bom</artifactId>
                 <version>${netty.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Dubbo 的 starter 在自身 POM 里声明了 Boot 2.7 时代的 jackson/micrometer，
+                 静态依赖分析工具会按声明版本报告 CVE（实际运行时由 Boot 4 BOM 覆盖）。
+                 这里显式导入同名 BOM，使声明与解析结果一致。 -->
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson2.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.micrometer</groupId>
+                <artifactId>micrometer-bom</artifactId>
+                <version>${micrometer.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
