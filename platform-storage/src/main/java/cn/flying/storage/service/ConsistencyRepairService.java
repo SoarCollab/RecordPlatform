@@ -17,6 +17,7 @@ import software.amazon.awssdk.awscore.AwsRequestOverrideConfiguration;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.exception.ApiCallAttemptTimeoutException;
 import software.amazon.awssdk.core.exception.ApiCallTimeoutException;
+import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.http.ContentStreamProvider;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -581,7 +582,7 @@ public class ConsistencyRepairService {
             return result(ImmediateRepairStatus.RETRYABLE_DEFERRED);
         } catch (RuntimeException e) {
             log.error("复制对象 {} 从 {} 到 {} 失败: {}", objectName, sourceNode, targetNode, e.getMessage());
-            if (isTimeoutFailure(e) || deadlineExpired(deadline)) {
+            if (isTimeoutFailure(e) || isTransientTransportFailure(e) || deadlineExpired(deadline)) {
                 return result(ImmediateRepairStatus.RETRYABLE_DEFERRED);
             }
             return result(copyStarted
@@ -819,6 +820,29 @@ public class ConsistencyRepairService {
     /**
      * 识别 AWS API call/attempt timeout 及其包装异常。
      */
+    /**
+     * 判断异常链是否来自可重试的瞬时传输故障。
+     * <p>
+     * 连接被重置、连接中断等客户端侧传输失败并不代表目标前置条件缺失，
+     * 若归类为 {@code PREREQUISITE_UNAVAILABLE} 会放弃重试；这类失败应与超时一样延后重试。
+     *
+     * @param failure 复制过程抛出的异常
+     * @return true 表示属于瞬时传输故障
+     */
+    private boolean isTransientTransportFailure(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof SdkClientException
+                    || current instanceof java.net.SocketException
+                    || current instanceof java.net.SocketTimeoutException
+                    || current instanceof java.io.IOException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
     private boolean isTimeoutFailure(Throwable failure) {
         Throwable current = failure;
         while (current != null) {

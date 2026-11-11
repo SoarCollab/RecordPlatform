@@ -17,6 +17,7 @@
     <properties>
         <java.version>21</java.version>
         <hutool.version>5.8.48</hutool.version>
+        <protobuf.version>4.36.2</protobuf.version>
         <mybatis-plus-bom.version>3.5.18</mybatis-plus-bom.version>
         <testcontainers.version>2.0.5</testcontainers.version>
         <jacoco.version>0.8.16</jacoco.version>
@@ -126,6 +127,15 @@
                 <groupId>com.baomidou</groupId>
                 <artifactId>mybatis-plus-bom</artifactId>
                 <version>${mybatis-plus-bom.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Dubbo 的 metadata/BOM 链路声明了 protobuf 3.25.1（CVE-2024-7254）；
+                 统一导入 protobuf BOM，使声明与运行时解析一致。 -->
+            <dependency>
+                <groupId>com.google.protobuf</groupId>
+                <artifactId>protobuf-bom</artifactId>
+                <version>${protobuf.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>

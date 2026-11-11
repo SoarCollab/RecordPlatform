@@ -26,6 +26,7 @@ import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.containers.wait.strategy.Wait;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.regions.Region;
@@ -94,6 +95,10 @@ import static org.mockito.Mockito.when;
 @Testcontainers(disabledWithoutDocker = false)
 @Timeout(value = 60, unit = TimeUnit.SECONDS)
 class DirectUploadFaultMatrixMinioIT {
+
+    /** 夹具写入的有限重试次数与退避，用于容忍容器刚就绪时的瞬时断连。 */
+    private static final int FIXTURE_PUT_ATTEMPTS = 3;
+    private static final long FIXTURE_PUT_BACKOFF_MILLIS = 250L;
 
     private static final int MINIO_PORT = 9000;
     private static final String ACCESS_KEY = "directupload";
@@ -677,12 +682,33 @@ class DirectUploadFaultMatrixMinioIT {
 
     /**
      * 写入一个真实 staging 对象并返回 provider ETag。
+     * <p>
+     * 容器刚就绪时 provider 偶发在响应前断开（MinIO 记为 499），这属于测试夹具的瞬时故障，
+     * 与产品行为无关，因此这里做有限重试；真实超时/故障场景由专门的用例注入。
      */
     private String putObject(String bucket, String key, byte[] content) {
-        return directClient.putObject(
-                PutObjectRequest.builder().bucket(bucket).key(key).build(),
-                RequestBody.fromBytes(content)
-        ).eTag();
+        SdkException lastFailure = null;
+        for (int attempt = 1; attempt <= FIXTURE_PUT_ATTEMPTS; attempt++) {
+            try {
+                return directClient.putObject(
+                        PutObjectRequest.builder().bucket(bucket).key(key).build(),
+                        RequestBody.fromBytes(content)
+                ).eTag();
+            } catch (SdkException failure) {
+                lastFailure = failure;
+                sleepQuietly(FIXTURE_PUT_BACKOFF_MILLIS * attempt);
+            }
+        }
+        throw lastFailure;
+    }
+
+    /** Sleeps without masking interruption, used only between fixture retries. */
+    private static void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
