@@ -2,16 +2,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as prettier from "prettier";
-import * as sveltePlugin from "prettier-plugin-svelte";
 import * as tailwindPlugin from "prettier-plugin-tailwindcss";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDir, "..");
 const prettierIgnorePath = path.join(projectRoot, ".prettierignore");
-const prettierPlugins = [
-  sveltePlugin.default ?? sveltePlugin,
-  tailwindPlugin.default ?? tailwindPlugin,
-];
+// `.svelte` 不在 prettier 覆盖范围内（项目内 .svelte 采用手写风格，见 .prettierignore 说明），
+// 这里只启用 Tailwind 类名排序插件。
+const prettierPlugins = [tailwindPlugin.default ?? tailwindPlugin];
 
 /**
  * Normalize incoming file arguments to absolute paths under the frontend project.

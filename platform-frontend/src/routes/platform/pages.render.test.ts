@@ -122,7 +122,7 @@ const server = setupServer(
 
 // Preload the route graph under active network interception, outside timed behavior hooks.
 vi.stubGlobal("AbortController", transferableAbortController().constructor);
-server.listen({ onUnhandledRequest: "error" });
+server.listen({ onUnhandledFrame: "error" });
 const [
   client,
   authModule,

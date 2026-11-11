@@ -22,7 +22,7 @@ async function loadLayoutModule(options: {
   });
 
   vi.doMock("@sveltejs/kit", () => ({ redirect }));
-  vi.doMock("$app/environment", () => ({ browser: options.browser }));
+  vi.doMock("$app/env", () => ({ browser: options.browser }));
   vi.doMock("$api/client", () => ({ getToken: () => options.token }));
   vi.doMock("$stores/auth.svelte", () => ({
     useAuth: () => ({ scope: options.scope ?? "tenant", initializeSession }),

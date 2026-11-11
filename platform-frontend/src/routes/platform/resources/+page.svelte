@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
   import { getPlatformResourceHealth } from "$api/endpoints/platform";
   import { requirePlatformCapability } from "$utils/platformAccess";
   import { platformErrorMessage } from "$utils/platformMutation";
@@ -35,7 +35,7 @@
     }
   }
   onMount(() => {
-    selectedTenant = $page.url.searchParams.get("tenant") ?? "";
+    selectedTenant = page.url.searchParams.get("tenant") ?? "";
     void load();
     return () => {
       sequence += 1;

@@ -908,12 +908,12 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
-          version: 10.26.1
+          version: 10.34.9
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           cache-dependency-path: platform-frontend/pnpm-lock.yaml
 
@@ -926,7 +926,7 @@ jobs:
         working-directory: .
         run: |
           for attempt in 1 2; do
-            if corepack pnpm@10.26.1 -C platform-frontend audit --audit-level high; then
+            if corepack pnpm@10.34.9 -C platform-frontend audit --audit-level high; then
               exit 0
             fi
             if [ "$attempt" -eq 2 ]; then
@@ -994,12 +994,12 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
-          version: 10.26.1
+          version: 10.34.9
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           cache-dependency-path: platform-frontend/pnpm-lock.yaml
 
@@ -1308,12 +1308,12 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
-          version: 10.26.1
+          version: 10.34.9
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           cache-dependency-path: platform-frontend/pnpm-lock.yaml
 

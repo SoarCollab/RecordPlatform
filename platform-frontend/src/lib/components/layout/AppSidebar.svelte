@@ -3,14 +3,20 @@
   import { adminItems, menuItems, type BadgeKey } from "$lib/config/navigation";
   import logo from "$lib/assets/logo.png";
 
-  let { collapsed, onToggle, pathname, isAdmin, getBadgeCount } = $props<{
+  // Svelte 5.57 起 $props 不再接受类型参数，改为标注解构结果的类型。
+  let {
+    collapsed,
+    onToggle,
+    pathname,
+    isAdmin,
+    getBadgeCount,
+  }: {
     collapsed: boolean;
     onToggle: () => void;
     pathname: string;
     isAdmin: boolean;
     getBadgeCount: (key: BadgeKey) => number;
-  }>();
-
+  } = $props();
 
   function isActive(href: string) {
     return pathname === href || pathname.startsWith(href + "/");

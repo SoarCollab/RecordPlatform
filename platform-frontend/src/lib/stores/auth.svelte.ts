@@ -34,6 +34,7 @@ let changingSession: {
   generation: number;
   snapshot: CredentialSnapshot;
 } | null = null;
+
 let pending: { snapshot: CredentialSnapshot; promise: Promise<void> } | null =
   null;
 

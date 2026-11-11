@@ -1,3 +1,5 @@
+import adapter from "@sveltejs/adapter-static";
+import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, loadEnv } from "vite";
@@ -20,7 +22,32 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [tailwindcss(), sveltekit()],
+    plugins: [
+      tailwindcss(),
+      sveltekit({
+        preprocess: vitePreprocess(),
+        adapter: adapter({
+          pages: "dist",
+          assets: "dist",
+          fallback: "index.html" /* SPA 路由回退 */,
+          precompress: true /* 预压缩 .gz/.br */,
+        }),
+
+        alias: {
+          // kit 3 把 $app/environment 改名为 $app/env（browser/dev/building/version 语义不变），
+          // 用别名保持既有源码不变，避免迁移 diff 变成全量改 import。
+          "$app/environment": "$app/env",
+          // kit 3 已移除内置 `$lib` 别名，这里按原语义补回，
+          // 使既有 $lib/... 引用无需全量改写。
+          $lib: "src/lib",
+          $components: "src/lib/components",
+          $stores: "src/lib/stores",
+          $api: "src/lib/api",
+          $services: "src/lib/services",
+          $utils: "src/lib/utils",
+        },
+      }),
+    ],
     server: {
       port: 5173,
       proxy: {

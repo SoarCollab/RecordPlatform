@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { env } from "$env/dynamic/public";
+import { PUBLIC_API_BASE_URL } from "$app/env/public";
 import { getAvatarUrl } from "./avatar";
 
 describe("getAvatarUrl", () => {
@@ -20,7 +20,7 @@ describe("getAvatarUrl", () => {
   it("should build download URL for relative paths", () => {
     const apiBase = import.meta.env.DEV
       ? "/record-platform/api/v1"
-      : `${env.PUBLIC_API_BASE_URL || "/record-platform"}/api/v1`;
+      : `${PUBLIC_API_BASE_URL || "/record-platform"}/api/v1`;
 
     expect(getAvatarUrl("avatar/abc.png")).toBe(
       `${apiBase}/images/download/images/avatar/abc.png`,

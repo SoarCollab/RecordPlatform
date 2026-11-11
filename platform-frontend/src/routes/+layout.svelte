@@ -2,7 +2,7 @@
   import "../app.css";
   import { ModeWatcher } from "mode-watcher";
   import { onNavigate } from "$app/navigation";
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
   import { subscribeCredentialChanges } from "$api/client";
   import { getStoredScopeHint } from "$utils/authSession";
   import { useNotifications } from "$stores/notifications.svelte";
@@ -28,11 +28,11 @@
   let scopeHint = $state(getStoredScopeHint());
   const showDownloads = $derived(
     scopeHint !== "platform" &&
-      (auth.scope === "tenant" || $page.url.pathname.startsWith("/share/")) &&
-      !$page.url.pathname.startsWith("/platform") &&
+      (auth.scope === "tenant" || page.url.pathname.startsWith("/share/")) &&
+      !page.url.pathname.startsWith("/platform") &&
       !(
-        $page.url.pathname === "/login" &&
-        $page.url.searchParams.get("mode") === "platform"
+        page.url.pathname === "/login" &&
+        page.url.searchParams.get("mode") === "platform"
       ),
   );
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { useAuth } from "$stores/auth.svelte";
   import { subscribeCredentialChanges } from "$api/client";
@@ -17,7 +17,7 @@
   const auth = useAuth();
   let validationError = $state("");
   let validationGeneration = 0;
-  const capability = $derived(platformCapabilityForPath($page.url.pathname));
+  const capability = $derived(platformCapabilityForPath(page.url.pathname));
   const allowed = $derived(
     auth.isPlatformAdmin &&
       (!capability || auth.hasPlatformCapability(capability)),

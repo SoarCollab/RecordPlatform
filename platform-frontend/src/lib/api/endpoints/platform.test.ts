@@ -11,7 +11,7 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { transferableAbortController } from "node:util";
 import { goto } from "$app/navigation";
-import * as fixture from "$lib/../test/fixtures/platform";
+import * as fixture from "../../../test/fixtures/platform";
 import type { PlatformConfigurationKey } from "$api/types";
 
 const base = "*/record-platform/api/v1/platform/*";
@@ -49,7 +49,7 @@ const server = setupServer(
   }),
 );
 vi.stubGlobal("AbortController", transferableAbortController().constructor);
-server.listen({ onUnhandledRequest: "error" });
+server.listen({ onUnhandledFrame: "error" });
 const [api, client] = await Promise.all([
   import("./platform"),
   import("$api/client"),

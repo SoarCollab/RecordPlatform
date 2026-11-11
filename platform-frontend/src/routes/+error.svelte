@@ -1,23 +1,23 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 </script>
 
 <div class="flex min-h-screen flex-col items-center justify-center px-4">
 	<div class="text-center">
-		<h1 class="mb-2 text-6xl font-bold text-primary">{$page.status}</h1>
+		<h1 class="mb-2 text-6xl font-bold text-primary">{page.status}</h1>
 		<h2 class="mb-4 text-2xl font-semibold">
-			{#if $page.status === 404}
+			{#if page.status === 404}
 				页面未找到
-			{:else if $page.status === 403}
+			{:else if page.status === 403}
 				无权访问
-			{:else if $page.status === 500}
+			{:else if page.status === 500}
 				服务器错误
 			{:else}
 				出错了
 			{/if}
 		</h2>
 		<p class="mb-8 text-muted-foreground">
-			{$page.error?.message || '抱歉，请求的页面发生了错误'}
+			{page.error?.message || '抱歉，请求的页面发生了错误'}
 		</p>
 		<a
 			href="/"

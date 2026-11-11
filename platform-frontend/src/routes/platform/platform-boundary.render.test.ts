@@ -21,48 +21,18 @@ import {
   vi,
 } from "vitest";
 import type { PlatformCapability } from "$api/types";
+import { setPagePath } from "../../test/page-state.svelte";
 
-const route = vi.hoisted(() => {
-  let value = {
-    url: new URL("http://localhost/platform"),
-    params: {},
-    route: { id: "/platform" },
-    status: 200,
-    error: null,
-    data: {},
-    form: null,
-  };
-  const listeners = new Set<(page: typeof value) => void>();
+vi.mock("$app/state", async () => {
+  const mock = await import("../../test/page-state.svelte");
   return {
-    set(path: string) {
-      value = { ...value, url: new URL(path, "http://localhost") };
-      for (const listener of listeners) listener(value);
-    },
-    page: {
-      subscribe(listener: (page: typeof value) => void) {
-        listeners.add(listener);
-        listener(value);
-        return () => listeners.delete(listener);
-      },
-    },
+    page: mock.pageState,
+    navigating: mock.navigatingState,
+    updated: mock.updatedState,
   };
 });
-vi.mock("$app/stores", () => ({
-  page: route.page,
-  navigating: {
-    subscribe: (listener: (value: null) => void) => {
-      listener(null);
-      return () => {};
-    },
-  },
-  updated: {
-    subscribe: (listener: (value: boolean) => void) => {
-      listener(false);
-      return () => {};
-    },
-    check: async () => false,
-  },
-}));
+
+const route = { set: setPagePath };
 
 const base = "*/record-platform/api/v1";
 const expiry = "2099-01-01T00:00:00Z";
@@ -164,7 +134,7 @@ vi.stubGlobal(
     dispatchEvent: vi.fn(),
   })),
 );
-server.listen({ onUnhandledRequest: "error" });
+server.listen({ onUnhandledFrame: "error" });
 const [
   client,
   { useAuth },

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { browser } from '$app/environment';
+	import { browser } from '$app/env';
 	import { page as appPage } from '$app/state';
 	import { useNotifications } from '$stores/notifications.svelte';
 	import { formatDateTime } from '$utils/format';

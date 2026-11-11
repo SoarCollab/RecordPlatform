@@ -3,9 +3,8 @@
  * Manages file download tasks with presigned URL direct S3 access
  * Supports concurrent downloads, progress tracking, resumable downloads, and streaming for large files
  */
-
-import { browser } from "$app/environment";
-import { env } from "$env/dynamic/public";
+import { browser } from "$app/env";
+import { PUBLIC_TENANT_ID } from "$app/env/public";
 import { ApiError, getToken } from "$api/client";
 import * as fileApi from "$api/endpoints/files";
 import {
@@ -52,6 +51,7 @@ import {
 
 // Re-export types
 export type { DownloadSource } from "$utils/downloadStorage";
+
 export type {
   DownloadStrategy,
   DownloadDecision,
@@ -59,7 +59,6 @@ export type {
 } from "$utils/fileSize";
 
 // ===== Types =====
-
 export type DownloadStatus =
   | "pending"
   | "fetching_urls"
@@ -238,11 +237,12 @@ async function getAuthContextHash(): Promise<string | null> {
   const token = getToken();
   if (!token) return null;
 
-  const tenantId = env.PUBLIC_TENANT_ID || "0";
+  const tenantId = PUBLIC_TENANT_ID || "0";
   const digest = await globalThis.crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(`${tenantId}:${token}`),
   );
+
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
@@ -563,6 +563,7 @@ export function isLegacyDownloadEligible(error: unknown): boolean {
     return false;
   }
   const detail = error.detail as ManifestErrorDetail;
+
   return (
     detail.manifestStatus === "REUPLOAD_REQUIRED" &&
     detail.manifestClassification === "REUPLOAD_REQUIRED" &&
@@ -1220,8 +1221,8 @@ async function startBatchDownload(
     { length: Math.min(batchConcurrency, queue.length) },
     () => worker(),
   );
-  await Promise.all(workers);
 
+  await Promise.all(workers);
   updateBatchProgress(0, completedCount, successCount, failures);
   if (batchState) {
     const completedSnapshot: BatchDownloadState = {
@@ -1271,6 +1272,7 @@ function clearBatchState(): void {
  */
 function pauseDownload(id: string): void {
   const task = getTask(id);
+
   if (
     !task ||
     (task.status !== "downloading" &&

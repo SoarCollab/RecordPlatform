@@ -2,7 +2,7 @@
 # Usage: docker build -f platform-frontend/Dockerfile -t recordplatform-frontend platform-frontend/
 
 # ── Stage 1: Build ──────────────────────────────────────────────────────────
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 
 # Enable Corepack so pnpm is resolved from package.json packageManager.
 RUN corepack enable

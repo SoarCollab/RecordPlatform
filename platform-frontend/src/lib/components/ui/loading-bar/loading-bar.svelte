@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { navigating } from "$app/stores";
+  import { navigating } from "$app/state";
   import { onDestroy } from "svelte";
 
   let progress = $state(0);
@@ -9,7 +9,7 @@
   let resetTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
   $effect(() => {
-    if ($navigating) {
+    if (navigating) {
       start();
     } else {
       complete();

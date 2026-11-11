@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { onMount } from "svelte";
   import { subscribeCredentialChanges } from "$api/client";
@@ -56,7 +56,7 @@
   /** Route events only for the mounted tenant shell. */
   function handleSSEMessage(message: SSEMessage) {
     handleSseMessage(message, {
-      pathname: $page.url.pathname,
+      pathname: page.url.pathname,
       badges,
       notifications,
     });
@@ -138,7 +138,7 @@
     <AppSidebar
       collapsed={sidebarCollapsed}
       onToggle={toggleSidebar}
-      pathname={$page.url.pathname}
+      pathname={page.url.pathname}
       isAdmin={auth.isAdmin}
       {getBadgeCount}
     />

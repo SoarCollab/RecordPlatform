@@ -117,7 +117,7 @@ const server = setupServer(
 
 // Install interception before importing the real client and route graph.
 vi.stubGlobal("AbortController", transferableAbortController().constructor);
-server.listen({ onUnhandledRequest: "error" });
+server.listen({ onUnhandledFrame: "error" });
 const [{ default: AuditPage }, client] = await Promise.all([
   import("../../+page.svelte"),
   import("$api/client"),

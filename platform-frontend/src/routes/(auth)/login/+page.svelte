@@ -5,7 +5,7 @@
   import { useNotifications } from "$stores/notifications.svelte";
   import { wasRememberMeSelected } from "$api/client";
   import { fly } from "svelte/transition";
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
   import { onMount } from "svelte";
   import type { AuthScope } from "$api/types";
   import * as Card from "$components/ui/card";
@@ -20,7 +20,7 @@
   let loginMode = $state<AuthScope>("tenant");
   onMount(() => {
     loginMode =
-      $page.url.searchParams.get("mode") === "platform" ? "platform" : "tenant";
+      page.url.searchParams.get("mode") === "platform" ? "platform" : "tenant";
   });
   let username = $state("");
   let password = $state("");

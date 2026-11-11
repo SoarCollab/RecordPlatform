@@ -78,7 +78,7 @@ const server = setupServer(
 
 // Interception precedes the real singleton client's import, including its fetch capture.
 vi.stubGlobal("AbortController", transferableAbortController().constructor);
-server.listen({ onUnhandledRequest: "error" });
+server.listen({ onUnhandledFrame: "error" });
 const [client, auth, helpers] = await Promise.all([
   import("$api/client"),
   import("./auth"),

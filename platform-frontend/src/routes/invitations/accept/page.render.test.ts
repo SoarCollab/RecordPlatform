@@ -65,7 +65,7 @@ vi.stubGlobal(
     dispatchEvent: vi.fn(),
   })),
 );
-server.listen({ onUnhandledRequest: "error" });
+server.listen({ onUnhandledFrame: "error" });
 const client = await import("$api/client");
 // Compile the real root graph during collection, outside the behavioral hook/test timeout.
 const { default: InvitationRoute } =

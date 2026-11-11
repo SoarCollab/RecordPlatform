@@ -1,6 +1,6 @@
 import { getToken } from "../client";
 import { getSseToken } from "./auth";
-import { env } from "$env/dynamic/public";
+import { PUBLIC_TENANT_ID, PUBLIC_API_BASE_URL } from "$app/env/public";
 
 export type SSEEventType =
   | "notification"
@@ -53,12 +53,12 @@ export async function createSSEConnection(
     // 步骤2：使用短期 Token 建立 SSE 连接
     const params = new URLSearchParams({
       token: sseToken,
-      "x-tenant-id": env.PUBLIC_TENANT_ID || "",
+      "x-tenant-id": PUBLIC_TENANT_ID || "",
     });
 
     const apiBase = import.meta.env.DEV
       ? "/record-platform/api/v1"
-      : `${env.PUBLIC_API_BASE_URL || "/record-platform"}/api/v1`;
+      : `${PUBLIC_API_BASE_URL || "/record-platform"}/api/v1`;
 
     const url = `${apiBase}/sse/connect?${params.toString()}`;
     const eventSource = new EventSource(url);

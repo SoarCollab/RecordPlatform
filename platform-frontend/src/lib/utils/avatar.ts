@@ -1,4 +1,4 @@
-import { env } from "$env/dynamic/public";
+import { PUBLIC_API_BASE_URL } from "$app/env/public";
 
 /**
  * 将后端返回的头像/图片路径转换为可直接访问的 URL。
@@ -17,7 +17,7 @@ export function getAvatarUrl(path?: string): string | undefined {
 
   const apiBase = import.meta.env.DEV
     ? "/record-platform/api/v1"
-    : `${env.PUBLIC_API_BASE_URL || "/record-platform"}/api/v1`;
+    : `${PUBLIC_API_BASE_URL || "/record-platform"}/api/v1`;
 
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${apiBase}/images/download/images${normalizedPath}`;
