@@ -103,6 +103,9 @@ class DirectUploadFaultMatrixMinioIT {
     private static final String TOXIPROXY_IMAGE = "ghcr.io/shopify/toxiproxy:2.5.0";
     private static final Network NETWORK = Network.newNetwork();
 
+    /** Captured once so every scenario starts from the configured default transfer budget. */
+    private int defaultTransferTimeoutSeconds;
+
     @Container
     private static final GenericContainer<?> MINIO_A = minioContainer("fault-minio-a");
 
@@ -191,6 +194,12 @@ class DirectUploadFaultMatrixMinioIT {
      */
     @BeforeEach
     void setUp() {
+        // 每个故障场景都从共享的默认传输预算开始：F14 之类的用例会改写该值，
+        // 若不复位，后续用例（如 F03）会带着 1 秒预算运行，SDK 主动断连后 MinIO 返回 499。
+        if (defaultTransferTimeoutSeconds == 0) {
+            defaultTransferTimeoutSeconds = storageProperties.getDirectUpload().getTransferTimeoutSeconds();
+        }
+        storageProperties.getDirectUpload().setTransferTimeoutSeconds(defaultTransferTimeoutSeconds);
         firstProxy.setConnectionCut(false);
         secondProxy.setConnectionCut(false);
         firstProxyClient = s3Client(proxyEndpoint(firstProxy));
