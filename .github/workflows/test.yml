@@ -860,7 +860,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Backend Coverage Report
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         if: always()
         with:
           use_oidc: true
@@ -870,7 +870,7 @@ jobs:
           fail_ci_if_error: true
 
       - name: Upload Verifier Coverage Report
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         if: always()
         with:
           use_oidc: true
@@ -950,7 +950,7 @@ jobs:
         run: pnpm test:coverage
 
       - name: Upload Frontend Coverage Report
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         if: always()
         with:
           use_oidc: true
