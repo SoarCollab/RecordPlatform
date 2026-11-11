@@ -17,7 +17,10 @@
         <java.version>21</java.version>
         <dubbo.version>3.3.7</dubbo.version>
         <protobuf.version>4.36.2</protobuf.version>
-        <aws.sdk.version>2.57.12</aws.sdk.version>
+        <!-- 保持在 2.44.x：2.57 起 storage 的 MinIO/Toxiproxy 故障矩阵出现
+             「Client disconnected before response was ready」(499) 回归，
+             需要独立环境定位后再升。该版本不涉及任何 CVE。 -->
+        <aws.sdk.version>2.44.4</aws.sdk.version>
         <hutool.version>5.8.48</hutool.version>
         <redisson.version>4.8.0</redisson.version>
         <spring-cloud-alibaba-dependencies.version>2025.1.0.0</spring-cloud-alibaba-dependencies.version>
