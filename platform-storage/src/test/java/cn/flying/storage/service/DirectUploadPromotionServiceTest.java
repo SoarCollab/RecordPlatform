@@ -1695,7 +1695,8 @@ class DirectUploadPromotionServiceTest {
         DirectUploadPromotionResult result = service.promote(descriptor, digestAccumulator());
 
         assertThat(result.size()).isEqualTo(content.length);
-        verify(sourceClient, times(2)).deleteObject(any(DeleteObjectRequest.class));
+        // public 与 sealed 各做 3 次有限重试后才放弃并转为 tombstone 保留。
+        verify(sourceClient, times(6)).deleteObject(any(DeleteObjectRequest.class));
         verify(stagingTracker).retainAfterDelete(descriptor.stagingDescriptor());
         assertThat(meterRegistry.counter(
                 "storage_direct_upload_operations_total",
