@@ -334,6 +334,10 @@
                                  （表现为随机位置的 Connection reset / 499）。 -->
                             <forkCount>1</forkCount>
                             <reuseForks>false</reuseForks>
+                            <!-- 容器化 provider 在 CI runner 上偶发瞬时失败（MinIO 记录 499
+                                 「Client disconnected before response was ready」，失败点每轮漂移）。
+                                 这类抖动不代表产品行为，重跑通过即视为通过；失败仍会在报告中标记为 flake。 -->
+                            <rerunFailingTestsCount>2</rerunFailingTestsCount>
                             <systemPropertyVariables>
                                 <user.home>${project.build.directory}</user.home>
                             </systemPropertyVariables>
@@ -378,6 +382,10 @@
                             <failIfNoTests>true</failIfNoTests>
                             <forkCount>1</forkCount>
                             <reuseForks>false</reuseForks>
+                            <!-- 容器化 provider 在 CI runner 上偶发瞬时失败（MinIO 记录 499
+                                 「Client disconnected before response was ready」，失败点每轮漂移）。
+                                 这类抖动不代表产品行为，重跑通过即视为通过；失败仍会在报告中标记为 flake。 -->
+                            <rerunFailingTestsCount>2</rerunFailingTestsCount>
                             <argLine>-Xmx80m -XX:+ExitOnOutOfMemoryError</argLine>
                             <systemPropertyVariables>
                                 <user.home>${project.build.directory}</user.home>
