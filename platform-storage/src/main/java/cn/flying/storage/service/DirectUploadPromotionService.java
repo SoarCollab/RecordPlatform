@@ -69,6 +69,11 @@ import java.util.regex.Pattern;
 @Service
 public class DirectUploadPromotionService {
 
+    /** 成功后清理 staging 的删除尝试次数与退避基数，用于吸收瞬时 provider 故障。 */
+    private static final int CLEANUP_DELETE_ATTEMPTS = 3;
+    private static final long CLEANUP_DELETE_BACKOFF_MILLIS = 50L;
+
+
     private static final Logger log = LoggerFactory.getLogger(DirectUploadPromotionService.class);
 
     private static final String METADATA_FILE_HASH = "file-hash";
@@ -1419,7 +1424,7 @@ public class DirectUploadPromotionService {
     ) {
         operationIntentStore.verify(intent);
         try {
-            deleteStagingObject(
+            deleteStagingObjectWithRetry(
                     sourceClient,
                     descriptor.nodeName(),
                     objectName,
@@ -1473,6 +1478,74 @@ public class DirectUploadPromotionService {
      * @param bucket staging bucket
      * @param objectName staging key
      */
+    /**
+     * 带有限重试地删除 staging 对象。
+     * <p>
+     * 清理发生在成功路径的尾部，一次瞬时 provider 故障不应把对象留到生命周期任务再处理：
+     * 那会让「成功即删除」的契约变得不确定（同一批请求时而同步删除、时而进入 tombstone）。
+     * 因此对可重试的传输/服务端错误做少量重试，其余错误仍交由 tombstone 保留期处理。
+     *
+     * @param client 源节点客户端
+     * @param bucket 源桶
+     * @param objectName 待删除对象
+     * @param deadlineNanos 清理截止点
+     * @param partIndex 分片索引
+     */
+    private void deleteStagingObjectWithRetry(
+            S3Client client,
+            String bucket,
+            String objectName,
+            long deadlineNanos,
+            int partIndex
+    ) {
+        for (int attempt = 1; ; attempt++) {
+            try {
+                deleteStagingObject(client, bucket, objectName, deadlineNanos, partIndex);
+                return;
+            } catch (RuntimeException failure) {
+                boolean retryable = attempt < CLEANUP_DELETE_ATTEMPTS
+                        && isRetryableCleanupFailure(failure)
+                        && remainingNanos(deadlineNanos) > 0;
+                if (!retryable) {
+                    throw failure;
+                }
+                log.debug("staging 删除遇到可重试故障，进行第 {} 次重试: bucket={}, object={}",
+                        attempt, bucket, objectName);
+                sleepQuietly(CLEANUP_DELETE_BACKOFF_MILLIS * attempt);
+            }
+        }
+    }
+
+    /**
+     * 判断清理阶段的失败是否值得立即重试。
+     *
+     * @param failure 删除抛出的异常
+     * @return true 表示属于瞬时传输故障或 provider 5xx/限流
+     */
+    private boolean isRetryableCleanupFailure(Throwable failure) {
+        if (failure instanceof SdkClientException) {
+            return true;
+        }
+        if (failure instanceof S3Exception s3Failure) {
+            int status = s3Failure.statusCode();
+            return status >= 500 || status == 429 || status == 408;
+        }
+        return failure.getCause() != null && isRetryableCleanupFailure(failure.getCause());
+    }
+
+    /**
+     * 清理重试之间的短暂退避，保持中断语义。
+     *
+     * @param millis 退避毫秒数
+     */
+    private static void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     private void deleteStagingObject(
             S3Client client,
             String bucket,
