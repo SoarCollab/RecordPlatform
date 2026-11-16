@@ -13,7 +13,7 @@
 
     <properties>
         <java.version>21</java.version>
-        <poi.version>5.5.1</poi.version>
+        <poi.version>6.0.0</poi.version>
         <logstash.encoder.version>9.0</logstash.encoder.version>
         <skywalking.version>9.8.0</skywalking.version>
         <spring-cloud-alibaba-dependencies.version>2025.1.0.0</spring-cloud-alibaba-dependencies.version>
