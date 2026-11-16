@@ -24,7 +24,7 @@
     "@lucide/svelte": "^1.70.0",
     "@playwright/test": "1.65.0",
     "@sveltejs/adapter-static": "^4.0.1",
-    "@sveltejs/kit": "^3.1.1",
+    "@sveltejs/kit": "^3.2.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tailwindcss/vite": "^4.3.5",
     "@testing-library/jest-dom": "^7.0.1",
@@ -48,7 +48,7 @@
     "tailwindcss": "^4.3.5",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.2",
-    "vite": "8.3.7",
+    "vite": "8.3.8",
     "vitest": "5.1.0"
   },
   "dependencies": {
