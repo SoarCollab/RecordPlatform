@@ -39,13 +39,13 @@
             commons-compress 1.28+ requires commons-lang3 containing ArrayFill (>= 3.14.0).
             Testcontainers (docker-java) may require SystemProperties.getUserName(String) (>= 3.17.0).
          -->
-        <commons-lang3.version>3.21.0</commons-lang3.version>
-        <netty.version>4.2.20.Final</netty.version>
+        <commons-lang3.version>3.22.0</commons-lang3.version>
+        <netty.version>4.2.21.Final</netty.version>
         <log4j2.version>2.26.1</log4j2.version>
         <rabbit-amqp-client.version>5.33.1</rabbit-amqp-client.version>
         <httpclient5.version>5.6.3</httpclient5.version>
         <httpcore5.version>5.4.3</httpcore5.version>
-        <aws.sdk.version>2.57.12</aws.sdk.version>
+        <aws.sdk.version>2.59.5</aws.sdk.version>
         <!--
             Mockito inline mock maker relies on Byte Buddy instrumentation.
             On some macOS/JDK builds, runtime self-attach is not available; pre-attaching the agent fixes it.
@@ -73,7 +73,7 @@
             <dependency>
                 <groupId>com.github.jsqlparser</groupId>
                 <artifactId>jsqlparser</artifactId>
-                <version>5.3</version>
+                <version>5.4</version>
             </dependency>
             <!--    项目子模块    -->
             <dependency>
@@ -178,7 +178,7 @@
             <dependency>
                 <groupId>org.bouncycastle</groupId>
                 <artifactId>bcprov-jdk18on</artifactId>
-                <version>1.86</version>
+                <version>1.87</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
